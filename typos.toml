@@ -1,0 +1,3 @@
+[default.extend-words]
+# "retuned" (re-tuned) is a real word in this context, not a typo of "returned".
+retuned = "retuned"
