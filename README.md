@@ -1,5 +1,7 @@
 # oxtt
 
+[![CI](https://github.com/akiomik/oxtt/actions/workflows/ci.yml/badge.svg)](https://github.com/akiomik/oxtt/actions/workflows/ci.yml)
+
 A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT, written in Rust.
 
 ## Status

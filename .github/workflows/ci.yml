@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JACK development headers
+        run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JACK development headers
+        run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --all-targets --locked
+      - name: cargo build --release
+        run: cargo build --release --locked
+
+  msrv:
+    name: MSRV (1.85.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install JACK development headers
+        run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build (MSRV)
+        run: cargo build --all-targets --locked
