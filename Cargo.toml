@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 jack = "0.13"
+signal-hook = "0.3"
