@@ -1,0 +1,72 @@
+# Architecture
+
+This document describes the internal architecture of the `oxtt` DSP engine and its JACK host adapter: how audio data flows through the system, which component owns which state, and where the real-time / non-real-time boundary lies.
+
+## Component Overview
+
+```
+main.rs
+  -> params::parse_args          CLI parsing, validation, presets
+  -> jack_host::run               JACK client lifecycle, port registration
+       -> AudioProcessHandler     audio callback (real-time thread)
+            -> dsp::OttProcessor::process
+                 -> dsp::crossover::Crossover
+                 -> dsp::compressor::DualThresholdCompressor  (one per band)
+                      -> dsp::envelope::BandEnvelope
+                 -> dsp::smooth::Smoothed / LogSmoothed
+       -> Notifications           JACK notification callback (shutdown, sample-rate change)
+```
+
+`OttProcessor` (`src/dsp/mod.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let a different host adapter (e.g. an ALSA-direct backend) be added later without touching `dsp/` (see `decisions/0005-jack-adapter-with-alsa-direct-deferred.md`).
+
+## Signal Flow
+
+Per stereo frame, `OttProcessor::process_frame` performs:
+
+```
+input_l, input_r
+  -> input gain
+  -> Crossover::process_frame            3-band split, per channel
+       low  = phase_comp(LP4_low(x))       phase-compensated (decisions/0001)
+       mid  = LP4_high(HP4_low(x))
+       high = HP4_high(HP4_low(x))
+  -> per band: DualThresholdCompressor.process(detector_power(l, r))  (decisions/0002)
+       wet_band    = band_input * dynamic_gain * makeup_gain
+       band_output = lerp(band_input, wet_band, depth)                (decisions/0004)
+  -> sum(low, mid, high)
+  -> output gain
+  -> finite-value guard (non-finite -> 0.0)
+  -> output_l, output_r
+```
+
+`Crossover` and the three `DualThresholdCompressor`s are the only stateful DSP components in the signal path. Every scalar parameter (gains, depth, time, thresholds, amounts, crossover frequencies) is wrapped in a `Smoothed` (or `LogSmoothed`, for crossover frequencies) and ticked once per sample ahead of use, so it converges to its target over a fixed 20 ms time constant independent of host buffer size.
+
+## State Ownership
+
+`OttProcessor` owns, per instance:
+
+- `GlobalRuntime`: smoothed input/output gain, depth, time, upward, downward.
+- `Crossover`: log-smoothed low/high cutoff, plus, per channel, three independent `Lr4` pairs (low split, high split, phase compensator) — six second-order biquad cascades per channel, twelve total.
+- `[BandProcessor; 3]`: smoothed per-band thresholds/amounts/makeup gain, and one `DualThresholdCompressor` (two envelope states, `low_env` and `high_env`) each.
+
+There is no intermediate buffer sized to the host's callback buffer. Processing is frame-by-frame: one stereo sample is split, processed by all three bands, summed, and written, before moving to the next sample. This is what makes `process()`'s output independent of how the caller chunks the input slices — verified by `chunking_does_not_affect_output` (`src/dsp/mod.rs`).
+
+## Real-Time / Non-Real-Time Boundary
+
+```
+non-real-time                          |  real-time (JACK audio thread)
+----------------------------------------|---------------------------------------
+main.rs: parse_args, Client::new,       |  AudioProcessHandler::process
+  OttProcessor::new, activate_async     |    - swap pending_sample_rate (Atomic)
+                                         |    - OttProcessor::process
+signal_hook: SIGINT/SIGTERM -> Atomic   |      (no alloc, no lock, no I/O)
+main loop: poll shutdown flag, sleep    |
+active_client.deactivate()              |  Notifications::sample_rate / shutdown
+                                         |  (JACK-internal thread, Atomic stores only)
+```
+
+`AudioProcessHandler` and `Notifications` (`src/jack_host.rs`) communicate only through `Arc<AtomicBool>` and `Arc<AtomicU32>`. The audio callback never blocks on a lock, allocates, or performs I/O. See `contracts.md` (section 6) for the full list of operations prohibited inside the callback, and for how a future control-surface thread (GPIO/ADC on Raspberry Pi) would plug into this same boundary via a bounded non-blocking queue instead of a new lock.
+
+## Parameter Update Path
+
+`OttProcessor::set_params` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. See `contracts.md` (section 2) for the exact pre/postconditions of `new`, `reset`, and `set_params`.
