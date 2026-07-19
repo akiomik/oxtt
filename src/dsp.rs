@@ -61,16 +61,16 @@ struct BandProcessor {
 impl BandProcessor {
     fn new(params: &BandParams, sample_rate: f32) -> Self {
         Self {
-            lower_threshold_db: Smoothed::new(params.lower_threshold_db, sample_rate),
-            upper_threshold_db: Smoothed::new(params.upper_threshold_db, sample_rate),
-            up_amount: Smoothed::new(params.up_amount, sample_rate),
-            down_amount: Smoothed::new(params.down_amount, sample_rate),
+            lower_threshold_db: Smoothed::new(params.thresholds.lower_db(), sample_rate),
+            upper_threshold_db: Smoothed::new(params.thresholds.upper_db(), sample_rate),
+            up_amount: Smoothed::new(params.up_amount.get(), sample_rate),
+            down_amount: Smoothed::new(params.down_amount.get(), sample_rate),
             makeup_gain_db: Smoothed::new(params.makeup_gain_db, sample_rate),
             base_attack_ms: params.base_attack_ms,
             base_release_ms: params.base_release_ms,
             compressor: DualThresholdCompressor::new(
-                params.lower_threshold_db,
-                params.upper_threshold_db,
+                params.thresholds.lower_db(),
+                params.thresholds.upper_db(),
             ),
         }
     }
@@ -78,11 +78,11 @@ impl BandProcessor {
     /// Updates only the smoothing targets. Keeps the current smoothing state as-is (docs/contracts.md §2).
     const fn set_targets(&mut self, params: &BandParams) {
         self.lower_threshold_db
-            .set_target(params.lower_threshold_db);
+            .set_target(params.thresholds.lower_db());
         self.upper_threshold_db
-            .set_target(params.upper_threshold_db);
-        self.up_amount.set_target(params.up_amount);
-        self.down_amount.set_target(params.down_amount);
+            .set_target(params.thresholds.upper_db());
+        self.up_amount.set_target(params.up_amount.get());
+        self.down_amount.set_target(params.down_amount.get());
         self.makeup_gain_db.set_target(params.makeup_gain_db);
         self.base_attack_ms = params.base_attack_ms;
         self.base_release_ms = params.base_release_ms;
@@ -169,20 +169,20 @@ impl GlobalRuntime {
         Self {
             input_gain_db: Smoothed::new(params.input_gain_db, sample_rate),
             output_gain_db: Smoothed::new(params.output_gain_db, sample_rate),
-            depth: Smoothed::new(params.depth, sample_rate),
-            time: Smoothed::new(params.time, sample_rate),
-            upward: Smoothed::new(params.upward, sample_rate),
-            downward: Smoothed::new(params.downward, sample_rate),
+            depth: Smoothed::new(params.depth.get(), sample_rate),
+            time: Smoothed::new(params.time.get(), sample_rate),
+            upward: Smoothed::new(params.upward.get(), sample_rate),
+            downward: Smoothed::new(params.downward.get(), sample_rate),
         }
     }
 
     const fn set_targets(&mut self, params: &GlobalParams) {
         self.input_gain_db.set_target(params.input_gain_db);
         self.output_gain_db.set_target(params.output_gain_db);
-        self.depth.set_target(params.depth);
-        self.time.set_target(params.time);
-        self.upward.set_target(params.upward);
-        self.downward.set_target(params.downward);
+        self.depth.set_target(params.depth.get());
+        self.time.set_target(params.time.get());
+        self.upward.set_target(params.upward.get());
+        self.downward.set_target(params.downward.get());
     }
 }
 
@@ -387,7 +387,7 @@ mod unit_tests {
 )]
 mod processor_tests {
     use super::*;
-    use crate::params::Preset;
+    use crate::params::{Preset, UnitInterval};
     use std::f32::consts::PI;
 
     fn rms(samples: &[f32]) -> f32 {
@@ -405,7 +405,7 @@ mod processor_tests {
     fn depth_zero_matches_pure_crossover_reconstruction() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.depth = 0.0;
+        params.global.depth = UnitInterval::new(0.0);
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
 
         let mut reference = Crossover::new(
@@ -439,7 +439,7 @@ mod processor_tests {
     fn upward_zero_gives_no_boost_below_lower_threshold() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.upward = 0.0;
+        params.global.upward = UnitInterval::new(0.0);
         for band in &mut params.bands {
             band.makeup_gain_db = 0.0;
         }
@@ -466,7 +466,7 @@ mod processor_tests {
     fn downward_zero_gives_no_suppression_above_upper_threshold() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.downward = 0.0;
+        params.global.downward = UnitInterval::new(0.0);
         for band in &mut params.bands {
             band.makeup_gain_db = 0.0;
         }

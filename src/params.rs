@@ -14,6 +14,73 @@ pub const MAX_SAMPLE_RATE_HZ: f32 = 384_000.0;
 /// Upper-bound coefficient on the Nyquist side that crossover frequencies must respect (docs/contracts.md §1).
 pub const CROSSOVER_NYQUIST_RATIO: f32 = 0.45;
 
+/// A normalized fraction in `0.0..=1.0` (docs/contracts.md §1).
+///
+/// Shared by the dry/wet mix, the attack/release time multiplier, the
+/// upward/downward multipliers, and each band's compression amounts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitInterval(f32);
+
+impl UnitInterval {
+    /// Wraps `value`. Range and finiteness are checked later by `validate_ranges`.
+    #[must_use]
+    pub const fn new(value: f32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+
+    fn validate(self, field: &'static str) -> Result<(), ConfigError> {
+        check_range(field, self.0, 0.0, 1.0)
+    }
+}
+
+/// A band's downward/upward compression threshold pair, in dB (docs/contracts.md §1).
+///
+/// Both bounds must lie in `-80.0..=0.0`, and `lower_db` must be less than `upper_db`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThresholdRange {
+    lower_db: f32,
+    upper_db: f32,
+}
+
+impl ThresholdRange {
+    /// Wraps `lower_db`/`upper_db`. Range and ordering are checked later by `validate_ranges`.
+    #[must_use]
+    pub const fn new(lower_db: f32, upper_db: f32) -> Self {
+        Self { lower_db, upper_db }
+    }
+
+    /// Returns the downward-compression threshold in dB.
+    #[must_use]
+    pub const fn lower_db(self) -> f32 {
+        self.lower_db
+    }
+
+    /// Returns the upward-compression threshold in dB.
+    #[must_use]
+    pub const fn upper_db(self) -> f32 {
+        self.upper_db
+    }
+
+    fn validate(self, band: usize) -> Result<(), ConfigError> {
+        check_range("lower_threshold_db", self.lower_db, -80.0, 0.0)?;
+        check_range("upper_threshold_db", self.upper_db, -80.0, 0.0)?;
+        if self.lower_db >= self.upper_db {
+            return Err(ConfigError::ThresholdOrder {
+                band,
+                lower: self.lower_db,
+                upper: self.upper_db,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Global parameters shared across all bands (docs/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalParams {
@@ -21,14 +88,14 @@ pub struct GlobalParams {
     pub input_gain_db: f32,
     /// Post-sum gain in dB, range `-24.0..=24.0`.
     pub output_gain_db: f32,
-    /// Dry/wet mix, range `0.0..=1.0`.
-    pub depth: f32,
-    /// Attack/release time multiplier, range `0.0..=1.0`.
-    pub time: f32,
-    /// Upward compression amount multiplier, range `0.0..=1.0`.
-    pub upward: f32,
-    /// Downward compression amount multiplier, range `0.0..=1.0`.
-    pub downward: f32,
+    /// Dry/wet mix.
+    pub depth: UnitInterval,
+    /// Attack/release time multiplier.
+    pub time: UnitInterval,
+    /// Upward compression amount multiplier.
+    pub upward: UnitInterval,
+    /// Downward compression amount multiplier.
+    pub downward: UnitInterval,
     /// Low/mid crossover frequency in Hz, range `40.0..=2000.0`.
     pub low_crossover_hz: f32,
     /// Mid/high crossover frequency in Hz, range `400.0..=16000.0`.
@@ -38,14 +105,12 @@ pub struct GlobalParams {
 /// Per-band parameters (docs/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandParams {
-    /// Downward-compression threshold in dB, range `-80.0..=0.0`.
-    pub lower_threshold_db: f32,
-    /// Upward-compression threshold in dB, range `-80.0..=0.0`, must exceed `lower_threshold_db`.
-    pub upper_threshold_db: f32,
-    /// Upward compression amount, range `0.0..=1.0`.
-    pub up_amount: f32,
-    /// Downward compression amount, range `0.0..=1.0`.
-    pub down_amount: f32,
+    /// Downward/upward compression threshold pair in dB.
+    pub thresholds: ThresholdRange,
+    /// Upward compression amount.
+    pub up_amount: UnitInterval,
+    /// Downward compression amount.
+    pub down_amount: UnitInterval,
     /// Makeup gain in dB, range `-40.0..=40.0`.
     pub makeup_gain_db: f32,
     /// Attack time in ms at `time = 0.5`, must be positive.
@@ -187,17 +252,9 @@ pub fn validate_sample_rate(sample_rate: f32) -> Result<(), ConfigError> {
 
 impl BandParams {
     fn validate(&self, band: usize) -> Result<(), ConfigError> {
-        check_range("lower_threshold_db", self.lower_threshold_db, -80.0, 0.0)?;
-        check_range("upper_threshold_db", self.upper_threshold_db, -80.0, 0.0)?;
-        if self.lower_threshold_db >= self.upper_threshold_db {
-            return Err(ConfigError::ThresholdOrder {
-                band,
-                lower: self.lower_threshold_db,
-                upper: self.upper_threshold_db,
-            });
-        }
-        check_range("up_amount", self.up_amount, 0.0, 1.0)?;
-        check_range("down_amount", self.down_amount, 0.0, 1.0)?;
+        self.thresholds.validate(band)?;
+        self.up_amount.validate("up_amount")?;
+        self.down_amount.validate("down_amount")?;
         check_range("makeup_gain_db", self.makeup_gain_db, -40.0, 40.0)?;
         check_positive("base_attack_ms", self.base_attack_ms)?;
         check_positive("base_release_ms", self.base_release_ms)?;
@@ -219,10 +276,10 @@ impl OttParams {
         let g = &self.global;
         check_range("input_gain_db", g.input_gain_db, -24.0, 24.0)?;
         check_range("output_gain_db", g.output_gain_db, -24.0, 24.0)?;
-        check_range("depth", g.depth, 0.0, 1.0)?;
-        check_range("time", g.time, 0.0, 1.0)?;
-        check_range("upward", g.upward, 0.0, 1.0)?;
-        check_range("downward", g.downward, 0.0, 1.0)?;
+        g.depth.validate("depth")?;
+        g.time.validate("time")?;
+        g.upward.validate("upward")?;
+        g.downward.validate("downward")?;
         check_range("low_crossover_hz", g.low_crossover_hz, 40.0, 2000.0)?;
         check_range("high_crossover_hz", g.high_crossover_hz, 400.0, 16000.0)?;
 
@@ -284,28 +341,25 @@ pub enum Preset {
 impl Preset {
     // Band values are fixed as a compatibility target for the `Default` preset, per ADR 0006.
     const LOW_BAND: BandParams = BandParams {
-        lower_threshold_db: -35.0,
-        upper_threshold_db: -28.0,
-        up_amount: 0.800,
-        down_amount: 0.900,
+        thresholds: ThresholdRange::new(-35.0, -28.0),
+        up_amount: UnitInterval::new(0.800),
+        down_amount: UnitInterval::new(0.900),
         makeup_gain_db: 16.3,
         base_attack_ms: 2.8,
         base_release_ms: 40.0,
     };
     const MID_BAND: BandParams = BandParams {
-        lower_threshold_db: -36.0,
-        upper_threshold_db: -25.0,
-        up_amount: 0.800,
-        down_amount: 0.857,
+        thresholds: ThresholdRange::new(-36.0, -25.0),
+        up_amount: UnitInterval::new(0.800),
+        down_amount: UnitInterval::new(0.857),
         makeup_gain_db: 11.7,
         base_attack_ms: 1.4,
         base_release_ms: 28.0,
     };
     const HIGH_BAND: BandParams = BandParams {
-        lower_threshold_db: -35.0,
-        upper_threshold_db: -30.0,
-        up_amount: 0.800,
-        down_amount: 1.000,
+        thresholds: ThresholdRange::new(-35.0, -30.0),
+        up_amount: UnitInterval::new(0.800),
+        down_amount: UnitInterval::new(1.000),
         makeup_gain_db: 16.3,
         base_attack_ms: 0.7,
         base_release_ms: 15.0,
@@ -323,20 +377,20 @@ impl Preset {
             Self::SafeStart => GlobalParams {
                 input_gain_db: 0.0,
                 output_gain_db: -18.0,
-                depth: 0.5,
-                time: 0.5,
-                upward: 1.0,
-                downward: 1.0,
+                depth: UnitInterval::new(0.5),
+                time: UnitInterval::new(0.5),
+                upward: UnitInterval::new(1.0),
+                downward: UnitInterval::new(1.0),
                 low_crossover_hz: 120.0,
                 high_crossover_hz: 2500.0,
             },
             Self::Default => GlobalParams {
                 input_gain_db: 0.0,
                 output_gain_db: 0.0,
-                depth: 1.0,
-                time: 0.5,
-                upward: 1.0,
-                downward: 1.0,
+                depth: UnitInterval::new(1.0),
+                time: UnitInterval::new(0.5),
+                upward: UnitInterval::new(1.0),
+                downward: UnitInterval::new(1.0),
                 low_crossover_hz: 120.0,
                 high_crossover_hz: 2500.0,
             },
@@ -507,19 +561,19 @@ where
             }
             "--depth" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.depth = parse_percent(&name, &value)?;
+                params.global.depth = UnitInterval::new(parse_percent(&name, &value)?);
             }
             "--time" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.time = parse_percent(&name, &value)?;
+                params.global.time = UnitInterval::new(parse_percent(&name, &value)?);
             }
             "--upward" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.upward = parse_percent(&name, &value)?;
+                params.global.upward = UnitInterval::new(parse_percent(&name, &value)?);
             }
             "--downward" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.downward = parse_percent(&name, &value)?;
+                params.global.downward = UnitInterval::new(parse_percent(&name, &value)?);
             }
             "--low-crossover" => {
                 let value = take_value(&name, inline, &mut iter)?;
@@ -588,8 +642,7 @@ mod tests {
     #[test]
     fn rejects_inverted_thresholds() {
         let mut params = Preset::SafeStart.params();
-        params.bands[BAND_LOW].lower_threshold_db = -10.0;
-        params.bands[BAND_LOW].upper_threshold_db = -20.0;
+        params.bands[BAND_LOW].thresholds = ThresholdRange::new(-10.0, -20.0);
         assert!(matches!(
             params.validate_ranges(),
             Err(ConfigError::ThresholdOrder { .. })
@@ -641,7 +694,7 @@ mod tests {
         .unwrap();
         match outcome {
             CliOutcome::Run(params) => {
-                assert_eq!(params.global.depth, 0.75);
+                assert_eq!(params.global.depth.get(), 0.75);
                 assert_eq!(params.global.low_crossover_hz, 100.0);
                 assert_eq!(params.global.output_gain_db, 0.0); // from `default` preset
             }
