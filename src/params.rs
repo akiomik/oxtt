@@ -2,9 +2,9 @@
 //!
 //! Ranges and invariants follow `docs/contracts.md` §1.
 
-use std::error::Error;
-use std::fmt;
 use std::str::FromStr;
+
+use thiserror::Error;
 
 /// Lower bound of the allowed sample rate range (docs/contracts.md §1).
 pub const MIN_SAMPLE_RATE_HZ: f32 = 8_000.0;
@@ -71,9 +71,10 @@ pub const BAND_MID: usize = 1;
 pub const BAND_HIGH: usize = 2;
 
 /// Validation error when constructing or updating parameters (docs/contracts.md §1).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum ConfigError {
     /// A field's value was NaN or infinite.
+    #[error("{field} must be finite, got {value}")]
     NotFinite {
         /// Name of the offending field.
         field: &'static str,
@@ -81,6 +82,7 @@ pub enum ConfigError {
         value: f32,
     },
     /// A field's value fell outside its allowed range.
+    #[error("{field} must be in [{min}, {max}], got {value}")]
     OutOfRange {
         /// Name of the offending field.
         field: &'static str,
@@ -92,6 +94,9 @@ pub enum ConfigError {
         value: f32,
     },
     /// A band's `lower_threshold_db` was not less than its `upper_threshold_db`.
+    #[error(
+        "band {band}: lower_threshold_db ({lower}) must be less than upper_threshold_db ({upper})"
+    )]
     ThresholdOrder {
         /// Index of the offending band.
         band: usize,
@@ -101,6 +106,9 @@ pub enum ConfigError {
         upper: f32,
     },
     /// `high_crossover_hz` was less than one octave above `low_crossover_hz`.
+    #[error(
+        "high_crossover_hz ({high_hz}) must be at least one octave above low_crossover_hz ({low_hz})"
+    )]
     CrossoverOctave {
         /// The offending `low_crossover_hz`.
         low_hz: f32,
@@ -108,6 +116,7 @@ pub enum ConfigError {
         high_hz: f32,
     },
     /// A crossover frequency exceeded the Nyquist-relative limit at the current sample rate.
+    #[error("{field} ({value}) exceeds {max} at the current sample rate")]
     CrossoverNyquist {
         /// Name of the offending field.
         field: &'static str,
@@ -117,55 +126,14 @@ pub enum ConfigError {
         max: f32,
     },
     /// The sample rate was outside `MIN_SAMPLE_RATE_HZ..=MAX_SAMPLE_RATE_HZ` or not finite.
+    #[error(
+        "sample_rate must be finite and in [{MIN_SAMPLE_RATE_HZ}, {MAX_SAMPLE_RATE_HZ}], got {value}"
+    )]
     SampleRate {
         /// The offending sample rate.
         value: f32,
     },
 }
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotFinite { field, value } => {
-                write!(f, "{field} must be finite, got {value}")
-            }
-            Self::OutOfRange {
-                field,
-                min,
-                max,
-                value,
-            } => {
-                write!(f, "{field} must be in [{min}, {max}], got {value}")
-            }
-            Self::ThresholdOrder { band, lower, upper } => {
-                write!(
-                    f,
-                    "band {band}: lower_threshold_db ({lower}) must be less than upper_threshold_db ({upper})"
-                )
-            }
-            Self::CrossoverOctave { low_hz, high_hz } => {
-                write!(
-                    f,
-                    "high_crossover_hz ({high_hz}) must be at least one octave above low_crossover_hz ({low_hz})"
-                )
-            }
-            Self::CrossoverNyquist { field, value, max } => {
-                write!(
-                    f,
-                    "{field} ({value}) exceeds {max} at the current sample rate"
-                )
-            }
-            Self::SampleRate { value } => {
-                write!(
-                    f,
-                    "sample_rate must be finite and in [{MIN_SAMPLE_RATE_HZ}, {MAX_SAMPLE_RATE_HZ}], got {value}"
-                )
-            }
-        }
-    }
-}
-
-impl Error for ConfigError {}
 
 const fn check_finite(field: &'static str, value: f32) -> Result<(), ConfigError> {
     if value.is_finite() {
@@ -410,13 +378,16 @@ pub enum CliOutcome {
 }
 
 /// Error interpreting CLI arguments.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum CliError {
     /// An option name that isn't recognized.
+    #[error("unknown option: {0}")]
     UnknownOption(String),
     /// An option that requires a value but got none.
+    #[error("missing value for option: {0}")]
     MissingValue(String),
     /// An option's value failed to parse or fell outside its allowed range.
+    #[error("invalid value for {option}: {value}")]
     InvalidValue {
         /// The option name.
         option: String,
@@ -424,28 +395,8 @@ pub enum CliError {
         value: String,
     },
     /// The fully parsed parameters failed validation.
-    Config(ConfigError),
-}
-
-impl fmt::Display for CliError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownOption(opt) => write!(f, "unknown option: {opt}"),
-            Self::MissingValue(opt) => write!(f, "missing value for option: {opt}"),
-            Self::InvalidValue { option, value } => {
-                write!(f, "invalid value for {option}: {value}")
-            }
-            Self::Config(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl Error for CliError {}
-
-impl From<ConfigError> for CliError {
-    fn from(e: ConfigError) -> Self {
-        Self::Config(e)
-    }
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 }
 
 fn split_inline_value(arg: &str) -> (&str, Option<&str>) {

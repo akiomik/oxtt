@@ -1,7 +1,5 @@
 //! JACK port registration, `ProcessHandler`, and `NotificationHandler` (docs/architecture.md, docs/contracts.md §6, §7).
 
-use std::error::Error;
-use std::fmt;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -11,6 +9,7 @@ use std::time::Duration;
 use jack::{AudioIn, AudioOut, Client, ClientOptions, Control, Port, ProcessScope};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::flag;
+use thiserror::Error;
 
 use crate::dsp::OttProcessor;
 use crate::params::{ConfigError, OttParams};
@@ -23,44 +22,17 @@ const PORT_OUTPUT_L: &str = "output_l";
 const PORT_OUTPUT_R: &str = "output_r";
 
 /// Errors that can occur connecting to or running under JACK.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum HostError {
     /// A JACK client or port operation failed.
-    Jack(jack::Error),
+    #[error("JACK error: {0}")]
+    Jack(#[from] jack::Error),
     /// The supplied parameters failed validation.
-    Config(ConfigError),
+    #[error("invalid parameters: {0}")]
+    Config(#[from] ConfigError),
     /// Installing the SIGINT/SIGTERM handler failed.
-    Signal(io::Error),
-}
-
-impl fmt::Display for HostError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Jack(e) => write!(f, "JACK error: {e}"),
-            Self::Config(e) => write!(f, "invalid parameters: {e}"),
-            Self::Signal(e) => write!(f, "failed to install signal handler: {e}"),
-        }
-    }
-}
-
-impl Error for HostError {}
-
-impl From<jack::Error> for HostError {
-    fn from(e: jack::Error) -> Self {
-        Self::Jack(e)
-    }
-}
-
-impl From<ConfigError> for HostError {
-    fn from(e: ConfigError) -> Self {
-        Self::Config(e)
-    }
-}
-
-impl From<io::Error> for HostError {
-    fn from(e: io::Error) -> Self {
-        Self::Signal(e)
-    }
+    #[error("failed to install signal handler: {0}")]
+    Signal(#[from] io::Error),
 }
 
 /// Receives JACK shutdown notifications and sample-rate changes (docs/contracts.md §7).

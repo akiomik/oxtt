@@ -5,8 +5,7 @@ pub mod crossover;
 pub mod envelope;
 pub mod smooth;
 
-use std::error::Error;
-use std::fmt;
+use thiserror::Error;
 
 use crate::params::{
     BAND_HIGH, BAND_LOW, BAND_MID, BandParams, ConfigError, GlobalParams, OttParams,
@@ -39,23 +38,12 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 /// Runtime error returned by `process` (docs/contracts.md §3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ProcessError {
     /// `input_l`, `input_r`, `output_l`, and `output_r` did not all have the same length.
+    #[error("input/output buffer lengths do not match")]
     BufferLengthMismatch,
 }
-
-impl fmt::Display for ProcessError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BufferLengthMismatch => {
-                write!(f, "input/output buffer lengths do not match")
-            }
-        }
-    }
-}
-
-impl Error for ProcessError {}
 
 /// Bundles one band's smoothed parameters with its dual-threshold compressor (docs/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
