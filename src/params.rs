@@ -81,6 +81,49 @@ impl ThresholdRange {
     }
 }
 
+/// A low/mid and mid/high crossover frequency pair, in Hz (docs/contracts.md §1).
+///
+/// `low_hz` must lie in `40.0..=2000.0`, `high_hz` must lie in `400.0..=16000.0`,
+/// and `high_hz` must be at least one octave above `low_hz`. The Nyquist-relative
+/// limit depends on the sample rate, so it's checked separately by `OttParams::validate`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossoverPair {
+    low_hz: f32,
+    high_hz: f32,
+}
+
+impl CrossoverPair {
+    /// Wraps `low_hz`/`high_hz`. Range and octave separation are checked later by `validate_ranges`.
+    #[must_use]
+    pub const fn new(low_hz: f32, high_hz: f32) -> Self {
+        Self { low_hz, high_hz }
+    }
+
+    /// Returns the low/mid crossover frequency in Hz.
+    #[must_use]
+    pub const fn low_hz(self) -> f32 {
+        self.low_hz
+    }
+
+    /// Returns the mid/high crossover frequency in Hz.
+    #[must_use]
+    pub const fn high_hz(self) -> f32 {
+        self.high_hz
+    }
+
+    fn validate(self) -> Result<(), ConfigError> {
+        check_range("low_crossover_hz", self.low_hz, 40.0, 2000.0)?;
+        check_range("high_crossover_hz", self.high_hz, 400.0, 16000.0)?;
+        if self.high_hz < 2.0 * self.low_hz {
+            return Err(ConfigError::CrossoverOctave {
+                low_hz: self.low_hz,
+                high_hz: self.high_hz,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Global parameters shared across all bands (docs/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalParams {
@@ -96,10 +139,8 @@ pub struct GlobalParams {
     pub upward: UnitInterval,
     /// Downward compression amount multiplier.
     pub downward: UnitInterval,
-    /// Low/mid crossover frequency in Hz, range `40.0..=2000.0`.
-    pub low_crossover_hz: f32,
-    /// Mid/high crossover frequency in Hz, range `400.0..=16000.0`.
-    pub high_crossover_hz: f32,
+    /// Low/mid and mid/high crossover frequency pair.
+    pub crossovers: CrossoverPair,
 }
 
 /// Per-band parameters (docs/contracts.md §1).
@@ -280,15 +321,7 @@ impl OttParams {
         g.time.validate("time")?;
         g.upward.validate("upward")?;
         g.downward.validate("downward")?;
-        check_range("low_crossover_hz", g.low_crossover_hz, 40.0, 2000.0)?;
-        check_range("high_crossover_hz", g.high_crossover_hz, 400.0, 16000.0)?;
-
-        if g.high_crossover_hz < 2.0 * g.low_crossover_hz {
-            return Err(ConfigError::CrossoverOctave {
-                low_hz: g.low_crossover_hz,
-                high_hz: g.high_crossover_hz,
-            });
-        }
+        g.crossovers.validate()?;
 
         for (i, band) in self.bands.iter().enumerate() {
             band.validate(i)?;
@@ -309,17 +342,17 @@ impl OttParams {
 
         let nyquist_limit = CROSSOVER_NYQUIST_RATIO * sample_rate;
         let g = &self.global;
-        if g.low_crossover_hz > nyquist_limit {
+        if g.crossovers.low_hz() > nyquist_limit {
             return Err(ConfigError::CrossoverNyquist {
                 field: "low_crossover_hz",
-                value: g.low_crossover_hz,
+                value: g.crossovers.low_hz(),
                 max: nyquist_limit,
             });
         }
-        if g.high_crossover_hz > nyquist_limit {
+        if g.crossovers.high_hz() > nyquist_limit {
             return Err(ConfigError::CrossoverNyquist {
                 field: "high_crossover_hz",
-                value: g.high_crossover_hz,
+                value: g.crossovers.high_hz(),
                 max: nyquist_limit,
             });
         }
@@ -381,8 +414,7 @@ impl Preset {
                 time: UnitInterval::new(0.5),
                 upward: UnitInterval::new(1.0),
                 downward: UnitInterval::new(1.0),
-                low_crossover_hz: 120.0,
-                high_crossover_hz: 2500.0,
+                crossovers: CrossoverPair::new(120.0, 2500.0),
             },
             Self::Default => GlobalParams {
                 input_gain_db: 0.0,
@@ -391,8 +423,7 @@ impl Preset {
                 time: UnitInterval::new(0.5),
                 upward: UnitInterval::new(1.0),
                 downward: UnitInterval::new(1.0),
-                low_crossover_hz: 120.0,
-                high_crossover_hz: 2500.0,
+                crossovers: CrossoverPair::new(120.0, 2500.0),
             },
         };
         OttParams { global, bands }
@@ -577,11 +608,13 @@ where
             }
             "--low-crossover" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.low_crossover_hz = parse_f32(&name, &value)?;
+                let hz = parse_f32(&name, &value)?;
+                params.global.crossovers = CrossoverPair::new(hz, params.global.crossovers.high_hz());
             }
             "--high-crossover" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.high_crossover_hz = parse_f32(&name, &value)?;
+                let hz = parse_f32(&name, &value)?;
+                params.global.crossovers = CrossoverPair::new(params.global.crossovers.low_hz(), hz);
             }
             _ => return Err(CliError::UnknownOption(arg)),
         }
@@ -652,8 +685,7 @@ mod tests {
     #[test]
     fn rejects_crossover_less_than_one_octave_apart() {
         let mut params = Preset::SafeStart.params();
-        params.global.low_crossover_hz = 1000.0;
-        params.global.high_crossover_hz = 1500.0;
+        params.global.crossovers = CrossoverPair::new(1000.0, 1500.0);
         assert!(matches!(
             params.validate_ranges(),
             Err(ConfigError::CrossoverOctave { .. })
@@ -662,13 +694,8 @@ mod tests {
 
     #[test]
     fn rejects_crossover_above_nyquist_ratio() {
-        let params = OttParams {
-            global: GlobalParams {
-                high_crossover_hz: 8000.0,
-                ..Preset::SafeStart.params().global
-            },
-            ..Preset::SafeStart.params()
-        };
+        let mut params = Preset::SafeStart.params();
+        params.global.crossovers = CrossoverPair::new(params.global.crossovers.low_hz(), 8000.0);
         // At 44.1kHz, 0.45*44100 = 19845Hz, so 8kHz is allowed, but confirm it
         // violates the Nyquist constraint near an 8kHz sample-rate boundary.
         assert!(params.validate(16_000.0).is_err());
@@ -695,7 +722,7 @@ mod tests {
         match outcome {
             CliOutcome::Run(params) => {
                 assert_eq!(params.global.depth.get(), 0.75);
-                assert_eq!(params.global.low_crossover_hz, 100.0);
+                assert_eq!(params.global.crossovers.low_hz(), 100.0);
                 assert_eq!(params.global.output_gain_db, 0.0); // from `default` preset
             }
             _ => panic!("expected Run outcome"),

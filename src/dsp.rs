@@ -215,8 +215,8 @@ impl OttProcessor {
         let global = GlobalRuntime::new(&params.global, sample_rate);
         let crossover = Crossover::new(
             sample_rate,
-            params.global.low_crossover_hz,
-            params.global.high_crossover_hz,
+            params.global.crossovers.low_hz(),
+            params.global.crossovers.high_hz(),
         );
         let bands = [
             BandProcessor::new(&params.bands[BAND_LOW], sample_rate),
@@ -258,8 +258,8 @@ impl OttProcessor {
         params.validate(self.sample_rate)?;
         self.global.set_targets(&params.global);
         self.crossover.set_targets(
-            params.global.low_crossover_hz,
-            params.global.high_crossover_hz,
+            params.global.crossovers.low_hz(),
+            params.global.crossovers.high_hz(),
         );
         for (band, band_params) in self.bands.iter_mut().zip(params.bands.iter()) {
             band.set_targets(band_params);
@@ -410,8 +410,8 @@ mod processor_tests {
 
         let mut reference = Crossover::new(
             sample_rate,
-            params.global.low_crossover_hz,
-            params.global.high_crossover_hz,
+            params.global.crossovers.low_hz(),
+            params.global.crossovers.high_hz(),
         );
         let input_gain = db_to_amp(params.global.input_gain_db);
         let output_gain = db_to_amp(params.global.output_gain_db);
