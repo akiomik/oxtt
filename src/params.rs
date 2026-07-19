@@ -410,10 +410,10 @@ fn take_value(
     iter: &mut impl Iterator<Item = String>,
 ) -> Result<String, CliError> {
     if let Some(v) = inline {
-        return Ok(v.to_string());
+        return Ok(v.to_owned());
     }
     iter.next()
-        .ok_or_else(|| CliError::MissingValue(name.to_string()))
+        .ok_or_else(|| CliError::MissingValue(name.to_owned()))
 }
 
 fn parse_f32(option: &str, value: &str) -> Result<f32, CliError> {
@@ -421,8 +421,8 @@ fn parse_f32(option: &str, value: &str) -> Result<f32, CliError> {
         .trim()
         .parse::<f32>()
         .map_err(|_| CliError::InvalidValue {
-            option: option.to_string(),
-            value: value.to_string(),
+            option: option.to_owned(),
+            value: value.to_owned(),
         })
 }
 
@@ -431,8 +431,8 @@ fn parse_percent(option: &str, value: &str) -> Result<f32, CliError> {
     let raw = parse_f32(option, value)?;
     if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
         return Err(CliError::InvalidValue {
-            option: option.to_string(),
-            value: value.to_string(),
+            option: option.to_owned(),
+            value: value.to_owned(),
         });
     }
     Ok(raw / 100.0)
@@ -481,11 +481,11 @@ where
 {
     let mut preset = Preset::default();
     let mut params = preset.params();
-    let mut iter = args.into_iter().map(|s| s.as_ref().to_string());
+    let mut iter = args.into_iter().map(|s| s.as_ref().to_owned());
 
     while let Some(arg) = iter.next() {
         let (name, inline) = split_inline_value(&arg);
-        let name = name.to_string();
+        let name = name.to_owned();
         match name.as_str() {
             "--help" => return Ok(CliOutcome::Help(help_text())),
             "--version" => return Ok(CliOutcome::Version(version_text())),
