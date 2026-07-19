@@ -1,11 +1,16 @@
-//! JACK port registration, ProcessHandler, and NotificationHandler (docs/architecture.md, docs/contracts.md §6, §7).
+//! JACK port registration, `ProcessHandler`, and `NotificationHandler` (docs/architecture.md, docs/contracts.md §6, §7).
 
+use std::error::Error;
 use std::fmt;
+use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::thread;
 use std::time::Duration;
 
 use jack::{AudioIn, AudioOut, Client, ClientOptions, Control, Port, ProcessScope};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::flag;
 
 use crate::dsp::OttProcessor;
 use crate::params::{ConfigError, OttParams};
@@ -20,38 +25,41 @@ const PORT_OUTPUT_R: &str = "output_r";
 /// Errors that can occur connecting to or running under JACK.
 #[derive(Debug)]
 pub enum HostError {
+    /// A JACK client or port operation failed.
     Jack(jack::Error),
+    /// The supplied parameters failed validation.
     Config(ConfigError),
-    Signal(std::io::Error),
+    /// Installing the SIGINT/SIGTERM handler failed.
+    Signal(io::Error),
 }
 
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HostError::Jack(e) => write!(f, "JACK error: {e}"),
-            HostError::Config(e) => write!(f, "invalid parameters: {e}"),
-            HostError::Signal(e) => write!(f, "failed to install signal handler: {e}"),
+            Self::Jack(e) => write!(f, "JACK error: {e}"),
+            Self::Config(e) => write!(f, "invalid parameters: {e}"),
+            Self::Signal(e) => write!(f, "failed to install signal handler: {e}"),
         }
     }
 }
 
-impl std::error::Error for HostError {}
+impl Error for HostError {}
 
 impl From<jack::Error> for HostError {
     fn from(e: jack::Error) -> Self {
-        HostError::Jack(e)
+        Self::Jack(e)
     }
 }
 
 impl From<ConfigError> for HostError {
     fn from(e: ConfigError) -> Self {
-        HostError::Config(e)
+        Self::Config(e)
     }
 }
 
-impl From<std::io::Error> for HostError {
-    fn from(e: std::io::Error) -> Self {
-        HostError::Signal(e)
+impl From<io::Error> for HostError {
+    fn from(e: io::Error) -> Self {
+        Self::Signal(e)
     }
 }
 
@@ -95,6 +103,8 @@ impl jack::ProcessHandler for AudioProcessHandler {
             // On a sample-rate change: recompute all filter coefficients and
             // time coefficients, and reset state (docs/contracts.md §7). Never
             // panics inside the callback, even on failure (docs/contracts.md §6).
+            // JACK sample rates stay far below f32's 16.7M exact-integer range.
+            #[allow(clippy::cast_precision_loss)]
             let _ = self.processor.reset(pending as f32);
         }
 
@@ -125,6 +135,11 @@ impl jack::ProcessHandler for AudioProcessHandler {
 
 /// Connects to JACK and starts `oxtt`. Blocks until SIGINT/SIGTERM/JACK
 /// shutdown is received, then stops safely (docs/contracts.md §7).
+///
+/// # Errors
+///
+/// Returns `HostError` if connecting to JACK, registering ports, validating
+/// `params`, or installing the SIGINT/SIGTERM handler fails.
 pub fn run(params: OttParams) -> Result<(), HostError> {
     let (client, _status) = Client::new(CLIENT_NAME, ClientOptions::default())?;
 
@@ -134,18 +149,17 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
     let output_l = client.register_port(PORT_OUTPUT_L, AudioOut::default())?;
     let output_r = client.register_port(PORT_OUTPUT_R, AudioOut::default())?;
 
-    // Use the sample rate assigned by JACK (docs/contracts.md §7).
+    // Use the sample rate assigned by JACK (docs/contracts.md §7). JACK
+    // sample rates stay far below f32's 16.7M exact-integer range.
+    #[allow(clippy::cast_precision_loss)]
     let sample_rate = client.sample_rate() as f32;
     let processor = OttProcessor::new(sample_rate, params)?;
 
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     let pending_sample_rate = Arc::new(AtomicU32::new(0));
 
-    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown_requested))?;
-    signal_hook::flag::register(
-        signal_hook::consts::SIGTERM,
-        Arc::clone(&shutdown_requested),
-    )?;
+    flag::register(SIGINT, Arc::clone(&shutdown_requested))?;
+    flag::register(SIGTERM, Arc::clone(&shutdown_requested))?;
 
     let notifications = Notifications {
         shutdown_requested: Arc::clone(&shutdown_requested),
@@ -163,7 +177,7 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
     let active_client = client.activate_async(notifications, process_handler)?;
 
     while !shutdown_requested.load(Ordering::Acquire) {
-        std::thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50));
     }
 
     active_client.deactivate()?;

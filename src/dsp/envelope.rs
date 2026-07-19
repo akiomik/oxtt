@@ -10,12 +10,14 @@ const MIN_TIME_SAMPLES: f32 = 5.0;
 
 /// Instantaneous detected power shared by L/R: `p[n] = max(left[n]^2, right[n]^2)` (ADR 0002).
 #[inline]
+#[must_use]
 pub fn detector_power(left: f32, right: f32) -> f32 {
     (left * left).max(right * right)
 }
 
 /// `coefficient(t_ms) = exp(-1 / max(t_ms * 0.001 * sample_rate, 1))`.
 #[inline]
+#[must_use]
 pub fn envelope_coefficient(time_ms: f32, sample_rate: f32) -> f32 {
     let n = (time_ms * 0.001 * sample_rate).max(1.0);
     (-1.0_f32 / n).exp()
@@ -29,6 +31,7 @@ fn flush_denormal(x: f32) -> f32 {
 /// A single one-pole envelope update. Uses the attack coefficient when
 /// `p[n] > env[n-1]`, otherwise the release coefficient.
 #[inline]
+#[must_use]
 pub fn update_envelope(
     p: f32,
     prev_env: f32,
@@ -41,19 +44,21 @@ pub fn update_envelope(
     } else {
         envelope_coefficient(release_ms, sample_rate)
     };
-    flush_denormal(c * prev_env + (1.0 - c) * p)
+    flush_denormal(c.mul_add(prev_env, (1.0 - c) * p))
 }
 
 /// Derives the attack/release time multiplier from `time (0..1)`.
 ///
 /// `time = 0.5` gives a multiplier of 1; 0 gives ~0.0183; 1 gives ~54.6.
 #[inline]
+#[must_use]
 pub fn time_multiplier(time: f32) -> f32 {
-    (8.0 * time - 4.0).exp()
+    8.0f32.mul_add(time, -4.0).exp()
 }
 
 /// Derives the effective attack/release ms from the band's base values and `time`.
 #[inline]
+#[must_use]
 pub fn attack_release_ms(
     base_attack_ms: f32,
     base_release_ms: f32,
@@ -79,6 +84,7 @@ impl BandEnvelope {
     /// Initial construction. Snaps immediately to the boundary power,
     /// preventing startup at maximum gain from a state with no history
     /// (docs/contracts.md §2).
+    #[must_use]
     pub fn new(lower_threshold_db: f32, upper_threshold_db: f32) -> Self {
         let mut e = Self {
             low_env: 0.0,
@@ -96,16 +102,20 @@ impl BandEnvelope {
         self.high_env = db_to_amp(upper_threshold_db).powi(2);
     }
 
-    pub fn is_finite(&self) -> bool {
+    /// Returns `false` if either envelope has gone non-finite (docs/contracts.md §4).
+    #[must_use]
+    pub const fn is_finite(&self) -> bool {
         self.low_env.is_finite() && self.high_env.is_finite()
     }
 
     /// Returns the low envelope's power in dB.
+    #[must_use]
     pub fn low_level_db(&self) -> f32 {
         power_to_db(self.low_env)
     }
 
     /// Returns the high envelope's power in dB.
+    #[must_use]
     pub fn high_level_db(&self) -> f32 {
         power_to_db(self.high_env)
     }
@@ -133,6 +143,9 @@ impl BandEnvelope {
 }
 
 #[cfg(test)]
+// Step counts derived from ms*sample_rate stay well within f32/usize's exact
+// range, so narrowing casts here are intentional, not precision bugs.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 mod tests {
     use super::*;
 

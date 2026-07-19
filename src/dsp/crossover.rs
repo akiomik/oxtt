@@ -27,7 +27,11 @@ fn biquad_coeffs(cutoff_hz: f32, sample_rate: f32, high_pass: bool) -> [f32; 5] 
     let alpha = sin_w / (2.0 * Q_BUTTERWORTH);
 
     let (b0, b1, b2) = if high_pass {
-        ((1.0 + cos_w) / 2.0, -(1.0 + cos_w), (1.0 + cos_w) / 2.0)
+        (
+            f32::midpoint(1.0, cos_w),
+            -(1.0 + cos_w),
+            f32::midpoint(1.0, cos_w),
+        )
     } else {
         ((1.0 - cos_w) / 2.0, 1.0 - cos_w, (1.0 - cos_w) / 2.0)
     };
@@ -53,11 +57,11 @@ struct Biquad {
 }
 
 impl Biquad {
-    fn set_coeffs(&mut self, coeffs: [f32; 5]) {
+    const fn set_coeffs(&mut self, coeffs: [f32; 5]) {
         [self.b0, self.b1, self.b2, self.a1, self.a2] = coeffs;
     }
 
-    fn reset_state(&mut self) {
+    const fn reset_state(&mut self) {
         self.x1 = 0.0;
         self.x2 = 0.0;
         self.y1 = 0.0;
@@ -66,9 +70,14 @@ impl Biquad {
 
     #[inline]
     fn process(&mut self, x0: f32) -> f32 {
-        let y0 = self.b0 * x0 + self.b1 * self.x1 + self.b2 * self.x2
-            - self.a1 * self.y1
-            - self.a2 * self.y2;
+        let y0 = self.a2.mul_add(
+            -self.y2,
+            self.a1.mul_add(
+                -self.y1,
+                self.b2
+                    .mul_add(self.x2, self.b0.mul_add(x0, self.b1 * self.x1)),
+            ),
+        );
         self.x2 = self.x1;
         self.x1 = x0;
         self.y2 = self.y1;
@@ -76,7 +85,7 @@ impl Biquad {
         y0
     }
 
-    fn is_finite(&self) -> bool {
+    const fn is_finite(&self) -> bool {
         self.x1.is_finite() && self.x2.is_finite() && self.y1.is_finite() && self.y2.is_finite()
     }
 }
@@ -95,7 +104,7 @@ impl Lr4 {
         self.stage2.set_coeffs(coeffs);
     }
 
-    fn reset_state(&mut self) {
+    const fn reset_state(&mut self) {
         self.stage1.reset_state();
         self.stage2.reset_state();
     }
@@ -105,7 +114,7 @@ impl Lr4 {
         self.stage2.process(self.stage1.process(x))
     }
 
-    fn is_finite(&self) -> bool {
+    const fn is_finite(&self) -> bool {
         self.stage1.is_finite() && self.stage2.is_finite()
     }
 }
@@ -135,7 +144,7 @@ impl ChannelSplitter {
         self.phase_comp_hp.set_cutoff(high_hz, sample_rate, true);
     }
 
-    fn reset_state(&mut self) {
+    const fn reset_state(&mut self) {
         self.low_split_lp.reset_state();
         self.low_split_hp.reset_state();
         self.high_split_lp.reset_state();
@@ -159,7 +168,7 @@ impl ChannelSplitter {
         bands
     }
 
-    fn is_finite(&self) -> bool {
+    const fn is_finite(&self) -> bool {
         self.low_split_lp.is_finite()
             && self.low_split_hp.is_finite()
             && self.high_split_lp.is_finite()
@@ -180,6 +189,8 @@ pub struct Crossover {
 }
 
 impl Crossover {
+    /// Creates a crossover with filter coefficients set for `low_hz`/`high_hz` at `sample_rate`.
+    #[must_use]
     pub fn new(sample_rate: f32, low_hz: f32, high_hz: f32) -> Self {
         let mut c = Self {
             sample_rate,
@@ -218,18 +229,30 @@ impl Crossover {
     }
 
     /// Resets the filters' delay-line state (not the smoothing state).
-    pub fn reset_filter_state(&mut self) {
+    pub const fn reset_filter_state(&mut self) {
         self.left.reset_state();
         self.right.reset_state();
     }
 
-    pub fn is_finite(&self) -> bool {
+    /// Returns `false` if either channel's filter state has gone non-finite (docs/contracts.md §4).
+    #[must_use]
+    pub const fn is_finite(&self) -> bool {
         self.left.is_finite() && self.right.is_finite()
     }
 }
 
 #[cfg(test)]
+// Sample indices in these tests stay well within f32's exact integer range, and
+// narrowing back to f32/usize for signal generation and RMS measurement is intentional.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::float_cmp
+)]
 mod tests {
+    use std::f64::consts::SQRT_2;
+
     use super::*;
 
     /// Runs a steady-state sine wave through and estimates the amplitude [dB] from the RMS after enough cycles have settled.
@@ -245,12 +268,12 @@ mod tests {
             let x = (omega * n as f32).sin();
             let y = process(x);
             if n >= settle {
-                sum_sq += (y as f64) * (y as f64);
+                sum_sq += f64::from(y) * f64::from(y);
                 count += 1;
             }
         }
         let rms = (sum_sq / count as f64).sqrt();
-        let amplitude = rms * std::f64::consts::SQRT_2;
+        let amplitude = rms * SQRT_2;
         20.0 * amplitude.max(1e-12).log10() as f32
     }
 

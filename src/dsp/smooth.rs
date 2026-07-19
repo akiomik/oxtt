@@ -7,7 +7,8 @@
 /// Smoothing time constant (docs/architecture.md).
 pub const SMOOTHING_TIME_MS: f32 = 20.0;
 
-/// Derives the one-pole coefficient from `SMOOTHING_TIME_MS` and sample_rate.
+/// Derives the one-pole coefficient from `SMOOTHING_TIME_MS` and `sample_rate`.
+#[must_use]
 pub fn smoothing_coefficient(sample_rate: f32) -> f32 {
     (-1.0 / (SMOOTHING_TIME_MS * 0.001 * sample_rate)).exp()
 }
@@ -22,6 +23,7 @@ pub struct Smoothed {
 
 impl Smoothed {
     /// Constructs with an immediate snap to `value` (no startup fade).
+    #[must_use]
     pub fn new(value: f32, sample_rate: f32) -> Self {
         Self {
             current: value,
@@ -36,28 +38,34 @@ impl Smoothed {
     }
 
     /// Updates the smoothing target value.
-    pub fn set_target(&mut self, target: f32) {
+    pub const fn set_target(&mut self, target: f32) {
         self.target = target;
     }
 
     /// Immediately resets both current and target to the same value (initial construction, `reset`).
-    pub fn snap(&mut self, value: f32) {
+    pub const fn snap(&mut self, value: f32) {
         self.current = value;
         self.target = value;
     }
 
-    pub fn current(&self) -> f32 {
+    /// Returns the current (smoothed) value.
+    #[must_use]
+    pub const fn current(&self) -> f32 {
         self.current
     }
 
-    pub fn target(&self) -> f32 {
+    /// Returns the smoothing target value.
+    #[must_use]
+    pub const fn target(&self) -> f32 {
         self.target
     }
 
     /// Advances `current` toward `target` by one sample, returning the updated value.
     #[inline]
     pub fn tick(&mut self) -> f32 {
-        self.current = self.coefficient * self.current + (1.0 - self.coefficient) * self.target;
+        self.current = self
+            .coefficient
+            .mul_add(self.current, (1.0 - self.coefficient) * self.target);
         self.current
     }
 }
@@ -69,24 +77,31 @@ pub struct LogSmoothed {
 }
 
 impl LogSmoothed {
+    /// Constructs with an immediate snap to `value_hz` (no startup fade).
+    #[must_use]
     pub fn new(value_hz: f32, sample_rate: f32) -> Self {
         Self {
             inner: Smoothed::new(value_hz.ln(), sample_rate),
         }
     }
 
+    /// Recomputes the coefficient on a sample-rate change. Does not change current/target.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.inner.set_sample_rate(sample_rate);
     }
 
+    /// Updates the smoothing target frequency, in Hz.
     pub fn set_target_hz(&mut self, hz: f32) {
         self.inner.set_target(hz.ln());
     }
 
+    /// Immediately resets both current and target to `hz` (initial construction, `reset`).
     pub fn snap_hz(&mut self, hz: f32) {
         self.inner.snap(hz.ln());
     }
 
+    /// Returns the current (smoothed) value, in Hz.
+    #[must_use]
     pub fn current_hz(&self) -> f32 {
         self.inner.current().exp()
     }
@@ -99,6 +114,13 @@ impl LogSmoothed {
 }
 
 #[cfg(test)]
+// Step counts derived from ms/sample_rate stay well within f32/usize's exact
+// range, so narrowing casts here are intentional, not precision bugs.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::float_cmp
+)]
 mod tests {
     use super::*;
 

@@ -7,12 +7,14 @@
 use crate::dsp::db_to_amp;
 use crate::dsp::envelope::BandEnvelope;
 
-/// Clamp range for the combined gain (docs/contracts.md §4).
+/// Lower clamp for the combined gain (docs/contracts.md §4).
 pub const MIN_DYNAMIC_GAIN_DB: f32 = -60.0;
+/// Upper clamp for the combined gain (docs/contracts.md §4).
 pub const MAX_DYNAMIC_GAIN_DB: f32 = 30.0;
 
 /// e.g. `effective_up_amount = clamp(band.up_amount * upward, 0, 1)` (ADR 0003).
 #[inline]
+#[must_use]
 pub fn effective_amount(band_amount: f32, global_amount: f32) -> f32 {
     (band_amount * global_amount).clamp(0.0, 1.0)
 }
@@ -20,11 +22,17 @@ pub fn effective_amount(band_amount: f32, global_amount: f32) -> f32 {
 /// Resolved dynamics settings applied to a single sample.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandDynamics {
+    /// Downward-compression threshold in dB.
     pub lower_threshold_db: f32,
+    /// Upward-compression threshold in dB.
     pub upper_threshold_db: f32,
+    /// Upward compression amount after applying the global multiplier, `0.0..=1.0`.
     pub effective_up_amount: f32,
+    /// Downward compression amount after applying the global multiplier, `0.0..=1.0`.
     pub effective_down_amount: f32,
+    /// Attack time in ms, already adjusted for the global `time` control.
     pub attack_ms: f32,
+    /// Release time in ms, already adjusted for the global `time` control.
     pub release_ms: f32,
 }
 
@@ -35,6 +43,8 @@ pub struct DualThresholdCompressor {
 }
 
 impl DualThresholdCompressor {
+    /// Creates a compressor with its envelope initialized to the threshold midpoint (docs/contracts.md §2).
+    #[must_use]
     pub fn new(lower_threshold_db: f32, upper_threshold_db: f32) -> Self {
         Self {
             envelope: BandEnvelope::new(lower_threshold_db, upper_threshold_db),
@@ -46,7 +56,9 @@ impl DualThresholdCompressor {
         self.envelope.reset(lower_threshold_db, upper_threshold_db);
     }
 
-    pub fn is_finite(&self) -> bool {
+    /// Returns `false` if the envelope state has gone non-finite (docs/contracts.md §4).
+    #[must_use]
+    pub const fn is_finite(&self) -> bool {
         self.envelope.is_finite()
     }
 
@@ -74,6 +86,9 @@ impl DualThresholdCompressor {
 }
 
 #[cfg(test)]
+// These tests compare exact deterministic gain values (e.g. silence in -> silence out),
+// so float_cmp noise here is expected rather than a real risk.
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
     use crate::dsp::envelope::detector_power;
@@ -105,7 +120,7 @@ mod tests {
     fn gain_is_0db_inside_thresholds() {
         let dynamics = default_dynamics();
         let sample_rate = 48_000.0;
-        let mid_level_db = (dynamics.lower_threshold_db + dynamics.upper_threshold_db) / 2.0;
+        let mid_level_db = f32::midpoint(dynamics.lower_threshold_db, dynamics.upper_threshold_db);
         let gain = steady_state_gain(&dynamics, mid_level_db, sample_rate);
         assert!(
             (gain - 1.0).abs() < 1e-3,
@@ -204,7 +219,7 @@ mod tests {
         let dynamics = default_dynamics();
         let mut comp =
             DualThresholdCompressor::new(dynamics.lower_threshold_db, dynamics.upper_threshold_db);
-        let mid_level_db = (dynamics.lower_threshold_db + dynamics.upper_threshold_db) / 2.0;
+        let mid_level_db = f32::midpoint(dynamics.lower_threshold_db, dynamics.upper_threshold_db);
         let amp = db_to_amp(mid_level_db);
         let p = detector_power(amp, amp);
         let gain = comp.process(p, &dynamics, 48_000.0);

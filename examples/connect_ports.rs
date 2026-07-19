@@ -3,16 +3,16 @@
 //! Lets JACK smoke tests be automated even in development environments where
 //! CLI tools like `jack_connect` aren't available. Depends only on the `jack` crate.
 
+use std::env;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (source, destination) = match (args.first(), args.get(1)) {
-        (Some(s), Some(d)) => (s.as_str(), d.as_str()),
-        _ => {
-            eprintln!("usage: connect_ports <source_port> <destination_port>");
-            return ExitCode::FAILURE;
-        }
+    let args: Vec<String> = env::args().skip(1).collect();
+    let (source, destination) = if let (Some(s), Some(d)) = (args.first(), args.get(1)) {
+        (s.as_str(), d.as_str())
+    } else {
+        eprintln!("usage: connect_ports <source_port> <destination_port>");
+        return ExitCode::FAILURE;
     };
 
     let (client, _status) =

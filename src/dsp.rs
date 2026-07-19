@@ -1,10 +1,11 @@
-//! OttProcessor and the public DSP API (docs/architecture.md).
+//! `OttProcessor` and the public DSP API (docs/architecture.md).
 
 pub mod compressor;
 pub mod crossover;
 pub mod envelope;
 pub mod smooth;
 
+use std::error::Error;
 use std::fmt;
 
 use crate::params::{
@@ -34,26 +35,27 @@ pub(crate) fn power_to_db(power: f32) -> f32 {
 
 #[inline]
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
+    (b - a).mul_add(t, a)
 }
 
 /// Runtime error returned by `process` (docs/contracts.md §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessError {
+    /// `input_l`, `input_r`, `output_l`, and `output_r` did not all have the same length.
     BufferLengthMismatch,
 }
 
 impl fmt::Display for ProcessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ProcessError::BufferLengthMismatch => {
+            Self::BufferLengthMismatch => {
                 write!(f, "input/output buffer lengths do not match")
             }
         }
     }
 }
 
-impl std::error::Error for ProcessError {}
+impl Error for ProcessError {}
 
 /// Bundles one band's smoothed parameters with its dual-threshold compressor (docs/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -86,7 +88,7 @@ impl BandProcessor {
     }
 
     /// Updates only the smoothing targets. Keeps the current smoothing state as-is (docs/contracts.md §2).
-    fn set_targets(&mut self, params: &BandParams) {
+    const fn set_targets(&mut self, params: &BandParams) {
         self.lower_threshold_db
             .set_target(params.lower_threshold_db);
         self.upper_threshold_db
@@ -98,7 +100,7 @@ impl BandProcessor {
         self.base_release_ms = params.base_release_ms;
     }
 
-    fn is_finite(&self) -> bool {
+    const fn is_finite(&self) -> bool {
         self.compressor.is_finite()
     }
 
@@ -154,7 +156,7 @@ impl BandProcessor {
     }
 }
 
-/// Bundles one frame's smoothed global values to pass to BandProcessor (docs/architecture.md).
+/// Bundles one frame's smoothed global values to pass to `BandProcessor` (docs/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct FrameControls {
     time: f32,
@@ -186,7 +188,7 @@ impl GlobalRuntime {
         }
     }
 
-    fn set_targets(&mut self, params: &GlobalParams) {
+    const fn set_targets(&mut self, params: &GlobalParams) {
         self.input_gain_db.set_target(params.input_gain_db);
         self.output_gain_db.set_target(params.output_gain_db);
         self.depth.set_target(params.depth);
@@ -211,6 +213,11 @@ pub struct OttProcessor {
 }
 
 impl OttProcessor {
+    /// Constructs a processor for `sample_rate` with `params`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if `sample_rate` or `params` fail validation (docs/contracts.md §1).
     pub fn new(sample_rate: f32, params: OttParams) -> Result<Self, ConfigError> {
         params.validate(sample_rate)?;
         Ok(Self::new_unchecked(sample_rate, params))
@@ -242,6 +249,11 @@ impl OttProcessor {
     ///
     /// Keeps the most recently set target parameters and immediately sets
     /// `current` to `target` (docs/contracts.md §2).
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if `sample_rate` fails validation against the
+    /// currently held target parameters (docs/contracts.md §1).
     pub fn reset(&mut self, sample_rate: f32) -> Result<(), ConfigError> {
         self.target_params.validate(sample_rate)?;
         *self = Self::new_unchecked(sample_rate, self.target_params);
@@ -249,6 +261,11 @@ impl OttProcessor {
     }
 
     /// Updates the smoothing target for parameters. Keeps the current smoothing state as-is (docs/contracts.md §2).
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if `params` fail validation against the current
+    /// sample rate (docs/contracts.md §1).
     pub fn set_params(&mut self, params: OttParams) -> Result<(), ConfigError> {
         params.validate(self.sample_rate)?;
         self.global.set_targets(&params.global);
@@ -264,6 +281,11 @@ impl OttProcessor {
     }
 
     /// Returns an error before writing anything if the 4 slices don't have the same length (docs/contracts.md §3).
+    ///
+    /// # Errors
+    ///
+    /// Returns `ProcessError::BufferLengthMismatch` if `input_l`, `input_r`,
+    /// `output_l`, and `output_r` don't all have the same length.
     pub fn process(
         &mut self,
         input_l: &[f32],
@@ -363,13 +385,25 @@ mod unit_tests {
 
 /// `OttProcessor` integration tests (docs/contracts.md §2-§5).
 #[cfg(test)]
+// These tests compare exact deterministic values (verbatim inputs, buffer
+// equality across chunkings) and cast sample counts that stay well within
+// f32/f64's exact range, so unwrap/panic/float_cmp/cast noise here is expected.
+#[allow(
+    clippy::unwrap_used,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::similar_names
+)]
 mod processor_tests {
     use super::*;
     use crate::params::Preset;
     use std::f32::consts::PI;
 
     fn rms(samples: &[f32]) -> f32 {
-        let sum_sq: f64 = samples.iter().map(|&x| (x as f64) * (x as f64)).sum();
+        let sum_sq: f64 = samples.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
         ((sum_sq / samples.len() as f64).sqrt()) as f32
     }
 
@@ -418,7 +452,7 @@ mod processor_tests {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
         params.global.upward = 0.0;
-        for band in params.bands.iter_mut() {
+        for band in &mut params.bands {
             band.makeup_gain_db = 0.0;
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
@@ -445,7 +479,7 @@ mod processor_tests {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
         params.global.downward = 0.0;
-        for band in params.bands.iter_mut() {
+        for band in &mut params.bands {
             band.makeup_gain_db = 0.0;
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
@@ -488,10 +522,10 @@ mod processor_tests {
         for i in 0..n {
             proc_b
                 .process(
-                    &input[i..i + 1],
-                    &input[i..i + 1],
-                    &mut out_b_l[i..i + 1],
-                    &mut out_b_r[i..i + 1],
+                    &input[i..=i],
+                    &input[i..=i],
+                    &mut out_b_l[i..=i],
+                    &mut out_b_r[i..=i],
                 )
                 .unwrap();
         }
@@ -560,7 +594,7 @@ mod processor_tests {
                 state ^= state << 13;
                 state ^= state >> 17;
                 state ^= state << 5;
-                (state as f32 / u32::MAX as f32) * 2.0 - 1.0
+                (state as f32 / u32::MAX as f32).mul_add(2.0, -1.0)
             })
             .collect();
         assert_all_finite("white_noise", sample_rate, &white_noise);
