@@ -65,9 +65,9 @@ impl BandProcessor {
             upper_threshold_db: Smoothed::new(params.thresholds.upper_db(), sample_rate),
             up_amount: Smoothed::new(params.up_amount.get(), sample_rate),
             down_amount: Smoothed::new(params.down_amount.get(), sample_rate),
-            makeup_gain_db: Smoothed::new(params.makeup_gain_db, sample_rate),
-            base_attack_ms: params.base_attack_ms,
-            base_release_ms: params.base_release_ms,
+            makeup_gain_db: Smoothed::new(params.makeup_gain_db.get(), sample_rate),
+            base_attack_ms: params.base_attack_ms.get(),
+            base_release_ms: params.base_release_ms.get(),
             compressor: DualThresholdCompressor::new(
                 params.thresholds.lower_db(),
                 params.thresholds.upper_db(),
@@ -83,9 +83,9 @@ impl BandProcessor {
             .set_target(params.thresholds.upper_db());
         self.up_amount.set_target(params.up_amount.get());
         self.down_amount.set_target(params.down_amount.get());
-        self.makeup_gain_db.set_target(params.makeup_gain_db);
-        self.base_attack_ms = params.base_attack_ms;
-        self.base_release_ms = params.base_release_ms;
+        self.makeup_gain_db.set_target(params.makeup_gain_db.get());
+        self.base_attack_ms = params.base_attack_ms.get();
+        self.base_release_ms = params.base_release_ms.get();
     }
 
     const fn is_finite(&self) -> bool {
@@ -167,8 +167,8 @@ struct GlobalRuntime {
 impl GlobalRuntime {
     fn new(params: &GlobalParams, sample_rate: f32) -> Self {
         Self {
-            input_gain_db: Smoothed::new(params.input_gain_db, sample_rate),
-            output_gain_db: Smoothed::new(params.output_gain_db, sample_rate),
+            input_gain_db: Smoothed::new(params.input_gain_db.get(), sample_rate),
+            output_gain_db: Smoothed::new(params.output_gain_db.get(), sample_rate),
             depth: Smoothed::new(params.depth.get(), sample_rate),
             time: Smoothed::new(params.time.get(), sample_rate),
             upward: Smoothed::new(params.upward.get(), sample_rate),
@@ -177,8 +177,8 @@ impl GlobalRuntime {
     }
 
     const fn set_targets(&mut self, params: &GlobalParams) {
-        self.input_gain_db.set_target(params.input_gain_db);
-        self.output_gain_db.set_target(params.output_gain_db);
+        self.input_gain_db.set_target(params.input_gain_db.get());
+        self.output_gain_db.set_target(params.output_gain_db.get());
         self.depth.set_target(params.depth.get());
         self.time.set_target(params.time.get());
         self.upward.set_target(params.upward.get());
@@ -387,7 +387,7 @@ mod unit_tests {
 )]
 mod processor_tests {
     use super::*;
-    use crate::params::{Preset, UnitInterval};
+    use crate::params::{GainDb, MakeupGainDb, Preset, UnitInterval};
     use std::f32::consts::PI;
 
     fn rms(samples: &[f32]) -> f32 {
@@ -405,7 +405,7 @@ mod processor_tests {
     fn depth_zero_matches_pure_crossover_reconstruction() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.depth = UnitInterval::new(0.0);
+        params.global.depth = UnitInterval::new_const(0.0);
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
 
         let mut reference = Crossover::new(
@@ -413,8 +413,8 @@ mod processor_tests {
             params.global.crossovers.low_hz(),
             params.global.crossovers.high_hz(),
         );
-        let input_gain = db_to_amp(params.global.input_gain_db);
-        let output_gain = db_to_amp(params.global.output_gain_db);
+        let input_gain = db_to_amp(params.global.input_gain_db.get());
+        let output_gain = db_to_amp(params.global.output_gain_db.get());
 
         let n = 2000;
         let input = sine(n, 300.0, 0.5, sample_rate);
@@ -439,9 +439,9 @@ mod processor_tests {
     fn upward_zero_gives_no_boost_below_lower_threshold() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.upward = UnitInterval::new(0.0);
+        params.global.upward = UnitInterval::new_const(0.0);
         for band in &mut params.bands {
-            band.makeup_gain_db = 0.0;
+            band.makeup_gain_db = MakeupGainDb::new_const(0.0);
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
 
@@ -466,9 +466,9 @@ mod processor_tests {
     fn downward_zero_gives_no_suppression_above_upper_threshold() {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
-        params.global.downward = UnitInterval::new(0.0);
+        params.global.downward = UnitInterval::new_const(0.0);
         for band in &mut params.bands {
-            band.makeup_gain_db = 0.0;
+            band.makeup_gain_db = MakeupGainDb::new_const(0.0);
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
 
@@ -607,7 +607,7 @@ mod processor_tests {
         let settle = n / 2;
         let output_rms = rms(&out_l[settle..]);
         let makeup_only_rms =
-            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db);
+            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db.get());
 
         assert!(
             output_rms > makeup_only_rms * 1.05,
@@ -634,7 +634,7 @@ mod processor_tests {
         let settle = n / 2;
         let output_rms = rms(&out_l[settle..]);
         let makeup_only_rms =
-            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db);
+            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db.get());
 
         assert!(
             output_rms < makeup_only_rms * 0.95,
@@ -678,7 +678,7 @@ mod processor_tests {
 
         // Change the target, then reset before it takes effect.
         let mut updated = params;
-        updated.global.output_gain_db = -6.0;
+        updated.global.output_gain_db = GainDb::new_const(-6.0);
         proc.set_params(updated).unwrap();
         proc.reset(96_000.0).unwrap();
 

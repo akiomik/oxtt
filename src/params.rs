@@ -1,6 +1,18 @@
 //! Interprets CLI values, and handles parameter validation, normalization, and presets.
 //!
 //! Ranges and invariants follow `docs/contracts.md` §1.
+//!
+//! Every value object below exposes at most two constructors:
+//! - `new(...) -> Result<Self, ConfigError>`: the only public, runtime-checked way to
+//!   build one from an untrusted value (CLI input, or a library caller). Only exists
+//!   where such a construction path actually exists.
+//! - `new_const(...) -> Self`: `pub(crate)`, for the fixed preset literals only.
+//!   Asserts the same invariants, so an invalid literal fails to compile rather than
+//!   slipping past a forgotten runtime check.
+//!
+//! Once constructed, every field of `OttParams` is therefore guaranteed valid on its
+//! own; the only thing that still needs checking against external state is the
+//! sample-rate-dependent Nyquist constraint, handled by `OttParams::validate`.
 
 use std::str::FromStr;
 
@@ -22,9 +34,22 @@ pub const CROSSOVER_NYQUIST_RATIO: f32 = 0.45;
 pub struct UnitInterval(f32);
 
 impl UnitInterval {
-    /// Wraps `value`. Range and finiteness are checked later by `validate_ranges`.
-    #[must_use]
-    pub const fn new(value: f32) -> Self {
+    /// Validates and wraps `value`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if `value` is not finite or falls outside `0.0..=1.0`.
+    pub fn new(field: &'static str, value: f32) -> Result<Self, ConfigError> {
+        check_range(field, value, 0.0, 1.0)?;
+        Ok(Self(value))
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    pub(crate) const fn new_const(value: f32) -> Self {
+        assert!(
+            value.is_finite() && value >= 0.0 && value <= 1.0,
+            "UnitInterval literal out of range"
+        );
         Self(value)
     }
 
@@ -33,15 +58,12 @@ impl UnitInterval {
     pub const fn get(self) -> f32 {
         self.0
     }
-
-    fn validate(self, field: &'static str) -> Result<(), ConfigError> {
-        check_range(field, self.0, 0.0, 1.0)
-    }
 }
 
 /// A band's downward/upward compression threshold pair, in dB (docs/contracts.md §1).
 ///
 /// Both bounds must lie in `-80.0..=0.0`, and `lower_db` must be less than `upper_db`.
+/// Only ever constructed from preset literals (ADR 0006); not CLI-configurable.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThresholdRange {
     lower_db: f32,
@@ -49,9 +71,20 @@ pub struct ThresholdRange {
 }
 
 impl ThresholdRange {
-    /// Wraps `lower_db`/`upper_db`. Range and ordering are checked later by `validate_ranges`.
-    #[must_use]
-    pub const fn new(lower_db: f32, upper_db: f32) -> Self {
+    /// For preset literals only. Panics (at compile time, in a `const` context) if the pair is invalid.
+    pub(crate) const fn new_const(lower_db: f32, upper_db: f32) -> Self {
+        assert!(
+            lower_db.is_finite() && lower_db >= -80.0 && lower_db <= 0.0,
+            "ThresholdRange lower_db literal out of range"
+        );
+        assert!(
+            upper_db.is_finite() && upper_db >= -80.0 && upper_db <= 0.0,
+            "ThresholdRange upper_db literal out of range"
+        );
+        assert!(
+            lower_db < upper_db,
+            "ThresholdRange lower_db must be less than upper_db"
+        );
         Self { lower_db, upper_db }
     }
 
@@ -65,19 +98,6 @@ impl ThresholdRange {
     #[must_use]
     pub const fn upper_db(self) -> f32 {
         self.upper_db
-    }
-
-    fn validate(self, band: usize) -> Result<(), ConfigError> {
-        check_range("lower_threshold_db", self.lower_db, -80.0, 0.0)?;
-        check_range("upper_threshold_db", self.upper_db, -80.0, 0.0)?;
-        if self.lower_db >= self.upper_db {
-            return Err(ConfigError::ThresholdOrder {
-                band,
-                lower: self.lower_db,
-                upper: self.upper_db,
-            });
-        }
-        Ok(())
     }
 }
 
@@ -93,9 +113,35 @@ pub struct CrossoverPair {
 }
 
 impl CrossoverPair {
-    /// Wraps `low_hz`/`high_hz`. Range and octave separation are checked later by `validate_ranges`.
-    #[must_use]
-    pub const fn new(low_hz: f32, high_hz: f32) -> Self {
+    /// Validates and wraps `low_hz`/`high_hz`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if either frequency is not finite, falls outside its
+    /// allowed range, or `high_hz` is less than one octave above `low_hz`.
+    pub fn new(low_hz: f32, high_hz: f32) -> Result<Self, ConfigError> {
+        check_range("low_crossover_hz", low_hz, 40.0, 2000.0)?;
+        check_range("high_crossover_hz", high_hz, 400.0, 16000.0)?;
+        if high_hz < 2.0 * low_hz {
+            return Err(ConfigError::CrossoverOctave { low_hz, high_hz });
+        }
+        Ok(Self { low_hz, high_hz })
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if the pair is invalid.
+    pub(crate) const fn new_const(low_hz: f32, high_hz: f32) -> Self {
+        assert!(
+            low_hz.is_finite() && low_hz >= 40.0 && low_hz <= 2000.0,
+            "CrossoverPair low_hz literal out of range"
+        );
+        assert!(
+            high_hz.is_finite() && high_hz >= 400.0 && high_hz <= 16000.0,
+            "CrossoverPair high_hz literal out of range"
+        );
+        assert!(
+            high_hz >= 2.0 * low_hz,
+            "CrossoverPair literal violates octave separation"
+        );
         Self { low_hz, high_hz }
     }
 
@@ -110,27 +156,95 @@ impl CrossoverPair {
     pub const fn high_hz(self) -> f32 {
         self.high_hz
     }
+}
 
-    fn validate(self) -> Result<(), ConfigError> {
-        check_range("low_crossover_hz", self.low_hz, 40.0, 2000.0)?;
-        check_range("high_crossover_hz", self.high_hz, 400.0, 16000.0)?;
-        if self.high_hz < 2.0 * self.low_hz {
-            return Err(ConfigError::CrossoverOctave {
-                low_hz: self.low_hz,
-                high_hz: self.high_hz,
-            });
-        }
-        Ok(())
+/// A gain value in dB, range `-24.0..=24.0` (docs/contracts.md §1).
+///
+/// Used for the pre-split and post-sum gains, which are CLI-configurable.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GainDb(f32);
+
+impl GainDb {
+    /// Validates and wraps `value`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if `value` is not finite or falls outside `-24.0..=24.0`.
+    pub fn new(field: &'static str, value: f32) -> Result<Self, ConfigError> {
+        check_range(field, value, -24.0, 24.0)?;
+        Ok(Self(value))
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    pub(crate) const fn new_const(value: f32) -> Self {
+        assert!(
+            value.is_finite() && value >= -24.0 && value <= 24.0,
+            "GainDb literal out of range"
+        );
+        Self(value)
+    }
+
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// A band's makeup gain in dB, range `-40.0..=40.0` (docs/contracts.md §1).
+///
+/// Only ever constructed from preset literals (ADR 0006); not CLI-configurable.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MakeupGainDb(f32);
+
+impl MakeupGainDb {
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    pub(crate) const fn new_const(value: f32) -> Self {
+        assert!(
+            value.is_finite() && value >= -40.0 && value <= 40.0,
+            "MakeupGainDb literal out of range"
+        );
+        Self(value)
+    }
+
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// A positive duration in milliseconds (docs/contracts.md §1).
+///
+/// Used for each band's base attack/release time at `time = 0.5`. Only ever
+/// constructed from preset literals (ADR 0006); not CLI-configurable.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositiveMs(f32);
+
+impl PositiveMs {
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    pub(crate) const fn new_const(value: f32) -> Self {
+        assert!(
+            value.is_finite() && value > 0.0,
+            "PositiveMs literal must be positive"
+        );
+        Self(value)
+    }
+
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
     }
 }
 
 /// Global parameters shared across all bands (docs/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalParams {
-    /// Pre-split gain in dB, range `-24.0..=24.0`.
-    pub input_gain_db: f32,
-    /// Post-sum gain in dB, range `-24.0..=24.0`.
-    pub output_gain_db: f32,
+    /// Pre-split gain in dB.
+    pub input_gain_db: GainDb,
+    /// Post-sum gain in dB.
+    pub output_gain_db: GainDb,
     /// Dry/wet mix.
     pub depth: UnitInterval,
     /// Attack/release time multiplier.
@@ -152,12 +266,12 @@ pub struct BandParams {
     pub up_amount: UnitInterval,
     /// Downward compression amount.
     pub down_amount: UnitInterval,
-    /// Makeup gain in dB, range `-40.0..=40.0`.
-    pub makeup_gain_db: f32,
-    /// Attack time in ms at `time = 0.5`, must be positive.
-    pub base_attack_ms: f32,
-    /// Release time in ms at `time = 0.5`, must be positive.
-    pub base_release_ms: f32,
+    /// Makeup gain in dB.
+    pub makeup_gain_db: MakeupGainDb,
+    /// Attack time in ms at `time = 0.5`.
+    pub base_attack_ms: PositiveMs,
+    /// Release time in ms at `time = 0.5`.
+    pub base_release_ms: PositiveMs,
 }
 
 /// All parameters used to construct or update an `OttProcessor`.
@@ -198,18 +312,6 @@ pub enum ConfigError {
         max: f32,
         /// The offending value.
         value: f32,
-    },
-    /// A band's `lower_threshold_db` was not less than its `upper_threshold_db`.
-    #[error(
-        "band {band}: lower_threshold_db ({lower}) must be less than upper_threshold_db ({upper})"
-    )]
-    ThresholdOrder {
-        /// Index of the offending band.
-        band: usize,
-        /// The band's `lower_threshold_db`.
-        lower: f32,
-        /// The band's `upper_threshold_db`.
-        upper: f32,
     },
     /// `high_crossover_hz` was less than one octave above `low_crossover_hz`.
     #[error(
@@ -263,20 +365,6 @@ fn check_range(field: &'static str, value: f32, min: f32, max: f32) -> Result<()
     }
 }
 
-fn check_positive(field: &'static str, value: f32) -> Result<(), ConfigError> {
-    check_finite(field, value)?;
-    if value > 0.0 {
-        Ok(())
-    } else {
-        Err(ConfigError::OutOfRange {
-            field,
-            min: f32::EPSILON,
-            max: f32::INFINITY,
-            value,
-        })
-    }
-}
-
 /// Validates the sample rate alone (docs/contracts.md §1).
 ///
 /// # Errors
@@ -291,54 +379,20 @@ pub fn validate_sample_rate(sample_rate: f32) -> Result<(), ConfigError> {
     }
 }
 
-impl BandParams {
-    fn validate(&self, band: usize) -> Result<(), ConfigError> {
-        self.thresholds.validate(band)?;
-        self.up_amount.validate("up_amount")?;
-        self.down_amount.validate("down_amount")?;
-        check_range("makeup_gain_db", self.makeup_gain_db, -40.0, 40.0)?;
-        check_positive("base_attack_ms", self.base_attack_ms)?;
-        check_positive("base_release_ms", self.base_release_ms)?;
-        Ok(())
-    }
-}
-
 impl OttParams {
-    /// Validates the sample-rate-independent ranges and invariants.
+    /// Validates the sample-rate-dependent Nyquist constraint.
     ///
-    /// Can be called before the sample rate that JACK will report is known,
-    /// e.g. at CLI startup.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ConfigError` if any field is out of range, non-finite, or
-    /// violates a cross-field invariant (docs/contracts.md §1).
-    pub fn validate_ranges(&self) -> Result<(), ConfigError> {
-        let g = &self.global;
-        check_range("input_gain_db", g.input_gain_db, -24.0, 24.0)?;
-        check_range("output_gain_db", g.output_gain_db, -24.0, 24.0)?;
-        g.depth.validate("depth")?;
-        g.time.validate("time")?;
-        g.upward.validate("upward")?;
-        g.downward.validate("downward")?;
-        g.crossovers.validate()?;
-
-        for (i, band) in self.bands.iter().enumerate() {
-            band.validate(i)?;
-        }
-
-        Ok(())
-    }
-
-    /// Full validation including the sample-rate-dependent Nyquist constraint (docs/contracts.md §1).
+    /// Every other invariant is guaranteed by construction: each field is a
+    /// value object that can only be built through its own validated
+    /// constructor (docs/contracts.md §1). This is the one check that needs
+    /// `sample_rate`, which isn't known until JACK reports it.
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError` if `sample_rate` is invalid, [`Self::validate_ranges`]
-    /// fails, or a crossover frequency exceeds the Nyquist-relative limit.
+    /// Returns `ConfigError` if `sample_rate` is invalid, or a crossover
+    /// frequency exceeds the Nyquist-relative limit.
     pub fn validate(&self, sample_rate: f32) -> Result<(), ConfigError> {
         validate_sample_rate(sample_rate)?;
-        self.validate_ranges()?;
 
         let nyquist_limit = CROSSOVER_NYQUIST_RATIO * sample_rate;
         let g = &self.global;
@@ -374,28 +428,28 @@ pub enum Preset {
 impl Preset {
     // Band values are fixed as a compatibility target for the `Default` preset, per ADR 0006.
     const LOW_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new(-35.0, -28.0),
-        up_amount: UnitInterval::new(0.800),
-        down_amount: UnitInterval::new(0.900),
-        makeup_gain_db: 16.3,
-        base_attack_ms: 2.8,
-        base_release_ms: 40.0,
+        thresholds: ThresholdRange::new_const(-35.0, -28.0),
+        up_amount: UnitInterval::new_const(0.800),
+        down_amount: UnitInterval::new_const(0.900),
+        makeup_gain_db: MakeupGainDb::new_const(16.3),
+        base_attack_ms: PositiveMs::new_const(2.8),
+        base_release_ms: PositiveMs::new_const(40.0),
     };
     const MID_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new(-36.0, -25.0),
-        up_amount: UnitInterval::new(0.800),
-        down_amount: UnitInterval::new(0.857),
-        makeup_gain_db: 11.7,
-        base_attack_ms: 1.4,
-        base_release_ms: 28.0,
+        thresholds: ThresholdRange::new_const(-36.0, -25.0),
+        up_amount: UnitInterval::new_const(0.800),
+        down_amount: UnitInterval::new_const(0.857),
+        makeup_gain_db: MakeupGainDb::new_const(11.7),
+        base_attack_ms: PositiveMs::new_const(1.4),
+        base_release_ms: PositiveMs::new_const(28.0),
     };
     const HIGH_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new(-35.0, -30.0),
-        up_amount: UnitInterval::new(0.800),
-        down_amount: UnitInterval::new(1.000),
-        makeup_gain_db: 16.3,
-        base_attack_ms: 0.7,
-        base_release_ms: 15.0,
+        thresholds: ThresholdRange::new_const(-35.0, -30.0),
+        up_amount: UnitInterval::new_const(0.800),
+        down_amount: UnitInterval::new_const(1.000),
+        makeup_gain_db: MakeupGainDb::new_const(16.3),
+        base_attack_ms: PositiveMs::new_const(0.7),
+        base_release_ms: PositiveMs::new_const(15.0),
     };
 
     const fn bands() -> [BandParams; 3] {
@@ -408,22 +462,22 @@ impl Preset {
         let bands = Self::bands();
         let global = match self {
             Self::SafeStart => GlobalParams {
-                input_gain_db: 0.0,
-                output_gain_db: -18.0,
-                depth: UnitInterval::new(0.5),
-                time: UnitInterval::new(0.5),
-                upward: UnitInterval::new(1.0),
-                downward: UnitInterval::new(1.0),
-                crossovers: CrossoverPair::new(120.0, 2500.0),
+                input_gain_db: GainDb::new_const(0.0),
+                output_gain_db: GainDb::new_const(-18.0),
+                depth: UnitInterval::new_const(0.5),
+                time: UnitInterval::new_const(0.5),
+                upward: UnitInterval::new_const(1.0),
+                downward: UnitInterval::new_const(1.0),
+                crossovers: CrossoverPair::new_const(120.0, 2500.0),
             },
             Self::Default => GlobalParams {
-                input_gain_db: 0.0,
-                output_gain_db: 0.0,
-                depth: UnitInterval::new(1.0),
-                time: UnitInterval::new(0.5),
-                upward: UnitInterval::new(1.0),
-                downward: UnitInterval::new(1.0),
-                crossovers: CrossoverPair::new(120.0, 2500.0),
+                input_gain_db: GainDb::new_const(0.0),
+                output_gain_db: GainDb::new_const(0.0),
+                depth: UnitInterval::new_const(1.0),
+                time: UnitInterval::new_const(0.5),
+                upward: UnitInterval::new_const(1.0),
+                downward: UnitInterval::new_const(1.0),
+                crossovers: CrossoverPair::new_const(120.0, 2500.0),
             },
         };
         OttParams { global, bands }
@@ -555,6 +609,13 @@ pub fn version_text() -> String {
 
 /// Interprets command-line arguments. Do not include `argv[0]`.
 ///
+/// Most fields are validated the moment their flag is parsed. The crossover
+/// pair is the one exception: `--low-crossover`/`--high-crossover` are
+/// independent flags that can appear in either order, and their octave-
+/// separation invariant can only be checked once both are known. Staging
+/// them as plain locals (rather than validating each flag against whatever
+/// the other currently holds) keeps the result independent of argument order.
+///
 /// # Errors
 ///
 /// Returns `CliError` for an unknown option, a missing or unparsable value,
@@ -566,6 +627,8 @@ where
 {
     let mut preset = Preset::default();
     let mut params = preset.params();
+    let mut low_hz = params.global.crossovers.low_hz();
+    let mut high_hz = params.global.crossovers.high_hz();
     let mut iter = args.into_iter().map(|s| s.as_ref().to_owned());
 
     while let Some(arg) = iter.next() {
@@ -581,46 +644,52 @@ where
                     value: value.clone(),
                 })?;
                 params = preset.params();
+                low_hz = params.global.crossovers.low_hz();
+                high_hz = params.global.crossovers.high_hz();
             }
             "--input-gain" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.input_gain_db = parse_f32(&name, &value)?;
+                let db = parse_f32(&name, &value)?;
+                params.global.input_gain_db = GainDb::new("input_gain_db", db)?;
             }
             "--output-gain" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.output_gain_db = parse_f32(&name, &value)?;
+                let db = parse_f32(&name, &value)?;
+                params.global.output_gain_db = GainDb::new("output_gain_db", db)?;
             }
             "--depth" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.depth = UnitInterval::new(parse_percent(&name, &value)?);
+                let raw = parse_percent(&name, &value)?;
+                params.global.depth = UnitInterval::new("depth", raw)?;
             }
             "--time" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.time = UnitInterval::new(parse_percent(&name, &value)?);
+                let raw = parse_percent(&name, &value)?;
+                params.global.time = UnitInterval::new("time", raw)?;
             }
             "--upward" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.upward = UnitInterval::new(parse_percent(&name, &value)?);
+                let raw = parse_percent(&name, &value)?;
+                params.global.upward = UnitInterval::new("upward", raw)?;
             }
             "--downward" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                params.global.downward = UnitInterval::new(parse_percent(&name, &value)?);
+                let raw = parse_percent(&name, &value)?;
+                params.global.downward = UnitInterval::new("downward", raw)?;
             }
             "--low-crossover" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                let hz = parse_f32(&name, &value)?;
-                params.global.crossovers = CrossoverPair::new(hz, params.global.crossovers.high_hz());
+                low_hz = parse_f32(&name, &value)?;
             }
             "--high-crossover" => {
                 let value = take_value(&name, inline, &mut iter)?;
-                let hz = parse_f32(&name, &value)?;
-                params.global.crossovers = CrossoverPair::new(params.global.crossovers.low_hz(), hz);
+                high_hz = parse_f32(&name, &value)?;
             }
             _ => return Err(CliError::UnknownOption(arg)),
         }
     }
 
-    params.validate_ranges()?;
+    params.global.crossovers = CrossoverPair::new(low_hz, high_hz)?;
     Ok(CliOutcome::Run(params))
 }
 
@@ -646,48 +715,43 @@ mod tests {
     }
 
     #[test]
-    fn rejects_nan_and_infinite() {
-        let mut params = Preset::SafeStart.params();
-        params.global.input_gain_db = f32::NAN;
+    fn gain_db_rejects_nan_and_infinite() {
         assert!(matches!(
-            params.validate_ranges(),
+            GainDb::new("input_gain_db", f32::NAN),
             Err(ConfigError::NotFinite { .. })
         ));
-
-        let mut params = Preset::SafeStart.params();
-        params.global.output_gain_db = f32::INFINITY;
         assert!(matches!(
-            params.validate_ranges(),
+            GainDb::new("output_gain_db", f32::INFINITY),
             Err(ConfigError::NotFinite { .. })
         ));
     }
 
     #[test]
-    fn rejects_out_of_range_gain() {
-        let mut params = Preset::SafeStart.params();
-        params.global.input_gain_db = 100.0;
+    fn gain_db_rejects_out_of_range() {
         assert!(matches!(
-            params.validate_ranges(),
+            GainDb::new("input_gain_db", 100.0),
             Err(ConfigError::OutOfRange { .. })
         ));
     }
 
     #[test]
-    fn rejects_inverted_thresholds() {
-        let mut params = Preset::SafeStart.params();
-        params.bands[BAND_LOW].thresholds = ThresholdRange::new(-10.0, -20.0);
+    fn unit_interval_rejects_out_of_range() {
         assert!(matches!(
-            params.validate_ranges(),
-            Err(ConfigError::ThresholdOrder { .. })
+            UnitInterval::new("depth", 1.5),
+            Err(ConfigError::OutOfRange { .. })
         ));
     }
 
     #[test]
-    fn rejects_crossover_less_than_one_octave_apart() {
-        let mut params = Preset::SafeStart.params();
-        params.global.crossovers = CrossoverPair::new(1000.0, 1500.0);
+    #[should_panic(expected = "ThresholdRange lower_db must be less than upper_db")]
+    fn threshold_range_new_const_rejects_inverted_thresholds() {
+        ThresholdRange::new_const(-10.0, -20.0);
+    }
+
+    #[test]
+    fn crossover_pair_rejects_less_than_one_octave_apart() {
         assert!(matches!(
-            params.validate_ranges(),
+            CrossoverPair::new(1000.0, 1500.0),
             Err(ConfigError::CrossoverOctave { .. })
         ));
     }
@@ -695,7 +759,8 @@ mod tests {
     #[test]
     fn rejects_crossover_above_nyquist_ratio() {
         let mut params = Preset::SafeStart.params();
-        params.global.crossovers = CrossoverPair::new(params.global.crossovers.low_hz(), 8000.0);
+        params.global.crossovers = CrossoverPair::new(params.global.crossovers.low_hz(), 8000.0)
+            .unwrap();
         // At 44.1kHz, 0.45*44100 = 19845Hz, so 8kHz is allowed, but confirm it
         // violates the Nyquist constraint near an 8kHz sample-rate boundary.
         assert!(params.validate(16_000.0).is_err());
@@ -723,10 +788,20 @@ mod tests {
             CliOutcome::Run(params) => {
                 assert_eq!(params.global.depth.get(), 0.75);
                 assert_eq!(params.global.crossovers.low_hz(), 100.0);
-                assert_eq!(params.global.output_gain_db, 0.0); // from `default` preset
+                assert_eq!(params.global.output_gain_db.get(), 0.0); // from `default` preset
             }
             _ => panic!("expected Run outcome"),
         }
+    }
+
+    #[test]
+    fn crossover_flags_are_order_independent() {
+        // low_hz=1900/high_hz=2500 (the SafeStart default) would violate the
+        // octave constraint, but high_hz=8000 fixes it. Staging both flags
+        // before validating means this succeeds regardless of flag order.
+        let a = parse_args(["--low-crossover", "1900", "--high-crossover", "8000"]).unwrap();
+        let b = parse_args(["--high-crossover", "8000", "--low-crossover", "1900"]).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]
@@ -769,7 +844,7 @@ mod tests {
     fn individual_options_override_preset() {
         let outcome = parse_args(["--preset", "default", "--output-gain", "-6"]).unwrap();
         match outcome {
-            CliOutcome::Run(params) => assert_eq!(params.global.output_gain_db, -6.0),
+            CliOutcome::Run(params) => assert_eq!(params.global.output_gain_db.get(), -6.0),
             _ => panic!("expected Run outcome"),
         }
     }
