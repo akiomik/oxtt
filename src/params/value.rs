@@ -310,9 +310,17 @@ mod tests {
 
     #[test]
     fn io_gain_error_message_is_descriptive() {
-        let err = IoGain::try_new(100.0).unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains("IoGain"), "error message was: {message}");
+        assert!(
+            IoGainError::GreaterOrEqualViolated
+                .to_string()
+                .contains("IoGain")
+        );
+        assert!(
+            IoGainError::LessOrEqualViolated
+                .to_string()
+                .contains("IoGain")
+        );
+        assert!(IoGainError::FiniteViolated.to_string().contains("IoGain"));
     }
 
     #[test]
