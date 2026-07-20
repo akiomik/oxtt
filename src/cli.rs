@@ -66,37 +66,17 @@ impl From<Cli> for OttParams {
     fn from(cli: Cli) -> Self {
         let mut params = cli.preset.params();
 
-        if let Some(input_gain) = cli.input_gain {
-            params.global.input_gain_db = input_gain;
-        }
-
-        if let Some(output_gain) = cli.output_gain {
-            params.global.output_gain_db = output_gain;
-        }
-
-        if let Some(depth) = cli.depth {
-            params.global.depth = depth;
-        }
-
-        if let Some(time) = cli.time {
-            params.global.time = time;
-        }
-
-        if let Some(upward) = cli.upward {
-            params.global.upward = upward;
-        }
-
-        if let Some(downward) = cli.downward {
-            params.global.downward = downward;
-        }
-
-        if let Some(low_crossover) = cli.low_crossover {
-            params.global.low_crossover_hz = low_crossover;
-        }
-
-        if let Some(high_crossover) = cli.high_crossover {
-            params.global.high_crossover_hz = high_crossover;
-        }
+        params.global.input_gain_db = cli.input_gain.unwrap_or(params.global.input_gain_db);
+        params.global.output_gain_db = cli.output_gain.unwrap_or(params.global.output_gain_db);
+        params.global.depth = cli.depth.unwrap_or(params.global.depth);
+        params.global.time = cli.time.unwrap_or(params.global.time);
+        params.global.upward = cli.upward.unwrap_or(params.global.upward);
+        params.global.downward = cli.downward.unwrap_or(params.global.downward);
+        params.global.low_crossover_hz =
+            cli.low_crossover.unwrap_or(params.global.low_crossover_hz);
+        params.global.high_crossover_hz = cli
+            .high_crossover
+            .unwrap_or(params.global.high_crossover_hz);
 
         params
     }
