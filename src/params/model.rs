@@ -1,5 +1,7 @@
 //! The parameter aggregates passed to `OttProcessor` (docs/contracts.md §1).
 
+use crate::bands::Bands;
+
 use super::error::ConfigError;
 use super::value::{IoGain, MakeupGain, NormalizedF32, PositiveF32, SampleRate, Threshold};
 use super::{CrossoverFreqHigh, CrossoverFreqLow};
@@ -167,16 +169,9 @@ pub struct BandParams {
 pub struct OttParams {
     /// Parameters shared across all bands.
     pub global: GlobalParams,
-    /// Per-band parameters, indexed by `BAND_LOW`/`BAND_MID`/`BAND_HIGH`.
-    pub bands: [BandParams; 3],
+    /// Per-band parameters.
+    pub bands: Bands<BandParams>,
 }
-
-/// Index of the low band within `OttParams::bands`.
-pub const BAND_LOW: usize = 0;
-/// Index of the mid band within `OttParams::bands`.
-pub const BAND_MID: usize = 1;
-/// Index of the high band within `OttParams::bands`.
-pub const BAND_HIGH: usize = 2;
 
 impl OttParams {
     /// Validates the one invariant that no value object can express on its own:

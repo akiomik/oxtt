@@ -1,7 +1,7 @@
 //! 4th-order Linkwitz-Riley crossover and the low branch's phase compensator (ADR 0001).
 
+use crate::bands::Bands;
 use crate::dsp::smooth::LogSmoothed;
-use crate::params::{BAND_HIGH, BAND_LOW, BAND_MID};
 use std::f32::consts::{FRAC_1_SQRT_2, PI};
 
 /// Defensive floor for cutoff values fed into biquad coefficient computation.
@@ -154,18 +154,14 @@ impl ChannelSplitter {
     }
 
     #[inline]
-    fn process(&mut self, x: f32) -> [f32; 3] {
+    fn process(&mut self, x: f32) -> Bands<f32> {
         let low_raw = self.low_split_lp.process(x);
         let upper = self.low_split_hp.process(x);
         let mid = self.high_split_lp.process(upper);
         let high = self.high_split_hp.process(upper);
         let low = self.phase_comp_lp.process(low_raw) + self.phase_comp_hp.process(low_raw);
 
-        let mut bands = [0.0; 3];
-        bands[BAND_LOW] = low;
-        bands[BAND_MID] = mid;
-        bands[BAND_HIGH] = high;
-        bands
+        Bands { low, mid, high }
     }
 
     const fn is_finite(&self) -> bool {
@@ -217,7 +213,7 @@ impl Crossover {
 
     /// Processes one frame. L and R both use the same smoothed cutoff (ADR 0001).
     #[inline]
-    pub fn process_frame(&mut self, left_in: f32, right_in: f32) -> ([f32; 3], [f32; 3]) {
+    pub fn process_frame(&mut self, left_in: f32, right_in: f32) -> (Bands<f32>, Bands<f32>) {
         let low_hz = self.low_freq.tick_hz();
         let high_hz = self.high_freq.tick_hz();
         self.left.set_cutoffs(low_hz, high_hz, self.sample_rate);
@@ -294,7 +290,7 @@ mod tests {
             let gain_db = measure_gain_db(
                 |x| {
                     let (l, _r) = c.process_frame(x, x);
-                    l[BAND_LOW] + l[BAND_MID] + l[BAND_HIGH]
+                    l.low + l.mid + l.high
                 },
                 freq,
                 sample_rate,
@@ -358,7 +354,7 @@ mod tests {
         for n in 0..10_000 {
             let x = if n == 0 { 1.0 } else { 0.0 };
             let (l, _r) = c.process_frame(x, x);
-            let sum = l[BAND_LOW] + l[BAND_MID] + l[BAND_HIGH];
+            let sum = l.low + l.mid + l.high;
             assert!(sum.is_finite(), "sample {n} produced non-finite output");
             last_sum = sum;
         }
@@ -432,7 +428,7 @@ mod tests {
             }
             let x = ((n as f32) * 0.05).sin();
             let (l, _r) = c.process_frame(x, x);
-            let sum = l[BAND_LOW] + l[BAND_MID] + l[BAND_HIGH];
+            let sum = l.low + l.mid + l.high;
 
             // If A_low(z)*A_high(z) stays at 1 even while the cutoff is changing,
             // unprocessed reconstruction should simply track the input itself, so

@@ -2,6 +2,8 @@
 
 use clap::ValueEnum;
 
+use crate::bands::Bands;
+
 use super::model::{BandParams, CrossoverSplit, GlobalParams, OttParams, ThresholdRange};
 use super::value::{
     CrossoverFreqHigh, CrossoverFreqLow, IoGain, MakeupGain, NormalizedF32, PositiveF32, Threshold,
@@ -53,8 +55,12 @@ impl Preset {
         base_release_ms: PositiveF32::new_const(15.0),
     };
 
-    const fn bands() -> [BandParams; 3] {
-        [Self::LOW_BAND, Self::MID_BAND, Self::HIGH_BAND]
+    const fn bands() -> Bands<BandParams> {
+        Bands {
+            low: Self::LOW_BAND,
+            mid: Self::MID_BAND,
+            high: Self::HIGH_BAND,
+        }
     }
 
     /// Returns the complete parameters for this preset.

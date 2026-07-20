@@ -7,9 +7,8 @@ pub mod smooth;
 
 use thiserror::Error;
 
-use crate::params::{
-    BAND_HIGH, BAND_LOW, BAND_MID, BandParams, ConfigError, GlobalParams, OttParams,
-};
+use crate::bands::Bands;
+use crate::params::{BandParams, ConfigError, GlobalParams, OttParams};
 use compressor::{BandDynamics, DualThresholdCompressor, effective_amount};
 use crossover::Crossover;
 use envelope::{attack_release_ms, detector_power};
@@ -197,7 +196,7 @@ pub struct OttProcessor {
     target_params: OttParams,
     global: GlobalRuntime,
     crossover: Crossover,
-    bands: [BandProcessor; 3],
+    bands: Bands<BandProcessor>,
 }
 
 impl OttProcessor {
@@ -218,11 +217,11 @@ impl OttProcessor {
             params.global.crossover.low_hz().get(),
             params.global.crossover.high_hz().get(),
         );
-        let bands = [
-            BandProcessor::new(&params.bands[BAND_LOW], sample_rate),
-            BandProcessor::new(&params.bands[BAND_MID], sample_rate),
-            BandProcessor::new(&params.bands[BAND_HIGH], sample_rate),
-        ];
+        let bands = Bands {
+            low: BandProcessor::new(&params.bands.low, sample_rate),
+            mid: BandProcessor::new(&params.bands.mid, sample_rate),
+            high: BandProcessor::new(&params.bands.high, sample_rate),
+        };
         Self {
             sample_rate,
             target_params: params,
@@ -426,7 +425,7 @@ mod processor_tests {
         for i in 0..n {
             let x = input[i] * input_gain;
             let (l, _r) = reference.process_frame(x, x);
-            let expected = (l[BAND_LOW] + l[BAND_MID] + l[BAND_HIGH]) * output_gain;
+            let expected = (l.low + l.mid + l.high) * output_gain;
             assert!(
                 (out_l[i] - expected).abs() < 1e-4,
                 "sample {i}: got {}, expected {expected}",
@@ -441,7 +440,7 @@ mod processor_tests {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
         params.global.upward = NormalizedF32::new_const(0.0);
-        for band in &mut params.bands {
+        for band in params.bands.iter_mut() {
             band.makeup_gain_db = ZERO_MAKEUP_GAIN;
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
@@ -469,7 +468,7 @@ mod processor_tests {
         let sample_rate = 48_000.0;
         let mut params = Preset::Default.params();
         params.global.downward = NormalizedF32::new_const(0.0);
-        for band in &mut params.bands {
+        for band in params.bands.iter_mut() {
             band.makeup_gain_db = ZERO_MAKEUP_GAIN;
         }
         let mut proc = OttProcessor::new(sample_rate, params).unwrap();
@@ -609,7 +608,7 @@ mod processor_tests {
         let settle = n / 2;
         let output_rms = rms(&out_l[settle..]);
         let makeup_only_rms =
-            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db.get());
+            rms(&input[settle..]) * db_to_amp(params.bands.mid.makeup_gain_db.get());
 
         assert!(
             output_rms > makeup_only_rms * 1.05,
@@ -636,7 +635,7 @@ mod processor_tests {
         let settle = n / 2;
         let output_rms = rms(&out_l[settle..]);
         let makeup_only_rms =
-            rms(&input[settle..]) * db_to_amp(params.bands[BAND_MID].makeup_gain_db.get());
+            rms(&input[settle..]) * db_to_amp(params.bands.mid.makeup_gain_db.get());
 
         assert!(
             output_rms < makeup_only_rms * 0.95,
