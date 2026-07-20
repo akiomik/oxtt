@@ -7,7 +7,13 @@ use oxtt::{cli::Cli, jack_host, params::OttParams};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let params: OttParams = cli.into();
+    let params = match OttParams::try_from(cli) {
+        Ok(params) => params,
+        Err(e) => {
+            eprintln!("oxtt: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     match jack_host::run(params) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

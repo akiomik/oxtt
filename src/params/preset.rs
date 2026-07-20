@@ -2,7 +2,7 @@
 
 use clap::ValueEnum;
 
-use super::model::{BandParams, GlobalParams, OttParams};
+use super::model::{BandParams, CrossoverSplit, GlobalParams, OttParams, ThresholdRange};
 use super::value::{
     CrossoverFreqHigh, CrossoverFreqLow, IoGain, MakeupGain, NormalizedF32, PositiveF32, Threshold,
 };
@@ -20,8 +20,10 @@ pub enum Preset {
 impl Preset {
     // Band values are fixed as a compatibility target for the `Default` preset, per ADR 0006.
     const LOW_BAND: BandParams = BandParams {
-        lower_threshold_db: Threshold::new_const(-35.0),
-        upper_threshold_db: Threshold::new_const(-28.0),
+        thresholds: ThresholdRange::new_const(
+            Threshold::new_const(-35.0),
+            Threshold::new_const(-28.0),
+        ),
         up_amount: NormalizedF32::new_const(0.800),
         down_amount: NormalizedF32::new_const(0.900),
         makeup_gain_db: MakeupGain::new_const(16.3),
@@ -29,8 +31,10 @@ impl Preset {
         base_release_ms: PositiveF32::new_const(40.0),
     };
     const MID_BAND: BandParams = BandParams {
-        lower_threshold_db: Threshold::new_const(-36.0),
-        upper_threshold_db: Threshold::new_const(-25.0),
+        thresholds: ThresholdRange::new_const(
+            Threshold::new_const(-36.0),
+            Threshold::new_const(-25.0),
+        ),
         up_amount: NormalizedF32::new_const(0.800),
         down_amount: NormalizedF32::new_const(0.857),
         makeup_gain_db: MakeupGain::new_const(11.7),
@@ -38,8 +42,10 @@ impl Preset {
         base_release_ms: PositiveF32::new_const(28.0),
     };
     const HIGH_BAND: BandParams = BandParams {
-        lower_threshold_db: Threshold::new_const(-35.0),
-        upper_threshold_db: Threshold::new_const(-30.0),
+        thresholds: ThresholdRange::new_const(
+            Threshold::new_const(-35.0),
+            Threshold::new_const(-30.0),
+        ),
         up_amount: NormalizedF32::new_const(0.800),
         down_amount: NormalizedF32::new_const(1.000),
         makeup_gain_db: MakeupGain::new_const(16.3),
@@ -63,8 +69,10 @@ impl Preset {
                 time: NormalizedF32::new_const(0.5),
                 upward: NormalizedF32::new_const(1.0),
                 downward: NormalizedF32::new_const(1.0),
-                low_crossover_hz: CrossoverFreqLow::new_const(120.0),
-                high_crossover_hz: CrossoverFreqHigh::new_const(2500.0),
+                crossover: CrossoverSplit::new_const(
+                    CrossoverFreqLow::new_const(120.0),
+                    CrossoverFreqHigh::new_const(2500.0),
+                ),
             },
             Self::Default => GlobalParams {
                 input_gain_db: IoGain::new_const(0.0),
@@ -73,8 +81,10 @@ impl Preset {
                 time: NormalizedF32::new_const(0.5),
                 upward: NormalizedF32::new_const(1.0),
                 downward: NormalizedF32::new_const(1.0),
-                low_crossover_hz: CrossoverFreqLow::new_const(120.0),
-                high_crossover_hz: CrossoverFreqHigh::new_const(2500.0),
+                crossover: CrossoverSplit::new_const(
+                    CrossoverFreqLow::new_const(120.0),
+                    CrossoverFreqHigh::new_const(2500.0),
+                ),
             },
         };
         OttParams { global, bands }

@@ -3,7 +3,8 @@
 use clap::Parser;
 
 use crate::params::{
-    CrossoverFreqHigh, CrossoverFreqLow, IoGain, NormalizedF32, OttParams, Preset,
+    ConfigError, CrossoverFreqHigh, CrossoverFreqLow, CrossoverSplit, IoGain, NormalizedF32,
+    OttParams, Preset,
 };
 
 /// Command-line arguments for `oxtt`, a 3-band upward/downward multiband
@@ -54,16 +55,17 @@ pub struct Cli {
     pub high_crossover: Option<CrossoverFreqHigh>,
 }
 
-// FIXME: This conversion does not call `OttParams::validate`, so cross-field
-// invariants (crossover octave separation, threshold ordering) aren't
-// enforced here (see `from_cli_does_not_enforce_crossover_octave_separation`
-// below). The only current caller reaches `OttParams::validate` indirectly
-// through `OttProcessor::new` in `jack_host::run`, after a JACK client has
-// already connected and registered ports — so a purely input-level error
-// isn't reported until JACK is contacted. Known design gap; revisit whether
-// this conversion (or `main.rs`) should validate what it can before that.
-impl From<Cli> for OttParams {
-    fn from(cli: Cli) -> Self {
+/// Crossover octave separation is checked here, immediately after parsing
+/// and before JACK is ever contacted: `CrossoverSplit::try_new` cannot
+/// produce an invalid pair, so this is the earliest point the invariant can
+/// be enforced. The Nyquist-relative crossover limit is not checked here —
+/// it additionally needs the sample rate, which isn't known until JACK
+/// reports it, so `OttParams::validate` is reached later, indirectly,
+/// through `OttProcessor::new` in `jack_host::run`.
+impl TryFrom<Cli> for OttParams {
+    type Error = ConfigError;
+
+    fn try_from(cli: Cli) -> Result<Self, ConfigError> {
         let mut params = cli.preset.params();
 
         params.global.input_gain_db = cli.input_gain.unwrap_or(params.global.input_gain_db);
@@ -72,13 +74,16 @@ impl From<Cli> for OttParams {
         params.global.time = cli.time.unwrap_or(params.global.time);
         params.global.upward = cli.upward.unwrap_or(params.global.upward);
         params.global.downward = cli.downward.unwrap_or(params.global.downward);
-        params.global.low_crossover_hz =
-            cli.low_crossover.unwrap_or(params.global.low_crossover_hz);
-        params.global.high_crossover_hz = cli
-            .high_crossover
-            .unwrap_or(params.global.high_crossover_hz);
 
-        params
+        let low_crossover_hz = cli
+            .low_crossover
+            .unwrap_or_else(|| params.global.crossover.low_hz());
+        let high_crossover_hz = cli
+            .high_crossover
+            .unwrap_or_else(|| params.global.crossover.high_hz());
+        params.global.crossover = CrossoverSplit::try_new(low_crossover_hz, high_crossover_hz)?;
+
+        Ok(params)
     }
 }
 
@@ -90,21 +95,21 @@ mod tests {
     #[test]
     fn unset_options_fall_back_to_preset() {
         let cli = Cli::parse_from(["oxtt", "--preset", "safe-start"]);
-        let params: OttParams = cli.into();
+        let params = OttParams::try_from(cli).unwrap();
         assert_eq!(params, Preset::SafeStart.params());
     }
 
     #[test]
     fn individual_options_override_preset() {
         let cli = Cli::parse_from(["oxtt", "--preset", "default", "--output-gain", "-6"]);
-        let params: OttParams = cli.into();
+        let params = OttParams::try_from(cli).unwrap();
         assert_eq!(params.global.output_gain_db.get(), -6.0);
     }
 
     #[test]
     fn input_gain_and_output_gain_are_independent() {
         let cli = Cli::parse_from(["oxtt", "--preset", "default", "--input-gain", "3"]);
-        let params: OttParams = cli.into();
+        let params = OttParams::try_from(cli).unwrap();
         assert_eq!(params.global.input_gain_db.get(), 3.0);
         assert_eq!(
             params.global.output_gain_db.get(),
@@ -116,11 +121,11 @@ mod tests {
     fn crossover_options_apply_regardless_of_flag_order() {
         let a = Cli::parse_from(["oxtt", "--low-crossover", "150", "--high-crossover", "3000"]);
         let b = Cli::parse_from(["oxtt", "--high-crossover", "3000", "--low-crossover", "150"]);
-        let params_a: OttParams = a.into();
-        let params_b: OttParams = b.into();
+        let params_a = OttParams::try_from(a).unwrap();
+        let params_b = OttParams::try_from(b).unwrap();
         assert_eq!(params_a, params_b);
-        assert_eq!(params_a.global.low_crossover_hz.get(), 150.0);
-        assert_eq!(params_a.global.high_crossover_hz.get(), 3000.0);
+        assert_eq!(params_a.global.crossover.low_hz().get(), 150.0);
+        assert_eq!(params_a.global.crossover.high_hz().get(), 3000.0);
     }
 
     #[test]
@@ -131,11 +136,11 @@ mod tests {
     }
 
     #[test]
-    fn from_cli_does_not_enforce_crossover_octave_separation() {
-        // Single-field ranges are checked at parse time, but the octave
-        // separation between low/high crossover spans two fields and is
-        // enforced later by `OttParams::validate` (docs/contracts.md §1),
-        // not by this conversion.
+    fn try_from_cli_enforces_crossover_octave_separation_before_jack_is_contacted() {
+        // Single-field ranges are checked at parse time; the octave
+        // separation between low/high crossover spans two fields but no
+        // longer needs the sample rate, so it's enforced right here too,
+        // before `main` ever touches JACK (docs/contracts.md §1).
         let cli = Cli::parse_from([
             "oxtt",
             "--low-crossover",
@@ -143,7 +148,9 @@ mod tests {
             "--high-crossover",
             "1500",
         ]);
-        let params: OttParams = cli.into();
-        assert!(params.validate(48_000.0).is_err());
+        assert!(matches!(
+            OttParams::try_from(cli),
+            Err(ConfigError::CrossoverOctave { .. })
+        ));
     }
 }

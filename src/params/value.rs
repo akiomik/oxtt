@@ -263,6 +263,31 @@ impl MakeupGain {
     }
 }
 
+/// Lower bound of the allowed sample rate range (docs/contracts.md §1).
+const MIN_SAMPLE_RATE_HZ: f32 = 8_000.0;
+/// Upper bound of the allowed sample rate range (docs/contracts.md §1).
+const MAX_SAMPLE_RATE_HZ: f32 = 384_000.0;
+
+/// A sample rate in Hz, range `8_000.0..=384_000.0` (docs/contracts.md §1).
+///
+/// Not CLI-configurable: JACK assigns this at connection time and can
+/// change it mid-session, so the only caller is `OttParams::validate`.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = MIN_SAMPLE_RATE_HZ, less_or_equal = MAX_SAMPLE_RATE_HZ),
+    constructor(visibility = pub(crate)),
+    derive(Debug, Clone, Copy, PartialEq)
+)]
+pub(crate) struct SampleRate(f32);
+
+impl SampleRate {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub(crate) const fn get(self) -> f32 {
+        self.into_inner()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::float_cmp)]
 mod tests {
@@ -321,6 +346,14 @@ mod tests {
         assert!(Threshold::try_new(0.1).is_err());
         assert!(Threshold::try_new(-80.0).is_ok());
         assert!(Threshold::try_new(0.0).is_ok());
+    }
+
+    #[test]
+    fn sample_rate_rejects_out_of_range_and_non_finite() {
+        assert!(SampleRate::try_new(1_000.0).is_err());
+        assert!(SampleRate::try_new(500_000.0).is_err());
+        assert!(SampleRate::try_new(f32::NAN).is_err());
+        assert!(SampleRate::try_new(48_000.0).is_ok());
     }
 
     #[test]
