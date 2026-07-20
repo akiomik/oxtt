@@ -388,13 +388,11 @@ mod unit_tests {
 #[cfg(test)]
 // These tests compare exact deterministic values (verbatim inputs, buffer
 // equality across chunkings) and cast sample counts that stay well within
-// f32/f64's exact range, so unwrap/panic/float_cmp/cast noise here is
-// expected. `vec!` is fine in tests; the real-time-callback contract
+// f32/f64's exact range, so unwrap/cast noise here is expected.
+// `vec!` is fine in tests; the real-time-callback contract
 // (docs/contracts.md §6) only applies to the DSP/audio-callback path.
 #[allow(
     clippy::unwrap_used,
-    clippy::panic,
-    clippy::float_cmp,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
