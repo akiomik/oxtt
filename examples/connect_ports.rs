@@ -2,6 +2,10 @@
 //!
 //! Lets JACK smoke tests be automated even in development environments where
 //! CLI tools like `jack_connect` aren't available. Depends only on the `jack` crate.
+//!
+//! Not on the real-time audio callback path, so the callback contract's
+//! no-I/O rule (docs/contracts.md §6) doesn't apply to `eprintln!` here.
+#![allow(clippy::disallowed_macros)]
 
 use std::env;
 use std::process::ExitCode;

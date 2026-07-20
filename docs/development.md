@@ -25,6 +25,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
+Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` panic-free (docs/contracts.md §6); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+
 The suite is organized by module and none of it requires a running JACK server:
 
 - `src/cli.rs` — CLI argument parsing

@@ -16,6 +16,19 @@ nutype = "0.7.0"
 signal-hook = "0.4"
 thiserror = "2"
 
+[dev-dependencies]
+no-panic = "0.1"
+
+# A single codegen unit lets LLVM inline and optimize across the whole crate,
+# which `OttProcessor::process`/`reset`'s `#[no_panic]` proof
+# (docs/contracts.md §6) needs to eliminate their panic paths (e.g. slice
+# bounds checks) at `cargo test --release` time; the default of several
+# parallel codegen units isn't aggressive enough for that proof to go
+# through. Real release builds benefit the same way (better inlining across
+# the real-time DSP path), just with a slower build.
+[profile.release]
+codegen-units = 1
+
 [lints.rust]
 missing_docs = "warn"
 
@@ -30,6 +43,9 @@ suspicious = { level = "warn", priority = -1 }
 
 absolute_paths = "warn"
 cognitive_complexity = "warn"
+disallowed_macros = "warn"
+disallowed_methods = "warn"
+disallowed_types = "warn"
 exit = "warn"
 expect_used = "allow"
 missing_assert_message = "warn"

@@ -16,7 +16,12 @@ const Q_BUTTERWORTH: f32 = FRAC_1_SQRT_2;
 
 fn clamp_cutoff(cutoff_hz: f32, sample_rate: f32) -> f32 {
     let max_hz = (NYQUIST_RATIO * sample_rate).max(MIN_CUTOFF_HZ);
-    cutoff_hz.clamp(MIN_CUTOFF_HZ, max_hz)
+    // `f32::clamp` asserts `min <= max`; `max_hz` is runtime-computed, so the
+    // optimizer can't prove that bound and treats the assert as reachable
+    // (breaks the no-panic proof on `OttProcessor::process`/`reset`, docs/contracts.md
+    // §6). `max` and `min` chained have the same behavior here (max_hz is
+    // always >= MIN_CUTOFF_HZ by construction above) without the assert.
+    cutoff_hz.max(MIN_CUTOFF_HZ).min(max_hz)
 }
 
 /// Second-order biquad coefficients from the RBJ cookbook formulas (`b0,b1,b2,a1,a2`, normalized by `a0`).

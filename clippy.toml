@@ -1,0 +1,39 @@
+# Machine-checked half of the real-time callback contract (docs/contracts.md
+# §6): `AudioProcessHandler::process` and everything it calls transitively
+# must not allocate/free heap memory, lock, perform I/O, spawn/sleep a
+# thread, or panic. Lints alone can't prove the last one (see the `no_panic`
+# attribute on `AudioProcessHandler::process` for that), but they catch the
+# rest at every call site, not just the ones a reviewer happens to notice.
+#
+# These lists apply crate-wide because clippy.toml has no per-module scoping;
+# code outside the real-time path that legitimately needs one of these
+# (`jack_host::run`'s setup/shutdown loop, `main`'s top-level error
+# reporting, tests) carries a local `#[allow(...)]` explaining why.
+
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "spawns a thread; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::thread::sleep", reason = "blocks/sleeps; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::sync::mpsc::Receiver::recv", reason = "blocking recv; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "blocking recv; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::fs::File::open", reason = "file I/O; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::fs::File::create", reason = "file I/O; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::fs::read", reason = "file I/O; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::fs::write", reason = "file I/O; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::io::stdout", reason = "writes to stdout; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::io::stderr", reason = "writes to stderr; prohibited on the real-time callback path (docs/contracts.md §6)" },
+]
+
+disallowed-types = [
+    { path = "std::sync::Mutex", reason = "blocking lock; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::sync::RwLock", reason = "blocking lock; prohibited on the real-time callback path (docs/contracts.md §6)" },
+]
+
+disallowed-macros = [
+    { path = "std::vec", reason = "heap-allocates; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::format", reason = "heap-allocates; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::print", reason = "writes to stdout; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::println", reason = "writes to stdout; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::eprint", reason = "writes to stderr; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::eprintln", reason = "writes to stderr; prohibited on the real-time callback path (docs/contracts.md §6)" },
+    { path = "std::dbg", reason = "writes to stderr; prohibited on the real-time callback path (docs/contracts.md §6)" },
+]

@@ -38,6 +38,8 @@ jobs:
         run: cargo test --all-targets --locked
       - name: cargo build --release
         run: cargo build --release --locked
+      - name: cargo test --release (no-panic proof, docs/contracts.md §6)
+        run: cargo test --release --locked
 
   msrv:
     name: MSRV (1.85.0)

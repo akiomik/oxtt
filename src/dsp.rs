@@ -241,6 +241,9 @@ impl OttProcessor {
     ///
     /// Returns `ConfigError` if `sample_rate` fails validation against the
     /// currently held target parameters (docs/contracts.md §1).
+    // Proves this function can never panic (docs/contracts.md §6); see the
+    // note on `process` above.
+    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn reset(&mut self, sample_rate: f32) -> Result<(), ConfigError> {
         self.target_params.validate(sample_rate)?;
         *self = Self::new_unchecked(sample_rate, self.target_params);
@@ -273,6 +276,11 @@ impl OttProcessor {
     ///
     /// Returns `ProcessError::BufferLengthMismatch` if `input_l`, `input_r`,
     /// `output_l`, and `output_r` don't all have the same length.
+    // Proves this function can never panic (docs/contracts.md §6), checked by
+    // `cargo test --release` (the proof only holds under optimization; see
+    // the `no-panic` crate's docs). Existing tests in `processor_tests`
+    // already call this, so no separate proof-only test is needed.
+    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn process(
         &mut self,
         input_l: &[f32],
@@ -285,10 +293,16 @@ impl OttProcessor {
             return Err(ProcessError::BufferLengthMismatch);
         }
 
-        for i in 0..len {
-            let (l, r) = self.process_frame(input_l[i], input_r[i]);
-            output_l[i] = l;
-            output_r[i] = r;
+        // Iterator-based rather than indexed: bounds checks on 4 independently-
+        // indexed slices aren't reliably provable away even once lengths are
+        // known equal, which breaks the no-panic proof (docs/contracts.md §6).
+        // Zipped iterators can't go out of bounds by construction.
+        let inputs = input_l.iter().zip(input_r.iter());
+        let outputs = output_l.iter_mut().zip(output_r.iter_mut());
+        for ((&l_in, &r_in), (out_l, out_r)) in inputs.zip(outputs) {
+            let (l, r) = self.process_frame(l_in, r_in);
+            *out_l = l;
+            *out_r = r;
         }
         Ok(())
     }
@@ -374,7 +388,9 @@ mod unit_tests {
 #[cfg(test)]
 // These tests compare exact deterministic values (verbatim inputs, buffer
 // equality across chunkings) and cast sample counts that stay well within
-// f32/f64's exact range, so unwrap/panic/float_cmp/cast noise here is expected.
+// f32/f64's exact range, so unwrap/panic/float_cmp/cast noise here is
+// expected. `vec!` is fine in tests; the real-time-callback contract
+// (docs/contracts.md §6) only applies to the DSP/audio-callback path.
 #[allow(
     clippy::unwrap_used,
     clippy::panic,
@@ -382,7 +398,8 @@ mod unit_tests {
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::similar_names
+    clippy::similar_names,
+    clippy::disallowed_macros
 )]
 mod processor_tests {
     use super::*;

@@ -149,6 +149,9 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
     let active_client = client.activate_async(notifications, process_handler)?;
 
     while !shutdown_requested.load(Ordering::Acquire) {
+        // Main thread's shutdown-poll loop, not the audio callback: the
+        // real-time callback contract (docs/contracts.md §6) doesn't apply here.
+        #[allow(clippy::disallowed_methods)]
         thread::sleep(Duration::from_millis(50));
     }
 

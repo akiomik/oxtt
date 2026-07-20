@@ -105,7 +105,12 @@ Verified by:
 
 Cross-thread communication into or out of the callback (JACK shutdown, sample-rate change, and any future control-surface parameter updates) MUST use only lock-free primitives: `Arc<AtomicBool>` / `Arc<AtomicU32>` today, and a bounded non-blocking queue for full parameter snapshots in a future control thread.
 
-There is no automated test for this contract today; it is enforced by code review and by the absence of `Mutex`, heap-allocating calls, and I/O calls on the `process` path in `src/jack_host.rs` and `src/dsp/`. `cargo clippy --all-targets -- -D warnings` catches some violations (e.g. some blocking patterns) but not all (e.g. allocation that clippy does not flag by default).
+Machine-checked in two ways:
+
+- `clippy.toml`'s `disallowed-methods`/`disallowed-types`/`disallowed-macros` ban the specific heap-allocating, locking, sleeping/spawning, and I/O calls named above (`cargo clippy --all-targets -- -D warnings`, run in CI). This applies crate-wide, since clippy has no way to scope a lint to one module; call sites outside the real-time path that legitimately need one of these (`jack_host::run`'s shutdown-poll loop, `main`'s top-level error reporting, tests) carry a local `#[allow(...)]` explaining why.
+- `OttProcessor::process` and `OttProcessor::reset` (`src/dsp.rs`) each carry a `#[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]`, which fails the build if the optimizer can't prove the function panic-free. This only proves the "panic or unwind" line for the two functions named, not for `AudioProcessHandler::process` itself (which takes a `jack::ProcessScope` that can't be constructed outside a live JACK callback, so it isn't feasible to exercise directly in a test) — that thin wrapper is still enforced by review only. The proof requires whole-crate optimization (`[profile.release] codegen-units = 1`) and only runs under `cargo test --release` (`cargo test`'s debug build always looks panic-possible, since overflow checks and unoptimized bounds checks are on); this is a separate CI step from plain `cargo test`.
+
+Nothing yet checks "runs in time proportional to sample count" or blocking patterns clippy doesn't recognize (e.g. allocation inside a dependency clippy can't see into) — those two remain code-review-only.
 
 ## 7. JACK Host Lifecycle Contract
 

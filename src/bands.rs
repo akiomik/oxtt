@@ -32,6 +32,9 @@ impl<T> Bands<T> {
 }
 
 #[cfg(test)]
+// `vec!` is fine in tests; the real-time-callback contract (docs/contracts.md
+// §6) only applies to the DSP/audio-callback path.
+#[allow(clippy::disallowed_macros)]
 mod tests {
     use super::*;
 
