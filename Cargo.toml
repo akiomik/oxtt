@@ -12,6 +12,7 @@ categories = ["multimedia::audio"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 jack = "0.13"
+nutype = "0.7.0"
 signal-hook = "0.4"
 thiserror = "2"
 

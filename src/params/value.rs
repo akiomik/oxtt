@@ -1,216 +1,265 @@
 //! Value objects for individual parameter fields (docs/contracts.md §1).
 //!
-//! Each type exposes at most two constructors:
-//! - `new(...) -> Result<Self, String>`: the only public, runtime-checked way to
-//!   build one from an untrusted value (CLI input via `FromStr`, or a library
-//!   caller). Only exists where such a construction path actually exists. The
-//!   error is a plain `String` rather than `ConfigError` because these constructors
-//!   never take a field-name label (see the construction principle below); the
-//!   caller that already knows which field it's assigning attaches that context.
-//! - `new_const(...) -> Self`: for the fixed preset literals only. Asserts the
-//!   same invariants, so an invalid literal fails to compile rather than
-//!   slipping past a forgotten runtime check.
+//! Range/finiteness validation is delegated to the `nutype` crate: each type
+//! below is a `#[nutype]`-generated newtype with a `validate(...)` clause
+//! for its bounds. `nutype` generates the fallible, runtime-checked
+//! `try_new(...) -> Result<Self, ...>` (the public entry point for
+//! untrusted input — CLI parsing via `derive(FromStr)`, or a library
+//! caller), and, via the `const_fn` flag, makes that same constructor
+//! callable from a `const` context. Each type adds two hand-written
+//! methods on top:
+//! - `get(self) -> f32`: renames `nutype`'s `into_inner` to match this
+//!   codebase's existing accessor convention (55 call sites in `dsp.rs`).
+//! - `new_const(value: f32) -> Self`: wraps `try_new` with a
+//!   `match { Ok(v) => v, Err(_) => panic!(...) }`, so preset literals
+//!   (`src/params/preset.rs`) keep their existing one-line call-site shape
+//!   instead of repeating that `match` at every field; an invalid literal
+//!   still fails to compile rather than slipping past a forgotten runtime
+//!   check.
 //!
-//! No constructor here takes an external label/context parameter alongside the
-//! value being validated: a value object's constructor accepts only data that is
-//! part of its own invariant, never free-text metadata that nothing enforces
-//! coherence for.
+//! No constructor here takes an external label/context parameter alongside
+//! the value being validated: a value object's constructor accepts only
+//! data that is part of its own invariant, never free-text metadata that
+//! nothing enforces coherence for. `nutype`'s generated validation error is
+//! specific to each type (not a shared, label-carrying `ConfigError`), so
+//! this holds for `try_new`/`FromStr` too — the caller assigning the
+//! validated value into a named field attaches field context itself.
 //!
-//! Most of these types share one shape — an inclusive `[min, max]` range check
-//! at both `new` and `new_const`, plus `get`, and (for the CLI-configurable
-//! ones) `FromStr`/`Display` — so that shape is generated once by the
-//! `bounded_f32!` macro below rather than hand-rolled per type. `PositiveF32`
-//! has an asymmetric, open-ended bound (`> 0.0`, no upper limit) that doesn't
-//! fit the macro's closed-range shape, so it stays hand-written.
+//! `nutype`'s built-in range validators report a generic, type-specific
+//! message (e.g. "`IoGain` is too big. The value must be less than 24.0.")
+//! rather than echoing the offending value; that's an intentional trade
+//! against hand-writing a `Display` impl per type.
+use nutype::nutype;
 
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::str::FromStr;
-
-/// Generates a bounded-`f32` newtype: a private inner `f32`, `new`/`new_const`
-/// range checks against `[$min, $max]` sharing the same bounds (so they can't
-/// drift out of sync), and `get`. Add `, str` to also generate `FromStr` +
-/// `Display` for types that are CLI-configurable, and/or `, derive($extra)`
-/// to add an extra derive (e.g. `PartialOrd`, for types compared across
-/// fields by `OttParams::validate`). Doc comments attached to the invocation
-/// become the struct's doc comment, same as a hand-written type.
+/// A gain value in dB, range `-24.0..=24.0` (docs/contracts.md §1).
 ///
-/// Each combination of trailing `derive(...)`/`str` markers is its own arm
-/// (rather than two stacked `$(...)?` groups in one arm) because
-/// `macro_rules!` can't unambiguously decide, from one token of lookahead,
-/// whether an optional group that starts with a comma is present or absent
-/// when two such groups are adjacent.
-macro_rules! bounded_f32 {
-    (
-        $(#[$doc:meta])*
-        $name:ident, $min:expr, $max:expr, $err:literal, str
-    ) => {
-        bounded_f32!(@struct $(#[$doc])* $name, $min, $max, $err,);
-        bounded_f32!(@str_impls $name);
-    };
+/// Used for the pre-split and post-sum gains, which are CLI-configurable.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = -24.0, less_or_equal = 24.0),
+    derive(Debug, Clone, Copy, PartialEq, Display, FromStr)
+)]
+pub struct IoGain(f32);
 
-    (
-        $(#[$doc:meta])*
-        $name:ident, $min:expr, $max:expr, $err:literal, derive($($extra:ident),+ $(,)?), str
-    ) => {
-        bounded_f32!(@struct $(#[$doc])* $name, $min, $max, $err, $($extra),+);
-        bounded_f32!(@str_impls $name);
-    };
+impl IoGain {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
 
-    (
-        $(#[$doc:meta])*
-        $name:ident, $min:expr, $max:expr, $err:literal, derive($($extra:ident),+ $(,)?)
-    ) => {
-        bounded_f32!(@struct $(#[$doc])* $name, $min, $max, $err, $($extra),+);
-    };
-
-    (
-        @struct
-        $(#[$doc:meta])*
-        $name:ident, $min:expr, $max:expr, $err:literal, $($extra:ident),*
-    ) => {
-        $(#[$doc])*
-        #[derive(Debug, Clone, Copy, PartialEq $(, $extra)*)]
-        pub struct $name(f32);
-
-        impl $name {
-            /// Validates and wraps `value`.
-            ///
-            /// # Errors
-            ///
-            /// Returns `String` if `value` falls outside this type's valid range.
-            pub fn new(value: f32) -> Result<Self, String> {
-                if !($min..=$max).contains(&value) {
-                    return Err(format!("{}, got {value}", $err));
-                }
-
-                Ok(Self(value))
-            }
-
-            /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
-            ///
-            /// # Panics
-            ///
-            /// Panics if `value` falls outside this type's valid range.
-            #[must_use]
-            pub const fn new_const(value: f32) -> Self {
-                assert!(value >= $min && value <= $max, $err);
-                Self(value)
-            }
-
-            /// Returns the wrapped value.
-            #[must_use]
-            pub const fn get(self) -> f32 {
-                self.0
-            }
-        }
-    };
-
-    (@str_impls $name:ident) => {
-        impl FromStr for $name {
-            type Err = String;
-
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                f32::from_str(s)
-                    .map_err(|e| e.to_string())
-                    .and_then(Self::new)
-            }
-        }
-
-        impl Display for $name {
-            fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-                self.0.fmt(f)
-            }
-        }
-    };
-}
-
-bounded_f32!(
-    /// A gain value in dB, range `-24.0..=24.0` (docs/contracts.md §1).
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
     ///
-    /// Used for the pre-split and post-sum gains, which are CLI-configurable.
-    IoGain, -24.0, 24.0, "gain must be in [-24, 24]", str
-);
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `-24.0..=24.0`.
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("IoGain literal out of range"),
+        }
+    }
+}
 
 /// A positive duration in milliseconds (docs/contracts.md §1).
 ///
 /// Used for each band's base attack/release time at `time = 0.5`. Only ever
-/// constructed from preset literals (ADR 0006); not CLI-configurable. Its
-/// bound (`> 0.0`, no upper limit) doesn't fit `bounded_f32!`'s closed-range
-/// shape, so it's hand-written rather than macro-generated.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// constructed from preset literals (ADR 0006); not CLI-configurable, so
+/// its fallible constructor is crate-private.
+#[nutype(
+    const_fn,
+    validate(finite, greater = 0.0),
+    constructor(visibility = pub(crate)),
+    derive(Debug, Clone, Copy, PartialEq)
+)]
 pub struct PositiveF32(f32);
 
 impl PositiveF32 {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
+
     /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
     ///
     /// # Panics
     ///
     /// Panics if `value` is not strictly greater than `0.0`.
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
     pub(crate) const fn new_const(value: f32) -> Self {
-        assert!(value > 0.0, "PositiveF32 literal out of range");
-        Self(value)
-    }
-
-    /// Returns the wrapped value.
-    #[must_use]
-    pub const fn get(self) -> f32 {
-        self.0
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("PositiveF32 literal out of range"),
+        }
     }
 }
 
-bounded_f32!(
-    /// A normalized fraction in `0.0..=1.0` (docs/contracts.md §1).
-    ///
-    /// Shared by the dry/wet mix, the attack/release time multiplier, the
-    /// upward/downward multipliers, and each band's compression amounts.
-    NormalizedF32, 0.0, 1.0, "value must be in [0, 1]", str
-);
-
-bounded_f32!(
-    /// The low/mid crossover frequency in Hz, range `40.0..=2000.0` (docs/contracts.md §1).
-    ///
-    /// Combined with `CrossoverFreqHigh` by `OttParams::validate`, which enforces
-    /// the octave-separation invariant that no single field can express on its own.
-    CrossoverFreqLow, 40.0, 2000.0, "value must be in [40, 2000]", derive(PartialOrd), str
-);
-
-bounded_f32!(
-    /// The mid/high crossover frequency in Hz, range `400.0..=16000.0` (docs/contracts.md §1).
-    ///
-    /// Combined with `CrossoverFreqLow` by `OttParams::validate`, which enforces
-    /// the octave-separation invariant that no single field can express on its own.
-    CrossoverFreqHigh, 400.0, 16000.0, "value must be in [400, 16000]", derive(PartialOrd), str
-);
-
-bounded_f32!(
-    /// A band's downward/upward compression threshold in dB, range `-80.0..=0.0` (docs/contracts.md §1).
-    ///
-    /// Used for both `lower_threshold_db` and `upper_threshold_db`. `OttParams::validate`
-    /// enforces `lower_threshold_db < upper_threshold_db`, since that ordering spans
-    /// two fields and no single `Threshold` can express it on its own.
-    Threshold, -80.0, 0.0, "threshold must be in [-80, 0]", derive(PartialOrd)
-);
-
-/// A band's makeup gain in dB, range `-40.0..=40.0` (docs/contracts.md §1).
+/// A normalized fraction in `0.0..=1.0` (docs/contracts.md §1).
 ///
-/// Only ever constructed from preset literals (ADR 0006); not CLI-configurable.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MakeupGain(f32);
+/// Shared by the dry/wet mix, the attack/release time multiplier, the
+/// upward/downward multipliers, and each band's compression amounts.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = 0.0, less_or_equal = 1.0),
+    derive(Debug, Clone, Copy, PartialEq, Display, FromStr)
+)]
+pub struct NormalizedF32(f32);
 
-impl MakeupGain {
-    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
-    pub(crate) const fn new_const(value: f32) -> Self {
-        assert!(
-            value >= -40.0 && value <= 40.0,
-            "MakeupGain literal out of range"
-        );
-        Self(value)
-    }
-
+impl NormalizedF32 {
     /// Returns the wrapped value.
     #[must_use]
     pub const fn get(self) -> f32 {
-        self.0
+        self.into_inner()
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `0.0..=1.0`.
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("NormalizedF32 literal out of range"),
+        }
+    }
+}
+
+/// The low/mid crossover frequency in Hz, range `40.0..=2000.0` (docs/contracts.md §1).
+///
+/// Combined with `CrossoverFreqHigh` by `OttParams::validate`, which enforces
+/// the octave-separation invariant that no single field can express on its own.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = 40.0, less_or_equal = 2000.0),
+    derive(Debug, Clone, Copy, PartialEq, PartialOrd, Display, FromStr)
+)]
+pub struct CrossoverFreqLow(f32);
+
+impl CrossoverFreqLow {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `40.0..=2000.0`.
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("CrossoverFreqLow literal out of range"),
+        }
+    }
+}
+
+/// The mid/high crossover frequency in Hz, range `400.0..=16000.0` (docs/contracts.md §1).
+///
+/// Combined with `CrossoverFreqLow` by `OttParams::validate`, which enforces
+/// the octave-separation invariant that no single field can express on its own.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = 400.0, less_or_equal = 16000.0),
+    derive(Debug, Clone, Copy, PartialEq, PartialOrd, Display, FromStr)
+)]
+pub struct CrossoverFreqHigh(f32);
+
+impl CrossoverFreqHigh {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `400.0..=16000.0`.
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("CrossoverFreqHigh literal out of range"),
+        }
+    }
+}
+
+/// A band's downward/upward compression threshold in dB, range `-80.0..=0.0` (docs/contracts.md §1).
+///
+/// Used for both `lower_threshold_db` and `upper_threshold_db`. `OttParams::validate`
+/// enforces `lower_threshold_db < upper_threshold_db`, since that ordering spans
+/// two fields and no single `Threshold` can express it on its own.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = -80.0, less_or_equal = 0.0),
+    derive(Debug, Clone, Copy, PartialEq, PartialOrd)
+)]
+pub struct Threshold(f32);
+
+impl Threshold {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `-80.0..=0.0`.
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("Threshold literal out of range"),
+        }
+    }
+}
+
+/// A band's makeup gain in dB, range `-40.0..=40.0` (docs/contracts.md §1).
+///
+/// Only ever constructed from preset literals (ADR 0006); not CLI-configurable,
+/// so its fallible constructor is crate-private.
+#[nutype(
+    const_fn,
+    validate(finite, greater_or_equal = -40.0, less_or_equal = 40.0),
+    constructor(visibility = pub(crate)),
+    derive(Debug, Clone, Copy, PartialEq)
+)]
+pub struct MakeupGain(f32);
+
+impl MakeupGain {
+    /// Returns the wrapped value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.into_inner()
+    }
+
+    /// For preset literals only. Panics (at compile time, in a `const` context) if `value` is invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` falls outside `-40.0..=40.0`.
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub(crate) const fn new_const(value: f32) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("MakeupGain literal out of range"),
+        }
     }
 }
 
@@ -221,56 +270,57 @@ mod tests {
 
     #[test]
     fn io_gain_rejects_nan_and_infinite() {
-        assert!(IoGain::new(f32::NAN).is_err());
-        assert!(IoGain::new(f32::INFINITY).is_err());
-        assert!(IoGain::new(f32::NEG_INFINITY).is_err());
+        assert!(IoGain::try_new(f32::NAN).is_err());
+        assert!(IoGain::try_new(f32::INFINITY).is_err());
+        assert!(IoGain::try_new(f32::NEG_INFINITY).is_err());
     }
 
     #[test]
     fn io_gain_rejects_out_of_range() {
-        assert!(IoGain::new(24.1).is_err());
-        assert!(IoGain::new(-24.1).is_err());
-        assert!(IoGain::new(24.0).is_ok());
-        assert!(IoGain::new(-24.0).is_ok());
+        assert!(IoGain::try_new(24.1).is_err());
+        assert!(IoGain::try_new(-24.1).is_err());
+        assert!(IoGain::try_new(24.0).is_ok());
+        assert!(IoGain::try_new(-24.0).is_ok());
     }
 
     #[test]
-    fn io_gain_error_message_includes_the_offending_value() {
-        let err = IoGain::new(100.0).unwrap_err();
-        assert!(err.contains("100"), "error message was: {err}");
+    fn io_gain_error_message_is_descriptive() {
+        let err = IoGain::try_new(100.0).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("IoGain"), "error message was: {message}");
     }
 
     #[test]
     fn normalized_f32_rejects_nan_and_out_of_range() {
-        assert!(NormalizedF32::new(f32::NAN).is_err());
-        assert!(NormalizedF32::new(1.5).is_err());
-        assert!(NormalizedF32::new(-0.1).is_err());
-        assert!(NormalizedF32::new(0.0).is_ok());
-        assert!(NormalizedF32::new(1.0).is_ok());
+        assert!(NormalizedF32::try_new(f32::NAN).is_err());
+        assert!(NormalizedF32::try_new(1.5).is_err());
+        assert!(NormalizedF32::try_new(-0.1).is_err());
+        assert!(NormalizedF32::try_new(0.0).is_ok());
+        assert!(NormalizedF32::try_new(1.0).is_ok());
     }
 
     #[test]
     fn crossover_freq_low_rejects_out_of_range() {
-        assert!(CrossoverFreqLow::new(39.9).is_err());
-        assert!(CrossoverFreqLow::new(2000.1).is_err());
-        assert!(CrossoverFreqLow::new(40.0).is_ok());
-        assert!(CrossoverFreqLow::new(2000.0).is_ok());
+        assert!(CrossoverFreqLow::try_new(39.9).is_err());
+        assert!(CrossoverFreqLow::try_new(2000.1).is_err());
+        assert!(CrossoverFreqLow::try_new(40.0).is_ok());
+        assert!(CrossoverFreqLow::try_new(2000.0).is_ok());
     }
 
     #[test]
     fn crossover_freq_high_rejects_out_of_range() {
-        assert!(CrossoverFreqHigh::new(399.9).is_err());
-        assert!(CrossoverFreqHigh::new(16000.1).is_err());
-        assert!(CrossoverFreqHigh::new(400.0).is_ok());
-        assert!(CrossoverFreqHigh::new(16000.0).is_ok());
+        assert!(CrossoverFreqHigh::try_new(399.9).is_err());
+        assert!(CrossoverFreqHigh::try_new(16000.1).is_err());
+        assert!(CrossoverFreqHigh::try_new(400.0).is_ok());
+        assert!(CrossoverFreqHigh::try_new(16000.0).is_ok());
     }
 
     #[test]
     fn threshold_rejects_out_of_range() {
-        assert!(Threshold::new(-80.1).is_err());
-        assert!(Threshold::new(0.1).is_err());
-        assert!(Threshold::new(-80.0).is_ok());
-        assert!(Threshold::new(0.0).is_ok());
+        assert!(Threshold::try_new(-80.1).is_err());
+        assert!(Threshold::try_new(0.1).is_err());
+        assert!(Threshold::try_new(-80.0).is_ok());
+        assert!(Threshold::try_new(0.0).is_ok());
     }
 
     #[test]
