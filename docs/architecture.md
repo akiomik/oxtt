@@ -6,7 +6,7 @@ This document describes the internal architecture of the `oxtt` DSP engine and i
 
 ```
 main.rs
-  -> params::parse_args          CLI parsing, validation, presets
+  -> cli::Cli::parse              CLI parsing (clap), presets, per-field validation
   -> jack_host::run               JACK client lifecycle, port registration
        -> AudioProcessHandler     audio callback (real-time thread)
             -> dsp::OttProcessor::process
@@ -56,7 +56,7 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 ```
 non-real-time                          |  real-time (JACK audio thread)
 ----------------------------------------|---------------------------------------
-main.rs: parse_args, Client::new,       |  AudioProcessHandler::process
+main.rs: Cli::parse, Client::new,       |  AudioProcessHandler::process
   OttProcessor::new, activate_async     |    - swap pending_sample_rate (Atomic)
                                          |    - OttProcessor::process
 signal_hook: SIGINT/SIGTERM -> Atomic   |      (no alloc, no lock, no I/O)

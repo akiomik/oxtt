@@ -10,6 +10,7 @@ keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
 categories = ["multimedia::audio"]
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 jack = "0.13"
 signal-hook = "0.4"
 thiserror = "2"

@@ -1,12 +1,14 @@
 //! Startup presets (docs/contracts.md §1, ADR 0006).
 
-use std::str::FromStr;
+use clap::ValueEnum;
 
 use super::model::{BandParams, GlobalParams, OttParams};
-use super::value::{CrossoverPair, GainDb, MakeupGainDb, PositiveMs, ThresholdRange, UnitInterval};
+use super::value::{
+    CrossoverFreqHigh, CrossoverFreqLow, IoGain, MakeupGain, NormalizedF32, PositiveF32, Threshold,
+};
 
 /// Startup presets (docs/contracts.md §1, ADR 0006).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum Preset {
     /// Conservative output level, suitable for a first listen (docs/contracts.md §1).
     #[default]
@@ -18,28 +20,31 @@ pub enum Preset {
 impl Preset {
     // Band values are fixed as a compatibility target for the `Default` preset, per ADR 0006.
     const LOW_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new_const(-35.0, -28.0),
-        up_amount: UnitInterval::new_const(0.800),
-        down_amount: UnitInterval::new_const(0.900),
-        makeup_gain_db: MakeupGainDb::new_const(16.3),
-        base_attack_ms: PositiveMs::new_const(2.8),
-        base_release_ms: PositiveMs::new_const(40.0),
+        lower_threshold_db: Threshold::new_const(-35.0),
+        upper_threshold_db: Threshold::new_const(-28.0),
+        up_amount: NormalizedF32::new_const(0.800),
+        down_amount: NormalizedF32::new_const(0.900),
+        makeup_gain_db: MakeupGain::new_const(16.3),
+        base_attack_ms: PositiveF32::new_const(2.8),
+        base_release_ms: PositiveF32::new_const(40.0),
     };
     const MID_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new_const(-36.0, -25.0),
-        up_amount: UnitInterval::new_const(0.800),
-        down_amount: UnitInterval::new_const(0.857),
-        makeup_gain_db: MakeupGainDb::new_const(11.7),
-        base_attack_ms: PositiveMs::new_const(1.4),
-        base_release_ms: PositiveMs::new_const(28.0),
+        lower_threshold_db: Threshold::new_const(-36.0),
+        upper_threshold_db: Threshold::new_const(-25.0),
+        up_amount: NormalizedF32::new_const(0.800),
+        down_amount: NormalizedF32::new_const(0.857),
+        makeup_gain_db: MakeupGain::new_const(11.7),
+        base_attack_ms: PositiveF32::new_const(1.4),
+        base_release_ms: PositiveF32::new_const(28.0),
     };
     const HIGH_BAND: BandParams = BandParams {
-        thresholds: ThresholdRange::new_const(-35.0, -30.0),
-        up_amount: UnitInterval::new_const(0.800),
-        down_amount: UnitInterval::new_const(1.000),
-        makeup_gain_db: MakeupGainDb::new_const(16.3),
-        base_attack_ms: PositiveMs::new_const(0.7),
-        base_release_ms: PositiveMs::new_const(15.0),
+        lower_threshold_db: Threshold::new_const(-35.0),
+        upper_threshold_db: Threshold::new_const(-30.0),
+        up_amount: NormalizedF32::new_const(0.800),
+        down_amount: NormalizedF32::new_const(1.000),
+        makeup_gain_db: MakeupGain::new_const(16.3),
+        base_attack_ms: PositiveF32::new_const(0.7),
+        base_release_ms: PositiveF32::new_const(15.0),
     };
 
     const fn bands() -> [BandParams; 3] {
@@ -52,46 +57,27 @@ impl Preset {
         let bands = Self::bands();
         let global = match self {
             Self::SafeStart => GlobalParams {
-                input_gain_db: GainDb::new_const(0.0),
-                output_gain_db: GainDb::new_const(-18.0),
-                depth: UnitInterval::new_const(0.5),
-                time: UnitInterval::new_const(0.5),
-                upward: UnitInterval::new_const(1.0),
-                downward: UnitInterval::new_const(1.0),
-                crossovers: CrossoverPair::new_const(120.0, 2500.0),
+                input_gain_db: IoGain::new_const(0.0),
+                output_gain_db: IoGain::new_const(-18.0),
+                depth: NormalizedF32::new_const(0.5),
+                time: NormalizedF32::new_const(0.5),
+                upward: NormalizedF32::new_const(1.0),
+                downward: NormalizedF32::new_const(1.0),
+                low_crossover_hz: CrossoverFreqLow::new_const(120.0),
+                high_crossover_hz: CrossoverFreqHigh::new_const(2500.0),
             },
             Self::Default => GlobalParams {
-                input_gain_db: GainDb::new_const(0.0),
-                output_gain_db: GainDb::new_const(0.0),
-                depth: UnitInterval::new_const(1.0),
-                time: UnitInterval::new_const(0.5),
-                upward: UnitInterval::new_const(1.0),
-                downward: UnitInterval::new_const(1.0),
-                crossovers: CrossoverPair::new_const(120.0, 2500.0),
+                input_gain_db: IoGain::new_const(0.0),
+                output_gain_db: IoGain::new_const(0.0),
+                depth: NormalizedF32::new_const(1.0),
+                time: NormalizedF32::new_const(0.5),
+                upward: NormalizedF32::new_const(1.0),
+                downward: NormalizedF32::new_const(1.0),
+                low_crossover_hz: CrossoverFreqLow::new_const(120.0),
+                high_crossover_hz: CrossoverFreqHigh::new_const(2500.0),
             },
         };
         OttParams { global, bands }
-    }
-
-    /// Returns the preset's `--preset` CLI value.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::SafeStart => "safe-start",
-            Self::Default => "default",
-        }
-    }
-}
-
-impl FromStr for Preset {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "safe-start" => Ok(Self::SafeStart),
-            "default" => Ok(Self::Default),
-            _ => Err(()),
-        }
     }
 }
 

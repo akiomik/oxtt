@@ -27,7 +27,8 @@ cargo test --all-targets
 
 The suite is organized by module and none of it requires a running JACK server:
 
-- `src/params.rs` — CLI parsing and parameter validation
+- `src/cli.rs` — CLI argument parsing
+- `src/params/` — parameter value objects, validation, and presets
 - `src/dsp/mod.rs` — `OttProcessor` unit tests and processor-level integration tests
 - `src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests

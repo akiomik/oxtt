@@ -10,26 +10,6 @@ pub const MAX_SAMPLE_RATE_HZ: f32 = 384_000.0;
 /// Validation error when constructing or updating parameters (docs/contracts.md §1).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ConfigError {
-    /// A field's value was NaN or infinite.
-    #[error("{field} must be finite, got {value}")]
-    NotFinite {
-        /// Name of the offending field.
-        field: &'static str,
-        /// The offending value.
-        value: f32,
-    },
-    /// A field's value fell outside its allowed range.
-    #[error("{field} must be in [{min}, {max}], got {value}")]
-    OutOfRange {
-        /// Name of the offending field.
-        field: &'static str,
-        /// Lower bound of the allowed range, inclusive.
-        min: f32,
-        /// Upper bound of the allowed range, inclusive.
-        max: f32,
-        /// The offending value.
-        value: f32,
-    },
     /// `high_crossover_hz` was less than one octave above `low_crossover_hz`.
     #[error(
         "high_crossover_hz ({high_hz}) must be at least one octave above low_crossover_hz ({low_hz})"
@@ -39,6 +19,18 @@ pub enum ConfigError {
         low_hz: f32,
         /// The offending `high_crossover_hz`.
         high_hz: f32,
+    },
+    /// A band's `lower_threshold_db` was not less than its `upper_threshold_db`.
+    #[error(
+        "{band} band: lower_threshold_db ({lower_db}) must be less than upper_threshold_db ({upper_db})"
+    )]
+    ThresholdOrder {
+        /// Name of the offending band (`"low"`, `"mid"`, or `"high"`).
+        band: &'static str,
+        /// The offending `lower_threshold_db`.
+        lower_db: f32,
+        /// The offending `upper_threshold_db`.
+        upper_db: f32,
     },
     /// A crossover frequency exceeded the Nyquist-relative limit at the current sample rate.
     #[error("{field} ({value}) exceeds {max} at the current sample rate")]
@@ -58,33 +50,6 @@ pub enum ConfigError {
         /// The offending sample rate.
         value: f32,
     },
-}
-
-pub(super) const fn check_finite(field: &'static str, value: f32) -> Result<(), ConfigError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(ConfigError::NotFinite { field, value })
-    }
-}
-
-pub(super) fn check_range(
-    field: &'static str,
-    value: f32,
-    min: f32,
-    max: f32,
-) -> Result<(), ConfigError> {
-    check_finite(field, value)?;
-    if value < min || value > max {
-        Err(ConfigError::OutOfRange {
-            field,
-            min,
-            max,
-            value,
-        })
-    } else {
-        Ok(())
-    }
 }
 
 /// Validates the sample rate alone (docs/contracts.md §1).
