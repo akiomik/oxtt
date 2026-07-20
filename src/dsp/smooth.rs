@@ -4,8 +4,23 @@
 //! fixed at 20ms. After 20ms the difference from the target is about 36.8%
 //! (`1/e`) of the initial difference.
 
+use std::f64::consts::LN_2;
+
 /// Smoothing time constant (docs/architecture.md).
 pub const SMOOTHING_TIME_MS: f32 = 20.0;
+
+/// Remaining logarithmic crossover-frequency difference at which smoothing snaps to its target.
+///
+/// One cent is `1/1200` of an octave. At 0.1 cent, the final snap is far
+/// below a perceptible pitch/frequency difference, but gives a finite
+/// settled state so the real-time path can stop recalculating coefficients.
+pub const CROSSOVER_SETTLE_CENTS: f64 = 0.1;
+
+const CROSSOVER_SETTLE_LOG_HZ: f64 = CROSSOVER_SETTLE_CENTS * LN_2 / 1200.0;
+
+fn log_smoothing_coefficient(sample_rate: f32) -> f64 {
+    (-1.0 / (f64::from(SMOOTHING_TIME_MS) * 0.001 * f64::from(sample_rate))).exp()
+}
 
 /// Derives the one-pole coefficient from `SMOOTHING_TIME_MS` and `sample_rate`.
 #[must_use]
@@ -73,43 +88,83 @@ impl Smoothed {
 /// Wrapper for crossover frequencies that smooths on a logarithmic frequency scale (docs/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogSmoothed {
-    inner: Smoothed,
+    current_log_hz: f64,
+    target_log_hz: f64,
+    coefficient: f64,
 }
 
 impl LogSmoothed {
     /// Constructs with an immediate snap to `value_hz` (no startup fade).
     #[must_use]
     pub fn new(value_hz: f32, sample_rate: f32) -> Self {
+        let value_log_hz = f64::from(value_hz).ln();
         Self {
-            inner: Smoothed::new(value_hz.ln(), sample_rate),
+            current_log_hz: value_log_hz,
+            target_log_hz: value_log_hz,
+            coefficient: log_smoothing_coefficient(sample_rate),
         }
     }
 
     /// Recomputes the coefficient on a sample-rate change. Does not change current/target.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.inner.set_sample_rate(sample_rate);
+        self.coefficient = log_smoothing_coefficient(sample_rate);
     }
 
     /// Updates the smoothing target frequency, in Hz.
     pub fn set_target_hz(&mut self, hz: f32) {
-        self.inner.set_target(hz.ln());
+        self.target_log_hz = f64::from(hz).ln();
     }
 
     /// Immediately resets both current and target to `hz` (initial construction, `reset`).
     pub fn snap_hz(&mut self, hz: f32) {
-        self.inner.snap(hz.ln());
+        let log_hz = f64::from(hz).ln();
+        self.current_log_hz = log_hz;
+        self.target_log_hz = log_hz;
     }
 
     /// Returns the current (smoothed) value, in Hz.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // Validated crossover targets are far inside f32's finite range.
     pub fn current_hz(&self) -> f32 {
-        self.inner.current().exp()
+        self.current_log_hz.exp() as f32
+    }
+
+    /// Returns whether the current value has reached the target exactly.
+    #[must_use]
+    #[allow(clippy::float_cmp)] // Exact equality is the explicit finite settled-state sentinel.
+    pub const fn is_settled(&self) -> bool {
+        self.current_log_hz == self.target_log_hz
+    }
+
+    /// Advances the smoother and returns the effective frequency only when it changed.
+    ///
+    /// When the remaining log-frequency distance is within
+    /// [`CROSSOVER_SETTLE_CENTS`], this snaps to the target. The exact settled
+    /// state lets callers avoid recalculating filter coefficients indefinitely
+    /// for a static crossover setting.
+    #[inline]
+    pub fn tick_hz_if_changed(&mut self) -> Option<f32> {
+        if self.is_settled() {
+            return None;
+        }
+
+        let target = self.target_log_hz;
+        let next = self
+            .coefficient
+            .mul_add(self.current_log_hz, (1.0 - self.coefficient) * target);
+        if (target - next).abs() <= CROSSOVER_SETTLE_LOG_HZ {
+            self.current_log_hz = target;
+        } else {
+            self.current_log_hz = next;
+        }
+        Some(self.current_hz())
     }
 
     /// Advances by one sample and returns the current value in Hz.
     #[inline]
     pub fn tick_hz(&mut self) -> f32 {
-        self.inner.tick().exp()
+        self.tick_hz_if_changed()
+            .unwrap_or_else(|| self.current_hz())
     }
 }
 
@@ -179,20 +234,31 @@ mod tests {
 
     #[test]
     fn log_smoothed_converges_to_target_hz() {
-        // f32's one-pole recursion stalls once the update falls below one ULP.
-        // Here we confirm sufficient convergence by relative error (within
-        // 0.1%) rather than absolute error.
         let sample_rate = 48_000.0;
         let mut s = LogSmoothed::new(120.0, sample_rate);
         s.set_target_hz(2500.0);
+
+        // The first step must remain a smooth transition, not an immediate snap.
+        let first = s
+            .tick_hz_if_changed()
+            .expect("a changed target must start a crossover transition");
+        assert!(first > 120.0 && first < 2500.0);
+        assert!(!s.is_settled());
+
         for _ in 0..(sample_rate as usize) {
-            s.tick_hz();
+            if s.tick_hz_if_changed().is_none() {
+                break;
+            }
         }
-        let relative_error = (s.current_hz() - 2500.0).abs() / 2500.0;
         assert!(
-            relative_error < 1e-3,
-            "relative error {relative_error} too large"
+            s.is_settled(),
+            "current={} target={} delta={} epsilon={CROSSOVER_SETTLE_LOG_HZ}",
+            s.current_log_hz,
+            s.target_log_hz,
+            (s.current_log_hz - s.target_log_hz).abs(),
         );
+        assert_eq!(s.current_hz(), 2500.0);
+        assert_eq!(s.tick_hz_if_changed(), None);
     }
 
     #[test]

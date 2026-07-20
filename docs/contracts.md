@@ -105,6 +105,14 @@ Verified by:
 
 Cross-thread communication into or out of the callback (JACK shutdown, sample-rate change, and any future control-surface parameter updates) MUST use only lock-free primitives: `Arc<AtomicBool>` / `Arc<AtomicU32>` today, and a bounded non-blocking queue for full parameter snapshots in a future control thread.
 
+### Crossover settling and physical controls
+
+Crossovers smooth their cutoff targets in log-frequency space. A future physical control surface MUST suppress ADC quantization noise and small resting-value fluctuations before publishing a parameter snapshot: changes below its documented deadband/hysteresis threshold MUST NOT repeatedly restart a crossover transition.
+
+For every accepted crossover target change, the DSP MUST retain the existing 20 ms one-pole transition in log-frequency space until the remaining difference is within the `CROSSOVER_SETTLE_CENTS = 0.1` cent settling tolerance. It MUST then snap the current value to the target and mark that cutoff settled. This perceptually negligible tolerance MUST remain a named constant with deterministic test coverage; it is not an implementation-local magic number.
+
+While either cutoff is transitioning, the callback may update filter coefficients as required to preserve the smooth transition. Once both cutoffs are settled, and until either a cutoff target or the sample rate changes, the audio callback MUST NOT recompute crossover coefficients. The left and right channels MUST use the same effective cutoff values throughout a transition so the crossover reconstruction invariant (§5) continues to hold.
+
 Machine-checked in two ways:
 
 - `clippy.toml`'s `disallowed-methods`/`disallowed-types`/`disallowed-macros` ban the specific heap-allocating, locking, sleeping/spawning, and I/O calls named above (`cargo clippy --all-targets -- -D warnings`, run in CI). This applies crate-wide, since clippy has no way to scope a lint to one module; call sites outside the real-time path that legitimately need one of these (`jack_host::run`'s shutdown-poll loop, `main`'s top-level error reporting, tests) carry a local `#[allow(...)]` explaining why.

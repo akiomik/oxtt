@@ -140,9 +140,12 @@ struct ChannelSplitter {
 }
 
 impl ChannelSplitter {
-    fn set_cutoffs(&mut self, low_hz: f32, high_hz: f32, sample_rate: f32) {
+    fn set_low_cutoff(&mut self, low_hz: f32, sample_rate: f32) {
         self.low_split_lp.set_cutoff(low_hz, sample_rate, false);
         self.low_split_hp.set_cutoff(low_hz, sample_rate, true);
+    }
+
+    fn set_high_cutoff(&mut self, high_hz: f32, sample_rate: f32) {
         self.high_split_lp.set_cutoff(high_hz, sample_rate, false);
         self.high_split_hp.set_cutoff(high_hz, sample_rate, true);
         self.phase_comp_lp.set_cutoff(high_hz, sample_rate, false);
@@ -187,6 +190,8 @@ pub struct Crossover {
     high_freq: LogSmoothed,
     left: ChannelSplitter,
     right: ChannelSplitter,
+    #[cfg(test)]
+    coefficient_update_count: usize,
 }
 
 impl Crossover {
@@ -199,9 +204,11 @@ impl Crossover {
             high_freq: LogSmoothed::new(high_hz, sample_rate),
             left: ChannelSplitter::default(),
             right: ChannelSplitter::default(),
+            #[cfg(test)]
+            coefficient_update_count: 0,
         };
-        c.left.set_cutoffs(low_hz, high_hz, sample_rate);
-        c.right.set_cutoffs(low_hz, high_hz, sample_rate);
+        c.update_low_cutoff(low_hz);
+        c.update_high_cutoff(high_hz);
         c
     }
 
@@ -216,13 +223,38 @@ impl Crossover {
         self.high_freq.set_target_hz(high_hz);
     }
 
+    fn update_low_cutoff(&mut self, low_hz: f32) {
+        self.left.set_low_cutoff(low_hz, self.sample_rate);
+        self.right.set_low_cutoff(low_hz, self.sample_rate);
+        #[cfg(test)]
+        {
+            self.coefficient_update_count += 1;
+        }
+    }
+
+    fn update_high_cutoff(&mut self, high_hz: f32) {
+        self.left.set_high_cutoff(high_hz, self.sample_rate);
+        self.right.set_high_cutoff(high_hz, self.sample_rate);
+        #[cfg(test)]
+        {
+            self.coefficient_update_count += 1;
+        }
+    }
+
+    #[cfg(test)]
+    const fn coefficient_update_count(&self) -> usize {
+        self.coefficient_update_count
+    }
+
     /// Processes one frame. L and R both use the same smoothed cutoff (ADR 0001).
     #[inline]
     pub fn process_frame(&mut self, left_in: f32, right_in: f32) -> (Bands<f32>, Bands<f32>) {
-        let low_hz = self.low_freq.tick_hz();
-        let high_hz = self.high_freq.tick_hz();
-        self.left.set_cutoffs(low_hz, high_hz, self.sample_rate);
-        self.right.set_cutoffs(low_hz, high_hz, self.sample_rate);
+        if let Some(low_hz) = self.low_freq.tick_hz_if_changed() {
+            self.update_low_cutoff(low_hz);
+        }
+        if let Some(high_hz) = self.high_freq.tick_hz_if_changed() {
+            self.update_high_cutoff(high_hz);
+        }
 
         let left = self.left.process(left_in);
         let right = self.right.process(right_in);
@@ -411,6 +443,61 @@ mod tests {
                 "right channel state must be unaffected by left channel input"
             );
         }
+    }
+
+    #[test]
+    fn settled_crossovers_do_not_recompute_coefficients() {
+        let sample_rate = 48_000.0;
+        let mut c = Crossover::new(sample_rate, 120.0, 2500.0);
+        let initial_updates = c.coefficient_update_count();
+        assert_eq!(
+            initial_updates, 2,
+            "construction updates low and high once each"
+        );
+
+        for _ in 0..1024 {
+            c.process_frame(0.25, -0.25);
+        }
+        assert_eq!(
+            c.coefficient_update_count(),
+            initial_updates,
+            "static cutoffs must not update coefficients in the audio path"
+        );
+
+        c.set_targets(200.0, 2500.0);
+        c.process_frame(0.25, -0.25);
+        assert_eq!(
+            c.coefficient_update_count(),
+            initial_updates + 1,
+            "a low-only target change must update only the low coefficient group"
+        );
+
+        for _ in 0..(sample_rate as usize) {
+            c.process_frame(0.25, -0.25);
+            if c.low_freq.is_settled() && c.high_freq.is_settled() {
+                break;
+            }
+        }
+        assert!(c.low_freq.is_settled());
+        assert!(c.high_freq.is_settled());
+        let low_settled_updates = c.coefficient_update_count();
+
+        for _ in 0..1024 {
+            c.process_frame(0.25, -0.25);
+        }
+        assert_eq!(
+            c.coefficient_update_count(),
+            low_settled_updates,
+            "settled cutoffs must stay coefficient-stable"
+        );
+
+        c.set_targets(200.0, 4000.0);
+        c.process_frame(0.25, -0.25);
+        assert_eq!(
+            c.coefficient_update_count(),
+            low_settled_updates + 1,
+            "a high-only target change must update only the high coefficient group"
+        );
     }
 
     #[test]
