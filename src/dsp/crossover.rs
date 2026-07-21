@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn reconstruction_is_flat_across_representative_crossovers() {
-        // Combinations representative of the allowed range and the minimum one-octave spacing (docs/contracts.md §5).
+        // Combinations representative of the allowed range and the minimum one-octave spacing (docs/contracts.md §1).
         let cases: &[(f32, f32, f32)] = &[
             (48_000.0, 40.0, 400.0),
             (48_000.0, 2000.0, 4000.0),

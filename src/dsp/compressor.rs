@@ -43,7 +43,7 @@ pub struct DualThresholdCompressor {
 }
 
 impl DualThresholdCompressor {
-    /// Creates a compressor with its envelope initialized to the threshold midpoint (docs/contracts.md §2).
+    /// Creates a compressor with its envelope initialized to threshold-derived boundary powers (docs/contracts.md §2).
     #[must_use]
     pub fn new(lower_threshold_db: f32, upper_threshold_db: f32) -> Self {
         Self {

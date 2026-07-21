@@ -1,9 +1,11 @@
 # Machine-checked half of the real-time callback contract (docs/contracts.md
 # §6): `AudioProcessHandler::process` and everything it calls transitively
 # must not allocate/free heap memory, lock, perform I/O, spawn/sleep a
-# thread, or panic. Lints alone can't prove the last one (see the `no_panic`
-# attribute on `AudioProcessHandler::process` for that), but they catch the
-# rest at every call site, not just the ones a reviewer happens to notice.
+# thread, or panic. Lints alone cannot prove the last one; the `no_panic`
+# attributes on `OttProcessor::process`/`reset` cover the DSP core under
+# release optimization, while the thin JACK wrapper remains review-only.
+# The lints catch the rest at every call site, not just the ones a reviewer
+# happens to notice.
 #
 # These lists apply crate-wide because clippy.toml has no per-module scoping;
 # code outside the real-time path that legitimately needs one of these

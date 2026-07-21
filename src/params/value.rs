@@ -132,8 +132,8 @@ impl NormalizedF32 {
 
 /// The low/mid crossover frequency in Hz, range `40.0..=2000.0` (docs/contracts.md §1).
 ///
-/// Combined with `CrossoverFreqHigh` by `OttParams::validate`, which enforces
-/// the octave-separation invariant that no single field can express on its own.
+/// Combined with `CrossoverFreqHigh` by `CrossoverSplit`, which enforces the
+/// octave-separation invariant that no single field can express on its own.
 #[nutype(
     const_fn,
     validate(finite, greater_or_equal = 40.0, less_or_equal = 2000.0),
@@ -165,8 +165,8 @@ impl CrossoverFreqLow {
 
 /// The mid/high crossover frequency in Hz, range `400.0..=16000.0` (docs/contracts.md §1).
 ///
-/// Combined with `CrossoverFreqLow` by `OttParams::validate`, which enforces
-/// the octave-separation invariant that no single field can express on its own.
+/// Combined with `CrossoverFreqLow` by `CrossoverSplit`, which enforces the
+/// octave-separation invariant that no single field can express on its own.
 #[nutype(
     const_fn,
     validate(finite, greater_or_equal = 400.0, less_or_equal = 16000.0),
@@ -198,7 +198,7 @@ impl CrossoverFreqHigh {
 
 /// A band's downward/upward compression threshold in dB, range `-80.0..=0.0` (docs/contracts.md §1).
 ///
-/// Used for both `lower_threshold_db` and `upper_threshold_db`. `OttParams::validate`
+/// Used for both `lower_threshold_db` and `upper_threshold_db`. `ThresholdRange`
 /// enforces `lower_threshold_db < upper_threshold_db`, since that ordering spans
 /// two fields and no single `Threshold` can express it on its own.
 #[nutype(
