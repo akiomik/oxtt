@@ -11,6 +11,7 @@ use oxtt::{cli::Cli, jack_host, params::OttParams};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let report_xruns_on_exit = cli.report_xruns_on_exit;
     let params = match OttParams::try_from(cli) {
         Ok(params) => params,
         Err(e) => {
@@ -19,7 +20,12 @@ fn main() -> ExitCode {
         }
     };
     match jack_host::run(params) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(summary) => {
+            if report_xruns_on_exit {
+                eprintln!("oxtt: xrun_count={}", summary.xrun_count());
+            }
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("oxtt: {e}");
             ExitCode::FAILURE

@@ -55,10 +55,10 @@ During a transition, coefficients may be updated as needed. Once both cutoffs ar
 
 `AudioProcessHandler::process` and its transitive DSP calls must not allocate or free heap memory; acquire or wait on a lock; use a blocking channel operation; perform file or standard-stream I/O; spawn, join, or sleep a thread; panic or unwind; or take more than time proportional to the callback's frame count.
 
-The current JACK callbacks communicate shutdown and sample-rate changes through atomics. Any future control path into the audio callback must preserve these non-blocking, allocation-free requirements.
+The current JACK callbacks communicate shutdown, sample-rate changes, and xrun diagnostics through atomics. An xrun notification increments a diagnostic counter only; it must not format or emit a log record from the JACK-managed thread. Any future control path into the audio callback must preserve these non-blocking, allocation-free requirements.
 
 ## 7. JACK host lifecycle
 
 `jack_host::run` creates the `oxtt` client with exactly four ports: `input_l`, `input_r`, `output_l`, and `output_r`. It does not hardcode physical port names or auto-connect ports.
 
-The host uses JACK's assigned sample rate and buffer size. It reports connection/setup failures to stderr and returns a non-zero exit status, and it stops safely after JACK shutdown, `SIGINT`, or `SIGTERM`. After a JACK sample-rate notification, the audio callback resets the processor before later processing; a reset failure is contained in the callback rather than causing a panic.
+The host uses JACK's assigned sample rate and buffer size. It reports connection/setup failures to stderr and returns a non-zero exit status, and it stops safely after JACK shutdown, `SIGINT`, or `SIGTERM`. After a normal stop it returns the number of JACK xrun notifications to its caller. The CLI prints that value only when `--report-xruns-on-exit` is requested; normal operation has no mandatory diagnostic output. After a JACK sample-rate notification, the audio callback resets the processor before later processing; a reset failure is contained in the callback rather than causing a panic.

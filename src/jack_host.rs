@@ -2,7 +2,7 @@
 
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -35,6 +35,20 @@ pub enum HostError {
     Signal(#[from] io::Error),
 }
 
+/// Diagnostics collected by the JACK host during one completed run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunSummary {
+    xrun_count: u64,
+}
+
+impl RunSummary {
+    /// Number of xrun notifications delivered by JACK while the client was active.
+    #[must_use]
+    pub const fn xrun_count(self) -> u64 {
+        self.xrun_count
+    }
+}
+
 /// Receives JACK shutdown notifications and sample-rate changes (docs/contracts.md §7).
 ///
 /// These callbacks may be invoked from a thread other than the process
@@ -43,6 +57,7 @@ pub enum HostError {
 struct Notifications {
     shutdown_requested: Arc<AtomicBool>,
     pending_sample_rate: Arc<AtomicU32>,
+    xrun_count: Arc<AtomicU64>,
 }
 
 impl jack::NotificationHandler for Notifications {
@@ -54,6 +69,14 @@ impl jack::NotificationHandler for Notifications {
         // Use 0 as the "nothing pending" sentinel. JACK's sample rate is never 0 in practice.
         self.pending_sample_rate
             .store(srate.max(1), Ordering::Release);
+        Control::Continue
+    }
+
+    fn xrun(&mut self, _: &Client) -> Control {
+        // This notification can run on a JACK-managed thread. Counting is
+        // intentionally the only work here; formatting/reporting happens in
+        // the CLI after the host has stopped.
+        self.xrun_count.fetch_add(1, Ordering::Relaxed);
         Control::Continue
     }
 }
@@ -110,9 +133,10 @@ impl jack::ProcessHandler for AudioProcessHandler {
 ///
 /// # Errors
 ///
-/// Returns `HostError` if connecting to JACK, registering ports, validating
-/// `params`, or installing the SIGINT/SIGTERM handler fails.
-pub fn run(params: OttParams) -> Result<(), HostError> {
+/// Returns a [`RunSummary`] after a normal shutdown. Returns `HostError` if
+/// connecting to JACK, registering ports, validating `params`, installing the
+/// SIGINT/SIGTERM handler, or deactivating the client fails.
+pub fn run(params: OttParams) -> Result<RunSummary, HostError> {
     let (client, _status) = Client::new(CLIENT_NAME, ClientOptions::default())?;
 
     // Never auto-connects to physical ports (docs/contracts.md §7).
@@ -129,6 +153,7 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
 
     let shutdown_requested = Arc::new(AtomicBool::new(false));
     let pending_sample_rate = Arc::new(AtomicU32::new(0));
+    let xrun_count = Arc::new(AtomicU64::new(0));
 
     flag::register(SIGINT, Arc::clone(&shutdown_requested))?;
     flag::register(SIGTERM, Arc::clone(&shutdown_requested))?;
@@ -136,6 +161,7 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
     let notifications = Notifications {
         shutdown_requested: Arc::clone(&shutdown_requested),
         pending_sample_rate: Arc::clone(&pending_sample_rate),
+        xrun_count: Arc::clone(&xrun_count),
     };
     let process_handler = AudioProcessHandler {
         processor,
@@ -156,5 +182,18 @@ pub fn run(params: OttParams) -> Result<(), HostError> {
     }
 
     active_client.deactivate()?;
-    Ok(())
+    Ok(RunSummary {
+        xrun_count: xrun_count.load(Ordering::Relaxed),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RunSummary;
+
+    #[test]
+    fn run_summary_exposes_xrun_count() {
+        let summary = RunSummary { xrun_count: 3 };
+        assert_eq!(summary.xrun_count(), 3);
+    }
 }

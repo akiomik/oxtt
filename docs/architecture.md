@@ -61,11 +61,11 @@ main.rs: Cli::parse, Client::new,       |  AudioProcessHandler::process
                                          |    - OttProcessor::process
 signal_hook: SIGINT/SIGTERM -> Atomic   |      (no alloc, no lock, no I/O)
 main loop: poll shutdown flag, sleep    |
-active_client.deactivate()              |  Notifications::sample_rate / shutdown
+active_client.deactivate(), CLI report  |  Notifications::sample_rate / shutdown / xrun
                                          |  (JACK-internal thread, Atomic stores only)
 ```
 
-`AudioProcessHandler` and `Notifications` (`src/jack_host.rs`) communicate only through `Arc<AtomicBool>` and `Arc<AtomicU32>`. The audio callback never blocks on a lock, allocates, or performs I/O. See `contracts.md` (section 6) for the full list of operations prohibited inside the callback, and for how a future control-surface thread (GPIO/ADC on Raspberry Pi) would plug into this same boundary via a bounded non-blocking queue instead of a new lock.
+`AudioProcessHandler` and `Notifications` (`src/jack_host.rs`) communicate only through `Arc<AtomicBool>` and `Arc<AtomicU32>`. `Notifications` also updates an `Arc<AtomicU64>` xrun diagnostic counter; the main thread reads it only after deactivation and the CLI emits it only for `--report-xruns-on-exit`. The audio callback never blocks on a lock, allocates, or performs I/O. See `contracts.md` (section 6) for the full list of operations prohibited inside the callback, and for how a future control-surface thread (GPIO/ADC on Raspberry Pi) would plug into this same boundary via a bounded non-blocking queue instead of a new lock.
 
 ## Parameter Update Path
 

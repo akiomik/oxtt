@@ -53,6 +53,10 @@ pub struct Cli {
     /// mid/high split, range 400..16000
     #[arg(long, value_name = "Hz")]
     pub high_crossover: Option<CrossoverFreqHigh>,
+
+    /// print the JACK xrun count to stderr after a normal exit
+    #[arg(long)]
+    pub report_xruns_on_exit: bool,
 }
 
 /// Crossover octave separation is checked here, immediately after parsing
@@ -133,6 +137,12 @@ mod tests {
         assert!(Cli::try_parse_from(["oxtt", "--depth", "2.0"]).is_err());
         assert!(Cli::try_parse_from(["oxtt", "--input-gain", "100"]).is_err());
         assert!(Cli::try_parse_from(["oxtt", "--low-crossover", "10"]).is_err());
+    }
+
+    #[test]
+    fn xrun_report_is_opt_in() {
+        assert!(!Cli::parse_from(["oxtt"]).report_xruns_on_exit);
+        assert!(Cli::parse_from(["oxtt", "--report-xruns-on-exit"]).report_xruns_on_exit);
     }
 
     #[test]
