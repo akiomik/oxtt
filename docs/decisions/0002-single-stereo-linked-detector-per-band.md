@@ -16,7 +16,7 @@ The detector's `low_env`/`high_env` state is initialized to the *threshold-deriv
 
 ## Consequences
 
-- Stereo image is preserved under transients that hit only one channel: driving one channel hard does not desync the gain applied to the other channel, since `DualThresholdCompressor::process` takes a single detector power `p` and returns a single `dynamic_gain` applied to both `wet_left` and `wet_right` (`src/dsp/mod.rs`, `src/dsp/compressor.rs`).
+- Stereo image is preserved under transients that hit only one channel: driving one channel hard does not desync the gain applied to the other channel, since `DualThresholdCompressor::process` takes a single detector power `p` and returns a single `dynamic_gain` applied to both `wet_left` and `wet_right` (`src/dsp.rs`, `src/dsp/compressor.rs`).
 - A future "selectable stereo link" or per-channel/sidechain mode would need a new parameter and a second gain-computation path; it is not a mode switch on the existing detector.
 - The threshold-snapped initial state avoids a startup artifact and is required for `set_params`/`reset` semantics to compose correctly with parameter smoothing (see `contracts.md` section 2).
-- Verified by `init_state_yields_0db_gain` (`src/dsp/compressor.rs`), `init_and_reset_snap_to_threshold_powers` and `reset_after_use_snaps_back_to_threshold_powers` (`src/dsp/envelope.rs`).
+- Verified by `detector_power_is_symmetric_peak_linked` (`src/dsp/envelope.rs`) and `band_applies_one_dynamic_gain_to_asymmetric_stereo_input` (`src/dsp.rs`); startup/reset behavior is covered by `init_state_yields_0db_gain` (`src/dsp/compressor.rs`), `init_and_reset_snap_to_threshold_powers`, and `reset_after_use_snaps_back_to_threshold_powers` (`src/dsp/envelope.rs`).

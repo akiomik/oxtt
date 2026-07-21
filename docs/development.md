@@ -94,13 +94,13 @@ The suite is organized by module and none of it requires a running JACK server:
 
 - `src/cli.rs` — CLI argument parsing
 - `src/params/` — parameter value objects, validation, and presets
-- `src/dsp/mod.rs` — `OttProcessor` unit tests and processor-level integration tests
+- `src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
 - `src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `src/dsp/smooth.rs` — parameter-smoothing tests
 
-See `contracts.md` for what each contract guarantees and which tests verify it.
+See `contracts.md` for the guarantees those tests protect.
 
 ## Running Locally Without Real Audio Hardware
 

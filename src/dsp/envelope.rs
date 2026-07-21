@@ -150,6 +150,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn detector_power_is_symmetric_peak_linked() {
+        let expected = 0.75_f32.powi(2);
+        let left_dominant = detector_power(-0.75, 0.25);
+        let right_dominant = detector_power(0.25, -0.75);
+
+        assert!((left_dominant - expected).abs() <= f32::EPSILON);
+        assert!((right_dominant - expected).abs() <= f32::EPSILON);
+    }
+
+    #[test]
     fn step_response_is_monotonic_towards_target() {
         let sample_rate = 48_000.0;
         let mut env = 0.0_f32;

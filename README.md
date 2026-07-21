@@ -42,6 +42,6 @@ Run `cargo run --release -- --help` for the full list of CLI options (gain, dept
 Technical documentation lives under `docs/`:
 
 - [`docs/architecture.md`](docs/architecture.md) — component structure, signal flow, state ownership, real-time boundaries
-- [`docs/contracts.md`](docs/contracts.md) — preconditions, postconditions, and invariants of the public API and the audio callback, with links to the tests that verify them
+- [`docs/contracts.md`](docs/contracts.md) — normative DSP and real-time audio-callback contracts
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs)
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes

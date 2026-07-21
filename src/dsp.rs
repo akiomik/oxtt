@@ -699,6 +699,34 @@ mod processor_tests {
     }
 
     #[test]
+    fn band_applies_one_dynamic_gain_to_asymmetric_stereo_input() {
+        let sample_rate = 48_000.0;
+        let params = Preset::Default.params();
+        let mut band = BandProcessor::new(&params.bands.mid, sample_rate);
+        let frame = FrameControls {
+            time: params.global.time.get(),
+            upward: params.global.upward.get(),
+            downward: params.global.downward.get(),
+            depth: 1.0,
+        };
+
+        // A hard-panned, loud signal must still drive one shared gain for the
+        // quieter channel (docs/contracts.md §4, ADR 0002).
+        let left_in = 0.02;
+        let right_in = 0.5;
+        for _ in 0..2_000 {
+            let (left_out, right_out) = band.process(left_in, right_in, &frame, sample_rate);
+            let left_gain = left_out / left_in;
+            let right_gain = right_out / right_in;
+            let tolerance = 1e-5 * left_gain.abs().max(right_gain.abs()).max(1.0);
+            assert!(
+                (left_gain - right_gain).abs() <= tolerance,
+                "left gain {left_gain} differs from right gain {right_gain}"
+            );
+        }
+    }
+
+    #[test]
     fn process_rejects_mismatched_buffer_lengths() {
         let sample_rate = 48_000.0;
         let params = Preset::SafeStart.params();
