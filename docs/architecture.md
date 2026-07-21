@@ -17,7 +17,7 @@ main.rs
        -> Notifications           JACK notification callback (shutdown, sample-rate change)
 ```
 
-`OttProcessor` (`src/dsp/mod.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let a different host adapter (e.g. an ALSA-direct backend) be added later without touching `dsp/` (see `decisions/0005-jack-adapter-with-alsa-direct-deferred.md`).
+`OttProcessor` (`src/dsp/mod.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let the Linux-only ALSA-direct adapter selected for a future Raspberry Pi native backend be added without touching `dsp/` (see `decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md`).
 
 ## Signal Flow
 

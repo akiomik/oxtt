@@ -1,7 +1,7 @@
 //! oxtt: DSP core for a 3-band upward/downward multiband compressor.
 //!
 //! Keeps `main.rs` and `jack_host.rs` thin, so `OttProcessor` can be exposed
-//! and tested directly here without starting JACK (docs/architecture.md, ADR 0005).
+//! and tested directly here without starting JACK (docs/architecture.md, ADR 0007).
 
 pub mod bands;
 pub mod cli;

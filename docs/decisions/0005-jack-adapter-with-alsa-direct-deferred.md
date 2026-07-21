@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0007](0007-alsa-direct-not-cpal-for-pi-native-backend.md)
+
+ADR 0007 retains the JACK adapter as the current implementation but decides that
+any future Raspberry Pi native-audio backend will use ALSA directly rather than
+CPAL's ALSA backend.
 
 ## Context
 
