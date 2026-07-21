@@ -12,6 +12,69 @@ cargo build
 cargo build --release
 ```
 
+The repository's `rust-toolchain.toml` pins the development toolchain and is
+selected automatically by `rustup` while the current directory is inside the
+repository. `Cargo.toml`'s `rust-version` has a different purpose: it declares
+the minimum supported Rust version used by the MSRV CI job. Do not replace the
+pinned development toolchain with the MSRV just to build a release binary.
+The toolchain uses the `minimal` profile to avoid downloading local Rust
+documentation on headless systems; `clippy` and `rustfmt` remain explicitly
+listed as required components.
+
+For a reproducible binary, including the Raspberry Pi build, use the lockfile:
+
+```sh
+cargo build --release --locked
+```
+
+## Raspberry Pi 5 Native Build
+
+The Raspberry Pi 5 baseline is a native build on 64-bit Raspberry Pi OS Lite.
+This is both the host and target platform `aarch64-unknown-linux-gnu`, so no
+additional target is needed in `rust-toolchain.toml` and no `--target` argument
+is needed.
+
+Install the native build and JACK dependencies on the Pi:
+
+```sh
+sudo apt update
+sudo apt install build-essential pkg-config git curl file jackd2 libjack-jackd2-dev
+```
+
+Install `rustup` without an unrelated default toolchain. The first Rust command
+run in the repository will install the version and components declared by
+`rust-toolchain.toml`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none
+source "${HOME}/.cargo/env"
+git clone https://github.com/akiomik/oxtt.git
+cd oxtt
+rustup show active-toolchain
+rustc -vV
+cargo build --release --locked
+file target/release/oxtt
+ldd target/release/oxtt
+```
+
+Before running the binary, confirm that `rustc -vV` reports
+`host: aarch64-unknown-linux-gnu`, `file` reports an AArch64 ELF binary, and
+`ldd` resolves `libjack.so.0`.
+
+### Why macOS cross-compilation is not the baseline
+
+Adding `aarch64-unknown-linux-gnu` to `rust-toolchain.toml` only installs that
+target's Rust standard library. A macOS host would still need a Linux/AArch64
+linker and sysroot, plus target-architecture JACK libraries and `pkg-config`
+configuration for `jack-sys`. That setup is more moving parts than a native Pi
+build and would make every developer install a target that most builds do not
+use.
+
+For Raspberry Pi verification, transfer the source with Git and build on the
+Pi. Introduce a containerized cross-build workflow (and then add the Rust target
+explicitly) only if native build time or repeated deployment becomes a measured
+problem.
+
 ## Format and Lint
 
 ```sh
