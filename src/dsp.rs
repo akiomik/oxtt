@@ -401,8 +401,32 @@ mod unit_tests {
 )]
 mod processor_tests {
     use super::*;
-    use crate::params::{IoGain, MakeupGain, NormalizedF32, Preset};
+    use crate::params::{
+        CrossoverFreqHigh, CrossoverFreqLow, CrossoverSplit, IoGain, MakeupGain, NormalizedF32,
+        Preset,
+    };
+    use proptest::prelude::*;
     use std::f32::consts::PI;
+
+    const PROPERTY_CASES: u32 = 128;
+
+    fn arbitrary_samples() -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(any::<u32>().prop_map(f32::from_bits), 0..=256)
+    }
+
+    fn arbitrary_stereo_samples() -> impl Strategy<Value = (Vec<f32>, Vec<f32>)> {
+        prop::collection::vec((any::<u32>(), any::<u32>()), 0..=256).prop_map(|frames| {
+            let (left_bits, right_bits): (Vec<_>, Vec<_>) = frames.into_iter().unzip();
+            (
+                left_bits.into_iter().map(f32::from_bits).collect(),
+                right_bits.into_iter().map(f32::from_bits).collect(),
+            )
+        })
+    }
+
+    fn finite_samples() -> impl Strategy<Value = Vec<f32>> {
+        prop::collection::vec(any::<i16>().prop_map(f32::from), 0..=256)
+    }
 
     fn rms(samples: &[f32]) -> f32 {
         let sum_sq: f64 = samples.iter().map(|&x| f64::from(x) * f64::from(x)).sum();
@@ -684,6 +708,157 @@ mod processor_tests {
         let mut out_r = vec![0.0_f32; 9];
         let result = proc.process(&input, &input, &mut out_l, &mut out_r);
         assert_eq!(result, Err(ProcessError::BufferLengthMismatch));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(PROPERTY_CASES))]
+
+        #[test]
+        fn arbitrary_audio_samples_produce_only_finite_output(
+            (input_l, input_r) in arbitrary_stereo_samples(),
+        ) {
+            let mut processor = OttProcessor::new(48_000.0, Preset::Default.params()).unwrap();
+            let mut output_l = vec![0.0; input_l.len()];
+            let mut output_r = vec![0.0; input_r.len()];
+
+            prop_assert_eq!(
+                processor.process(&input_l, &input_r, &mut output_l, &mut output_r),
+                Ok(())
+            );
+            prop_assert!(output_l.iter().all(|sample| sample.is_finite()));
+            prop_assert!(output_r.iter().all(|sample| sample.is_finite()));
+        }
+
+        #[test]
+        fn mismatched_buffers_leave_outputs_unchanged(
+            input_l in arbitrary_samples(),
+            input_r in arbitrary_samples(),
+            mut output_l in finite_samples(),
+            mut output_r in finite_samples(),
+        ) {
+            prop_assume!(
+                input_l.len() != input_r.len()
+                    || input_l.len() != output_l.len()
+                    || input_l.len() != output_r.len()
+            );
+            let original_l = output_l.clone();
+            let original_r = output_r.clone();
+            let mut processor = OttProcessor::new(48_000.0, Preset::SafeStart.params()).unwrap();
+
+            prop_assert_eq!(
+                processor.process(&input_l, &input_r, &mut output_l, &mut output_r),
+                Err(ProcessError::BufferLengthMismatch)
+            );
+            prop_assert_eq!(output_l, original_l);
+            prop_assert_eq!(output_r, original_r);
+        }
+
+        #[test]
+        fn arbitrary_chunkings_are_bit_identical(
+            (input_l, input_r) in arbitrary_stereo_samples(),
+            chunk_hints in prop::collection::vec(any::<u8>(), 1..=16),
+        ) {
+            let params = Preset::Default.params();
+            let mut whole_processor = OttProcessor::new(48_000.0, params).unwrap();
+            let mut whole_l = vec![0.0; input_l.len()];
+            let mut whole_r = vec![0.0; input_r.len()];
+            prop_assert_eq!(
+                whole_processor.process(&input_l, &input_r, &mut whole_l, &mut whole_r),
+                Ok(())
+            );
+
+            let mut chunked_processor = OttProcessor::new(48_000.0, params).unwrap();
+            let mut chunked_l = vec![0.0; input_l.len()];
+            let mut chunked_r = vec![0.0; input_r.len()];
+            let mut offset = 0;
+            let mut chunk_index = 0;
+            while offset < input_l.len() {
+                let remaining = input_l.len() - offset;
+                let hint = usize::from(chunk_hints[chunk_index % chunk_hints.len()]);
+                let chunk_len = 1 + hint % remaining;
+                let end = offset + chunk_len;
+                prop_assert_eq!(
+                    chunked_processor.process(
+                        &input_l[offset..end],
+                        &input_r[offset..end],
+                        &mut chunked_l[offset..end],
+                        &mut chunked_r[offset..end],
+                    ),
+                    Ok(())
+                );
+                offset = end;
+                chunk_index += 1;
+            }
+
+            prop_assert_eq!(chunked_l, whole_l);
+            prop_assert_eq!(chunked_r, whole_r);
+        }
+
+        #[test]
+        fn rejected_parameter_updates_leave_processing_state_unchanged(
+            sample_rate in 8_000_u32..=17_000,
+            (input_l, input_r) in arbitrary_stereo_samples(),
+        ) {
+            let sample_rate = sample_rate as f32;
+            let params = Preset::Default.params();
+            let mut processor = OttProcessor::new(sample_rate, params).unwrap();
+            let mut control = OttProcessor::new(sample_rate, params).unwrap();
+            let mut invalid_params = params;
+            invalid_params.global.crossover = CrossoverSplit::new_const(
+                CrossoverFreqLow::new_const(500.0),
+                CrossoverFreqHigh::new_const(8_000.0),
+            );
+            prop_assert!(processor.set_params(invalid_params).is_err());
+
+            let mut output_l = vec![0.0; input_l.len()];
+            let mut output_r = vec![0.0; input_r.len()];
+            let mut control_l = vec![0.0; input_l.len()];
+            let mut control_r = vec![0.0; input_r.len()];
+            prop_assert_eq!(
+                processor.process(&input_l, &input_r, &mut output_l, &mut output_r),
+                Ok(())
+            );
+            prop_assert_eq!(
+                control.process(&input_l, &input_r, &mut control_l, &mut control_r),
+                Ok(())
+            );
+            prop_assert_eq!(output_l, control_l);
+            prop_assert_eq!(output_r, control_r);
+        }
+
+        #[test]
+        fn valid_lifecycle_operation_sequences_keep_output_finite(
+            operations in prop::collection::vec((0_u8..3, any::<u8>(), any::<u8>(), 8_000_u32..=384_000, any::<u32>(), any::<u32>()), 1..=64),
+        ) {
+            let mut params = Preset::Default.params();
+            let mut processor = OttProcessor::new(48_000.0, params).unwrap();
+            for (operation, first, second, sample_rate, left_bits, right_bits) in operations {
+                match operation {
+                    0 => {
+                        let input_l = [f32::from_bits(left_bits)];
+                        let input_r = [f32::from_bits(right_bits)];
+                        let mut output_l = [0.0];
+                        let mut output_r = [0.0];
+                        prop_assert_eq!(
+                            processor.process(&input_l, &input_r, &mut output_l, &mut output_r),
+                            Ok(())
+                        );
+                        prop_assert!(output_l[0].is_finite());
+                        prop_assert!(output_r[0].is_finite());
+                    }
+                    1 => {
+                        params.global.input_gain_db = IoGain::new_const(f32::from(first % 49) - 24.0);
+                        params.global.output_gain_db = IoGain::new_const(f32::from(second % 49) - 24.0);
+                        params.global.depth = NormalizedF32::new_const(f32::from(first) / f32::from(u8::MAX));
+                        params.global.time = NormalizedF32::new_const(f32::from(second) / f32::from(u8::MAX));
+                        prop_assert_eq!(processor.set_params(params), Ok(()));
+                    }
+                    _ => {
+                        prop_assert_eq!(processor.reset(sample_rate as f32), Ok(()));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

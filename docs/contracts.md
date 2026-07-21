@@ -44,6 +44,7 @@ Verified by:
 Verified by:
 
 - `reset_reapplies_last_target_params_without_startup_fade` (`src/dsp/mod.rs`)
+- `rejected_parameter_updates_leave_processing_state_unchanged` (`src/dsp.rs`, property test for the failed-`set_params` state-preservation contract)
 - `sample_rate_change_does_not_cause_startup_fade` (`src/dsp/smooth.rs`)
 - `init_state_yields_0db_gain`, `init_and_reset_snap_to_threshold_powers` (`src/dsp/compressor.rs`, `src/dsp/envelope.rs`)
 
@@ -59,6 +60,8 @@ Verified by:
 - `process_rejects_mismatched_buffer_lengths`
 - `chunking_does_not_affect_output`
 - `result_is_independent_of_chunking` (`src/dsp/smooth.rs`, for the underlying smoothing primitive)
+- `arbitrary_chunkings_are_bit_identical` (`src/dsp.rs`, property test over arbitrary stereo samples and chunk boundaries)
+- `mismatched_buffers_leave_outputs_unchanged` (`src/dsp.rs`, property test over arbitrary combinations of all four buffer lengths and finite output sentinels)
 
 ## 4. Numerical Safety Invariants
 
@@ -77,6 +80,8 @@ These hold for every sample processed by `OttProcessor::process`, for any `param
 Verified by:
 
 - `stays_finite_for_extended_stress_signals` (silence, DC, full-scale sine, impulse, white noise, >= 10 s, `src/dsp/mod.rs`)
+- `arbitrary_audio_samples_produce_only_finite_output` (`src/dsp.rs`, property test over arbitrary `f32` bit patterns, including NaN and infinities)
+- `valid_lifecycle_operation_sequences_keep_output_finite` (`src/dsp.rs`, property test over valid `process`/`set_params`/`reset` sequences)
 - `dc_and_nyquist_neighborhood_do_not_produce_nan_or_inf` (`src/dsp/crossover.rs`)
 - `gain_clamp_does_not_exceed_limits` (`src/dsp/compressor.rs`)
 - `silence_stays_silent_even_with_max_upward_gain` (`src/dsp/compressor.rs`)
