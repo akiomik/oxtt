@@ -49,6 +49,7 @@ perf = { level = "warn", priority = -1 }
 suspicious = { level = "warn", priority = -1 }
 
 absolute_paths = "warn"
+arithmetic_side_effects = "warn"
 cognitive_complexity = "warn"
 disallowed_macros = "warn"
 disallowed_methods = "warn"

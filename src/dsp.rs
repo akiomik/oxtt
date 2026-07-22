@@ -398,7 +398,8 @@ mod unit_tests {
     clippy::cast_sign_loss,
     clippy::similar_names,
     clippy::disallowed_macros,
-    clippy::indexing_slicing
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
 )]
 mod processor_tests {
     use super::*;

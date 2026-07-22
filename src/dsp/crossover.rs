@@ -227,6 +227,7 @@ impl Crossover {
         self.left.set_low_cutoff(low_hz, self.sample_rate);
         self.right.set_low_cutoff(low_hz, self.sample_rate);
         #[cfg(test)]
+        #[allow(clippy::arithmetic_side_effects)]
         {
             self.coefficient_update_count += 1;
         }
@@ -236,6 +237,7 @@ impl Crossover {
         self.left.set_high_cutoff(high_hz, self.sample_rate);
         self.right.set_high_cutoff(high_hz, self.sample_rate);
         #[cfg(test)]
+        #[allow(clippy::arithmetic_side_effects)]
         {
             self.coefficient_update_count += 1;
         }
@@ -281,7 +283,8 @@ impl Crossover {
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::float_cmp
+    clippy::float_cmp,
+    clippy::arithmetic_side_effects
 )]
 mod tests {
     use std::f64::consts::SQRT_2;
