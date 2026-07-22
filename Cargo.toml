@@ -20,6 +20,7 @@ thiserror = "2"
 no-panic = "0.1"
 proptest = "1"
 
+[profile.release]
 # A single codegen unit lets LLVM inline and optimize across the whole crate,
 # which `OttProcessor::process`/`reset`'s `#[no_panic]` proof
 # (docs/contracts.md §6) needs to eliminate their panic paths (e.g. slice
@@ -27,7 +28,6 @@ proptest = "1"
 # parallel codegen units isn't aggressive enough for that proof to go
 # through. Real release builds benefit the same way (better inlining across
 # the real-time DSP path), just with a slower build.
-[profile.release]
 codegen-units = 1
 # Cargo always builds test/bench targets with unwind regardless of this
 # setting, so `cargo test --release` (the no-panic proof above) is
