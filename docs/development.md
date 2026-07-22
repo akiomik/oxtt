@@ -102,6 +102,17 @@ The suite is organized by module and none of it requires a running JACK server:
 
 See `contracts.md` for the guarantees those tests protect.
 
+## Inspecting Generated Code
+
+`cargo-show-asm` shows the assembly rustc actually generates for a function, which is the only way to confirm whether a hot DSP function was inlined rather than guessing from `#[inline]` annotations alone:
+
+```sh
+cargo install cargo-show-asm
+cargo asm -p oxtt --lib "OttProcessor::process"
+```
+
+Narrowing to an inner function name (e.g. `db_to_amp`, `process_frame`, `envelope_coefficient`, `update_envelope`) currently reports no match: `[profile.release] codegen-units = 1` together with their `#[inline]` annotations already fully inlines them into `OttProcessor::process`, which is the only real-time-path function with a standalone symbol. Re-check with this tool before adding `#[inline(always)]` anywhere; the compiler may already be doing the work.
+
 ## Running Locally Without Real Audio Hardware
 
 `oxtt` connects to whichever JACK server is already running, under the client name `oxtt`, and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them. To develop without an audio interface:
