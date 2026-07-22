@@ -29,6 +29,11 @@ proptest = "1"
 # the real-time DSP path), just with a slower build.
 [profile.release]
 codegen-units = 1
+# Cargo always builds test/bench targets with unwind regardless of this
+# setting, so `cargo test --release` (the no-panic proof above) is
+# unaffected; this only changes the shipped binary, dropping unwind
+# tables/landing pads since nothing in the real-time path unwinds.
+panic = "abort"
 
 [lints.rust]
 missing_docs = "warn"
