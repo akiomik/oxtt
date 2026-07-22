@@ -1,0 +1,7 @@
+# Scoped to this exact target triple (not `[build]`/`RUSTFLAGS`) so it only
+# fires when actually compiling for the Raspberry Pi 5 (built natively on
+# the Pi itself, not cross-compiled); CI (ubuntu-latest,
+# x86_64-unknown-linux-gnu) and macOS development builds never compile for
+# this triple, so they are unaffected.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=cortex-a76"]
