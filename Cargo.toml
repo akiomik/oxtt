@@ -29,6 +29,7 @@ proptest = "1"
 # through. Real release builds benefit the same way (better inlining across
 # the real-time DSP path), just with a slower build.
 codegen-units = 1
+lto = true
 # Cargo always builds test/bench targets with unwind regardless of this
 # setting, so `cargo test --release` (the no-panic proof above) is
 # unaffected; this only changes the shipped binary, dropping unwind
