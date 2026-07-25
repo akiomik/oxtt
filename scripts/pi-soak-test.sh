@@ -224,21 +224,14 @@ jack_lsp -c -A | tee "$output_dir/graph.txt"
 
 if ((probe_interval > 0)); then
   (
-    # This loop only monitors JACK health for up to 30 minutes; a single
-    # probe's non-zero exit status must never abort the monitoring itself.
-    set +e
-    trace_exit() {
-      local status=$?
-      local alive=no
-      kill -0 "$jackd_pid" 2>/dev/null && alive=yes
-      printf 'TRACE subshell exit status=%s jackd_alive=%s\n' "$status" "$alive" >>"$output_dir/probe-trace.log"
-    }
-    trap trace_exit EXIT
+    # This loop only monitors JACK health for up to 30 minutes. Each probe is
+    # individually guarded (with `|| true`, or by being tested in a condition),
+    # so a single probe's non-zero exit never aborts the monitoring loop even
+    # under the inherited `set -e`.
     success=0
     failure=0
     while kill -0 "$jackd_pid" 2>/dev/null; do
       stamp=$(date -Is)
-      printf 'TRACE iter %s\n' "$stamp" >>"$output_dir/probe-trace.log"
       lsp_ok=0
       timeout 2s jack_lsp >>"$output_dir/probe-lsp.log" 2>&1 && lsp_ok=1 || true
       # jack_cpu_load streams samples until killed, so `timeout` always ends it
