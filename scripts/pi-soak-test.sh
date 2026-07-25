@@ -96,6 +96,12 @@ done
   exit 1
 }
 
+# This test runs unattended for up to 30 minutes, commonly launched over an
+# SSH command that exits right after backgrounding it. Detach stdin from the
+# invoking shell so no child (directly or via the probe subshell below) can be
+# affected once that SSH channel closes.
+exec </dev/null
+
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd)
 
@@ -214,11 +220,29 @@ jack_lsp -c -A | tee "$output_dir/graph.txt"
 
 if ((probe_interval > 0)); then
   (
+    # This loop only monitors JACK health for up to 30 minutes; a single
+    # probe's non-zero exit status must never abort the monitoring itself.
+    set +e
+    trace_exit() {
+      local status=$?
+      local alive=no
+      kill -0 "$jackd_pid" 2>/dev/null && alive=yes
+      printf 'TRACE subshell exit status=%s jackd_alive=%s\n' "$status" "$alive" >>"$output_dir/probe-trace.log"
+    }
+    trap trace_exit EXIT
     success=0
     failure=0
     while kill -0 "$jackd_pid" 2>/dev/null; do
       stamp=$(date -Is)
-      if timeout 2s jack_lsp >>"$output_dir/probe-lsp.log" 2>&1 && timeout 2s jack_cpu_load >>"$output_dir/probe-cpu-load.log" 2>&1; then
+      printf 'TRACE iter %s\n' "$stamp" >>"$output_dir/probe-trace.log"
+      lsp_ok=0
+      timeout 2s jack_lsp >>"$output_dir/probe-lsp.log" 2>&1 && lsp_ok=1 || true
+      # jack_cpu_load streams samples until killed, so `timeout` always ends it
+      # with a non-zero exit status even on success; judge it by its output
+      # instead of its exit code.
+      cpu_load_output=$(timeout 2s jack_cpu_load 2>&1 || true)
+      printf '%s\n' "$cpu_load_output" >>"$output_dir/probe-cpu-load.log"
+      if ((lsp_ok)) && grep -q 'jack DSP load' <<<"$cpu_load_output"; then
         success=$((success + 1))
         printf '%s success\n' "$stamp" >>"$output_dir/probe-status.log"
       else
@@ -259,8 +283,15 @@ path, seconds_text = sys.argv[1:]
 seconds = int(seconds_text)
 sample_rate = 48_000
 quiet_threshold = 200
+clip_threshold = 32760
 allowed_edge_frames = 2 * sample_rate
 allowed_gap_frames = sample_rate // 20
+# A clean 997 Hz loopback only dips below quiet_threshold for a few frames per
+# zero crossing (observed up to 17 frames on real hardware). A gap past this
+# is a real dropout even though it is far short of allowed_gap_frames, and
+# such dropouts have been observed to repeat every few seconds without ever
+# tripping JACK's xrun log or oxtt's own xrun counter.
+glitch_gap_frames = 40
 
 with wave.open(path, 'rb') as wav:
     if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (2, 2, sample_rate):
@@ -272,13 +303,21 @@ with wave.open(path, 'rb') as wav:
     last = None
     gap = 0
     max_gap = 0
+    glitch_count = 0
+    clip_count = 0
     index = 0
     while frames := wav.readframes(8192):
         for left, right in struct.iter_unpack('<hh', frames):
-            audible = max(abs(left), abs(right)) >= quiet_threshold
+            peak = max(abs(left), abs(right))
+            if peak >= clip_threshold:
+                clip_count += 1
+            audible = peak >= quiet_threshold
             if audible:
                 if first is not None:
-                    max_gap = max(max_gap, gap)
+                    if gap > max_gap:
+                        max_gap = gap
+                    if gap > glitch_gap_frames:
+                        glitch_count += 1
                 else:
                     first = index
                 last = index
@@ -292,12 +331,24 @@ with wave.open(path, 'rb') as wav:
         raise SystemExit(f'test signal started too late: {first} frames')
     if last is None or last < total - allowed_edge_frames:
         raise SystemExit(f'test signal ended too early: last={last} total={total}')
-    if max_gap > allowed_gap_frames:
-        raise SystemExit(f'unexpected quiet gap: {max_gap} frames')
+
     print(f'frames={total}')
     print(f'first_audible_frame={first}')
     print(f'last_audible_frame={last}')
     print(f'max_quiet_gap_frames={max_gap}')
+    print(f'glitch_gap_count={glitch_count}')
+    print(f'clip_sample_count={clip_count}')
+
+    if max_gap > allowed_gap_frames:
+        raise SystemExit(f'unexpected quiet gap: {max_gap} frames')
+    if glitch_count > 0:
+        raise SystemExit(
+            f'{glitch_count} short dropout(s) exceeded {glitch_gap_frames} frames '
+            f'(max={max_gap} frames); JACK and oxtt xrun counters can both read zero '
+            'while this happens'
+        )
+    if clip_count > 0:
+        raise SystemExit(f'{clip_count} sample(s) reached full-scale ({clip_threshold}/32767)')
 PY
 
 awk 'tolower($0) ~ /(xrun|underrun|overrun)/ { count++ } END { print count + 0 }' "$output_dir/jackd.log" \
