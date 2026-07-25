@@ -73,7 +73,7 @@ done
   exit 2
 }
 
-for command in jackd jack_lsp jack_connect jack_cpu_load python3 timeout vcgencmd; do
+for command in jackd jack_lsp jack_connect jack_cpu_load timeout vcgencmd; do
   command -v "$command" >/dev/null || {
     printf 'required command is unavailable: %s\n' "$command" >&2
     exit 1
@@ -83,12 +83,16 @@ done
   printf '%s\n' 'target/release/oxtt is missing; build current main in the distrobox first' >&2
   exit 1
 }
-[[ -x target/release/examples/soak_source ]] || {
-  printf '%s\n' 'target/release/examples/soak_source is missing; build the soak_source example in the distrobox first' >&2
+[[ -x target/release/soak_source ]] || {
+  printf '%s\n' 'target/release/soak_source is missing; run cargo build --release -p oxtt-jack-tools in the distrobox first' >&2
   exit 1
 }
-[[ -x target/release/examples/soak_recorder ]] || {
-  printf '%s\n' 'target/release/examples/soak_recorder is missing; build the soak_recorder example in the distrobox first' >&2
+[[ -x target/release/soak_recorder ]] || {
+  printf '%s\n' 'target/release/soak_recorder is missing; run cargo build --release -p oxtt-jack-tools in the distrobox first' >&2
+  exit 1
+}
+[[ -x target/release/soak_analyze ]] || {
+  printf '%s\n' 'target/release/soak_analyze is missing; run cargo build --release -p oxtt-jack-tools in the distrobox first' >&2
   exit 1
 }
 [[ "$(git branch --show-current)" == main ]] || {
@@ -163,7 +167,7 @@ done
 printf 'capture_left=%s\ncapture_right=%s\nplayback_left=%s\nplayback_right=%s\n' \
   "$capture_left" "$capture_right" "$playback_left" "$playback_right" | tee "$output_dir/physical-ports.txt"
 
-target/release/examples/soak_recorder --duration "$duration" --output "$recording" \
+target/release/soak_recorder --duration "$duration" --output "$recording" \
   >"$output_dir/soak-recorder.log" 2>&1 &
 recorder_pid=$!
 for _ in $(seq 1 100); do
@@ -183,7 +187,7 @@ jack_lsp | grep -Fx 'soak-recorder:in_2' >/dev/null || {
 jack_connect "$capture_left" soak-recorder:in_1
 jack_connect "$capture_right" soak-recorder:in_2
 
-target/release/examples/soak_source --duration "$duration" >"$output_dir/soak-source.log" 2>&1 &
+target/release/soak_source --duration "$duration" >"$output_dir/soak-source.log" 2>&1 &
 source_pid=$!
 for _ in $(seq 1 100); do
   if jack_lsp | grep -Fx 'soak-source:out_1' >/dev/null && jack_lsp | grep -Fx 'soak-source:out_2' >/dev/null; then
@@ -274,82 +278,12 @@ kill -TERM "$jackd_pid"
 wait "$jackd_pid" || true
 jackd_pid=''
 
-python3 - "$recording" "$duration" <<'PY'
-import struct
-import sys
-import wave
-
-path, seconds_text = sys.argv[1:]
-seconds = int(seconds_text)
-sample_rate = 48_000
-quiet_threshold = 200
-clip_threshold = 32760
-allowed_edge_frames = 2 * sample_rate
-allowed_gap_frames = sample_rate // 20
-# A clean 997 Hz loopback only dips below quiet_threshold for a few frames per
-# zero crossing (observed up to 17 frames on real hardware). A gap past this
-# is a real dropout even though it is far short of allowed_gap_frames, and
-# such dropouts have been observed to repeat every few seconds without ever
-# tripping JACK's xrun log or oxtt's own xrun counter.
-glitch_gap_frames = 40
-
-with wave.open(path, 'rb') as wav:
-    if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (2, 2, sample_rate):
-        raise SystemExit(f'unexpected WAV format: channels={wav.getnchannels()} width={wav.getsampwidth()} rate={wav.getframerate()}')
-    total = wav.getnframes()
-    if total < seconds * sample_rate - allowed_edge_frames:
-        raise SystemExit(f'recording too short: {total} frames')
-    first = None
-    last = None
-    gap = 0
-    max_gap = 0
-    glitch_count = 0
-    clip_count = 0
-    index = 0
-    while frames := wav.readframes(8192):
-        for left, right in struct.iter_unpack('<hh', frames):
-            peak = max(abs(left), abs(right))
-            if peak >= clip_threshold:
-                clip_count += 1
-            audible = peak >= quiet_threshold
-            if audible:
-                if first is not None:
-                    if gap > max_gap:
-                        max_gap = gap
-                    if gap > glitch_gap_frames:
-                        glitch_count += 1
-                else:
-                    first = index
-                last = index
-                gap = 0
-            elif first is not None:
-                gap += 1
-            index += 1
-    if first is None:
-        raise SystemExit('recording contains no audible test signal')
-    if first > allowed_edge_frames:
-        raise SystemExit(f'test signal started too late: {first} frames')
-    if last is None or last < total - allowed_edge_frames:
-        raise SystemExit(f'test signal ended too early: last={last} total={total}')
-
-    print(f'frames={total}')
-    print(f'first_audible_frame={first}')
-    print(f'last_audible_frame={last}')
-    print(f'max_quiet_gap_frames={max_gap}')
-    print(f'glitch_gap_count={glitch_count}')
-    print(f'clip_sample_count={clip_count}')
-
-    if max_gap > allowed_gap_frames:
-        raise SystemExit(f'unexpected quiet gap: {max_gap} frames')
-    if glitch_count > 0:
-        raise SystemExit(
-            f'{glitch_count} short dropout(s) exceeded {glitch_gap_frames} frames '
-            f'(max={max_gap} frames); JACK and oxtt xrun counters can both read zero '
-            'while this happens'
-        )
-    if clip_count > 0:
-        raise SystemExit(f'{clip_count} sample(s) reached full-scale ({clip_threshold}/32767)')
-PY
+# WAV verdict (dropout/clip/gap thresholds). Ported from an inline Python
+# analyser to target/release/soak_analyze so the thresholds are unit- and
+# property-tested; see tools/src/analysis.rs. Statistics go to stdout (kept in
+# wav-analysis.txt); a rejection prints its reason to stderr and exits non-zero,
+# which pipefail propagates to abort the run.
+target/release/soak_analyze "$recording" "$duration" | tee "$output_dir/wav-analysis.txt"
 
 awk 'tolower($0) ~ /(xrun|underrun|overrun)/ { count++ } END { print count + 0 }' "$output_dir/jackd.log" \
   | tee "$output_dir/jack-log-xrun-count.txt"

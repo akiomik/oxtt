@@ -126,19 +126,19 @@ Connect ports with whichever tool is available in your environment:
 
 - `jack_connect` / `jack_lsp`, if your JACK install ships example clients (Homebrew's `jack2` bottle does not, by default).
 - QjackCtl or another GUI patchbay.
-- The bundled example helpers, which depend only on the `jack` crate and work in every environment:
+- The bundled helper binaries in the `oxtt-jack-tools` crate, which depend only on the `jack` crate and work in every environment:
 
   ```sh
-  cargo run --example list_ports
-  cargo run --example connect_ports -- oxtt:input_l system:capture_1
+  cargo run -p oxtt-jack-tools --bin list_ports
+  cargo run -p oxtt-jack-tools --bin connect_ports -- oxtt:input_l system:capture_1
   ```
 
 ## Manual Smoke Test
 
 1. Start `jackd` (a real backend, or `-d dummy`).
 2. `cargo run --release -- --preset safe-start`.
-3. Confirm 4 ports are registered (`list_ports` example, or `jack_lsp`).
-4. Connect ports (`connect_ports` example, `jack_connect`, or a GUI patchbay) and confirm continuous processing at any buffer size.
+3. Confirm 4 ports are registered (`list_ports` helper, or `jack_lsp`).
+4. Connect ports (`connect_ports` helper, `jack_connect`, or a GUI patchbay) and confirm continuous processing at any buffer size.
 5. Send SIGINT (Ctrl-C) and confirm clean shutdown.
 6. Stop the JACK server while `oxtt` is running and confirm it exits instead of hanging.
 
@@ -156,7 +156,7 @@ DYLD_LIBRARY_PATH=/opt/homebrew/lib cargo run --release -- --preset safe-start
 
 ### Verifying against real audio with QjackCtl
 
-Homebrew's `jack2` bottle does not include the `jack_lsp`/`jack_connect` CLI tools (see `cargo run --example list_ports`/`connect_ports` above for a CLI-tool-free alternative). For interactive verification, QjackCtl is the easiest option:
+Homebrew's `jack2` bottle does not include the `jack_lsp`/`jack_connect` CLI tools (see `cargo run -p oxtt-jack-tools --bin list_ports`/`connect_ports` above for a CLI-tool-free alternative). For interactive verification, QjackCtl is the easiest option:
 
 ```sh
 brew install --cask qjackctl

@@ -31,7 +31,7 @@ cargo build --release
 cargo run --release -- --preset safe-start
 ```
 
-`oxtt` connects to the JACK server under the client name `oxtt` and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them — connect them with `jack_connect`, a GUI patchbay, or the bundled `list_ports`/`connect_ports` examples. See `docs/development.md` for local setup details, including macOS-specific notes.
+`oxtt` connects to the JACK server under the client name `oxtt` and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them — connect them with `jack_connect`, a GUI patchbay, or the bundled `list_ports`/`connect_ports` helpers in the `oxtt-jack-tools` crate. See `docs/development.md` for local setup details, including macOS-specific notes.
 
 Run `cargo run --release -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
 
