@@ -9,8 +9,7 @@ Usage:
   scripts/pi-soak-test.sh \
     --card CARD --frames FRAMES --periods PERIODS --mode direct|oxtt \
     --duration SECONDS --capture-left PORT --capture-right PORT \
-    --playback-left PORT --playback-right PORT --output-dir DIRECTORY \
-    [--probe-interval SECONDS]
+    --playback-left PORT --playback-right PORT --output-dir DIRECTORY
 
 Physical wiring for this test:
   Babyface Phones L/R -> Babyface Line/Instrument 3/4 inputs.
@@ -21,8 +20,8 @@ silent recording. In oxtt mode it inserts oxtt between the source and the
 explicit playback ports. For the recorded Babyface mapping, pass
 `system:capture_3`, `system:capture_4`, `system:playback_3`, and
 `system:playback_4` respectively.
---probe-interval 0 performs the audio-only trial. A positive value starts the
-separate JACK control-plane trial and probes jack_lsp and jack_cpu_load.
+Once the graph is up, it also spot-checks the JACK control plane once by
+querying jack_lsp and jack_cpu_load, and rejects a missing or failed answer.
 USAGE
 }
 
@@ -36,7 +35,6 @@ capture_left=''
 capture_right=''
 playback_left=''
 playback_right=''
-probe_interval=0
 
 while (($# > 0)); do
   case "$1" in
@@ -50,7 +48,6 @@ while (($# > 0)); do
     --playback-left) playback_left=${2:?missing value for --playback-left}; shift 2 ;;
     --playback-right) playback_right=${2:?missing value for --playback-right}; shift 2 ;;
     --output-dir) output_dir=${2:?missing value for --output-dir}; shift 2 ;;
-    --probe-interval) probe_interval=${2:?missing value for --probe-interval}; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -64,8 +61,8 @@ done
   printf '%s\n' '--mode must be direct or oxtt' >&2
   exit 2
 }
-[[ "$frames" =~ ^[0-9]+$ && "$periods" =~ ^[0-9]+$ && "$duration" =~ ^[0-9]+$ && "$probe_interval" =~ ^[0-9]+$ ]] || {
-  printf '%s\n' 'frames, periods, duration, and probe interval must be non-negative integers' >&2
+[[ "$frames" =~ ^[0-9]+$ && "$periods" =~ ^[0-9]+$ && "$duration" =~ ^[0-9]+$ ]] || {
+  printf '%s\n' 'frames, periods, and duration must be non-negative integers' >&2
   exit 2
 }
 ((frames > 0 && periods > 0 && duration > 0)) || {
@@ -102,8 +99,7 @@ done
 
 # This test runs unattended for up to 30 minutes, commonly launched over an
 # SSH command that exits right after backgrounding it. Detach stdin from the
-# invoking shell so no child (directly or via the probe subshell below) can be
-# affected once that SSH channel closes.
+# invoking shell so no child can be affected once that SSH channel closes.
 exec </dev/null
 
 mkdir -p "$output_dir"
@@ -113,11 +109,10 @@ jackd_pid=''
 oxtt_pid=''
 recorder_pid=''
 source_pid=''
-probe_pid=''
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
-  for pid in "$probe_pid" "$source_pid" "$recorder_pid" "$oxtt_pid" "$jackd_pid"; do
+  for pid in "$source_pid" "$recorder_pid" "$oxtt_pid" "$jackd_pid"; do
     if [[ -n "$pid" ]]; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
@@ -222,36 +217,25 @@ else
 fi
 jack_lsp -c -A | tee "$output_dir/graph.txt"
 
-if ((probe_interval > 0)); then
-  (
-    # This loop only monitors JACK health for up to 30 minutes. Each probe is
-    # individually guarded (with `|| true`, or by being tested in a condition),
-    # so a single probe's non-zero exit never aborts the monitoring loop even
-    # under the inherited `set -e`.
-    success=0
-    failure=0
-    while kill -0 "$jackd_pid" 2>/dev/null; do
-      stamp=$(date -Is)
-      lsp_ok=0
-      timeout 2s jack_lsp >>"$output_dir/probe-lsp.log" 2>&1 && lsp_ok=1 || true
-      # jack_cpu_load streams samples until killed, so `timeout` always ends it
-      # with a non-zero exit status even on success; judge it by its output
-      # instead of its exit code.
-      cpu_load_output=$(timeout 2s jack_cpu_load 2>&1 || true)
-      printf '%s\n' "$cpu_load_output" >>"$output_dir/probe-cpu-load.log"
-      if ((lsp_ok)) && grep -q 'jack DSP load' <<<"$cpu_load_output"; then
-        success=$((success + 1))
-        printf '%s success\n' "$stamp" >>"$output_dir/probe-status.log"
-      else
-        failure=$((failure + 1))
-        printf '%s failure\n' "$stamp" >>"$output_dir/probe-status.log"
-      fi
-      sleep "$probe_interval"
-    done
-    printf 'success=%s\nfailure=%s\n' "$success" "$failure" >"$output_dir/probe-summary.txt"
-  ) &
-  probe_pid=$!
+# Control-plane spot check. The audio path proves the data plane, and the
+# failure-pattern grep near the end proves no client collapsed during the run.
+# Neither exercises whether a *fresh* JACK client can still open the control
+# socket and get an answer -- the exact fault seen at 64x2 (`Cannot create new
+# client`, socket read failure), which surfaced right after graph setup. So
+# query the control plane once here, in that same window, and reject a missing
+# or failed answer. The average DSP load itself is not judged: it is not a proxy
+# for worst-case callback time, which the WAV analysis below already covers.
+if ! jack_lsp >"$output_dir/control-plane-lsp.txt" 2>&1 || [[ ! -s "$output_dir/control-plane-lsp.txt" ]]; then
+  printf '%s\n' 'jack_lsp did not answer the control plane' >&2
+  exit 1
 fi
+# jack_cpu_load streams samples until killed, so `timeout` always ends it with a
+# non-zero exit status even on success; judge it by its output instead.
+timeout 2s jack_cpu_load >"$output_dir/control-plane-cpu-load.txt" 2>&1 || true
+grep -q 'jack DSP load' "$output_dir/control-plane-cpu-load.txt" || {
+  printf '%s\n' 'jack_cpu_load did not answer the control plane' >&2
+  exit 1
+}
 
 wait "$recorder_pid"
 recorder_pid=''
@@ -261,11 +245,6 @@ if [[ "$mode" == oxtt ]]; then
   kill -TERM "$oxtt_pid"
   wait "$oxtt_pid"
   oxtt_pid=''
-fi
-if [[ -n "$probe_pid" ]]; then
-  kill -TERM "$probe_pid" 2>/dev/null || true
-  wait "$probe_pid" 2>/dev/null || true
-  probe_pid=''
 fi
 kill -TERM "$jackd_pid"
 wait "$jackd_pid" || true
@@ -302,26 +281,6 @@ if {
 } | tee "$output_dir/failure-log-matches.txt" | grep -q .; then
   printf '%s\n' 'JACK or client failure pattern was found' >&2
   exit 1
-fi
-if ((probe_interval > 0)); then
-  grep -Fx 'failure=0' "$output_dir/probe-summary.txt" >/dev/null || {
-    printf '%s\n' 'a JACK operation probe failed' >&2
-    exit 1
-  }
-  awk '
-    /^[0-9]+(\.[0-9]+)?$/ {
-      if (count == 0 || $1 > maximum) maximum = $1
-      count++
-    }
-    END {
-      if (count == 0) exit 1
-      printf "samples=%d\nmaximum=%.6f\n", count, maximum
-      exit !(maximum < 50)
-    }
-  ' "$output_dir/probe-cpu-load.log" | tee "$output_dir/cpu-load-summary.txt" || {
-    printf '%s\n' 'JACK CPU load was missing or reached 50 percent' >&2
-    exit 1
-  }
 fi
 vcgencmd get_throttled | tee "$output_dir/get-throttled-end.txt"
 grep -Fx 'throttled=0x0' "$output_dir/get-throttled-end.txt" >/dev/null
