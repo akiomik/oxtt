@@ -95,11 +95,18 @@ The dedicated-board candidates weighed (not decided) are:
 - **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
   **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
   older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
-  sub-1 ms latency, a DIY guitar-pedal ecosystem via PedalPCB Terrarium — note
-  Terrarium's stock I/O is **mono, not stereo**; Electrosmith's stereo-native
-  pedal enclosure ("Petal") could not be found for sale on Reverb or Perfect
-  Circuit at time of writing and has no confirmed purchase path. Cheapest
-  candidate, smallest, and fanless. Rust support has consolidated:
+  sub-1 ms latency. The module itself is stereo in hardware — its 40-pin
+  header breaks out dedicated `AUDIO_IN_L`/`AUDIO_IN_R`/`AUDIO_OUT_L`/
+  `AUDIO_OUT_R` pads (pins 16–19), and libDaisy's SAI init is 2-channel — so
+  "Terrarium is mono" is a carrier-board limitation, not a Daisy Seed one
+  (see addendum). PedalPCB Terrarium remains mono-stock and Electrosmith's
+  Petal has no confirmed purchase path, but open-source stereo carrier
+  boards for Daisy Seed already exist and are actively maintained —
+  [GuitarML/FunBox](https://github.com/GuitarML/FunBox) and
+  [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
+  — giving a concrete path to stereo without a from-scratch board or a
+  Terrarium mod. Cheapest candidate, smallest, and fanless. Rust support has
+  consolidated:
   `daisy-embassy` (Embassy async) is the actively maintained option, while
   `libdaisy-rust` has had no release since 2021; either way it carries
   embedded-Rust glue plus the small `no_std` port and gives up the
@@ -186,7 +193,7 @@ below are the total charged at checkout, not list price only.
 | Bela Gem Stereo Starter Kit | $149.00 + $21.00 shipping = $170.00 | ≈ ¥28,000 | Tracked/signed shipping from shop.bela.io; above the ¥10,000 tax-free threshold, so import consumption tax applies. |
 | Daisy Seed3 | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Standard shipping from daisy.audio; under the ¥10,000 threshold, so likely tax/duty-free under current rules. |
 | Daisy Seed2 DFM | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Same checkout total as Seed3 (older codec revision, same price point). |
-| Electrosmith Petal | — | — | Electrosmith's own store lists it as legacy/discontinued; not found for sale on Reverb or Perfect Circuit either. No confirmed purchase path at time of writing, so it cannot be priced. This removes the only stereo-native turnkey pedal enclosure for Daisy — a build on Daisy currently means Terrarium (mono stock I/O, needs modification for stereo) or a fully custom enclosure. |
+| Electrosmith Petal | — | — | `daisy.audio/daisy/petal` redirects to a 404 and Petal is absent from the current product collection; the Legacy page carries no price, purchase button, or explicit "discontinued" label, so treat as unavailable rather than confirmed-discontinued. Not found for sale on Reverb or Perfect Circuit either (tool-access-limited, not confirmed absent). No longer the blocker it looked like — stereo doesn't require Petal or a Terrarium mod; see the stereo-I/O addendum below. |
 
 This changes two things from the unverified figures the Decision previously
 carried: Bela's real entry cost is close to the top of the old "$80–250"
@@ -199,6 +206,56 @@ scheduled for repeal per the FY2026 tax reform outline
 decided 2025-12-26 with no enforcement date set yet; the Daisy figure above
 assumes current rules and should be rechecked if ordering after that repeal
 takes effect.
+
+## Addendum: resolving Daisy Seed's stereo I/O gap (2026-07-26)
+
+Stereo I/O is a hard requirement for this project — the intended sources
+(Elektron Digitakt 2 / Digitone 2 / Syntakt, Teenage Engineering OP-1 / OP-XY;
+see Consequences) are all stereo line-output gear. The prior framing —
+"Terrarium is mono, Petal is unavailable" — made Daisy Seed look unable to
+meet that requirement. That framing conflated the module with the carrier
+board; it does not survive closer inspection.
+
+- **The Daisy Seed module is stereo in hardware, not just in the codec spec.**
+  Its 40-pin header breaks out dedicated `AUDIO_IN_L` (pin 16), `AUDIO_IN_R`
+  (pin 17), `AUDIO_OUT_L` (pin 18), and `AUDIO_OUT_R` (pin 19) pads — the same
+  pin numbers on Seed3 — and libDaisy initialises the STM32's SAI peripheral
+  for 2 channels regardless of carrier board. Any carrier board that wires
+  those four pads gets stereo; Terrarium's mono-only wiring is that board's
+  own design choice, not a Daisy Seed constraint (inferred from
+  GuitarML/DaisyEffects only ever indexing `in[0]`/`out[0]` for Terrarium —
+  Terrarium's schematic itself isn't open-sourced, only `terrarium.h` pin
+  definitions are, so this is inferred rather than confirmed against the PCB
+  pattern).
+- **Open-source stereo carrier boards for Daisy Seed already exist and are
+  actively maintained**, avoiding both a from-scratch PCB design and reliance
+  on the unavailable Petal:
+  - [GuitarML/FunBox](https://github.com/GuitarML/FunBox) — built by the same
+    author as the Terrarium-oriented DaisyEffects project, explicitly a
+    "stereo guitar pedal platform using Daisy Seed", 125B enclosure, full
+    KiCad schematic/PCB/BOM/Gerbers in-repo, 253 stars, last updated
+    2026-07-23. Community build notes (an op-amp swap, TL074→MCP6024, to fix
+    noise/phase issues) are documented on the
+    [PedalPCB forum](https://forum.pedalpcb.com/threads/developing-a-custom-pcb-for-daisy-seed-funbox.22152/)
+    and in a [build guide](https://keyth72.medium.com/funbox-build-guide-afbd8046121e).
+  - [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
+    — stereo I/O, multiple enclosure sizes (125B/1590B), MIT-licensed PCB
+    files; a second independent option to compare against FunBox.
+- **Daisy Pod** ($68, in stock direct from Electrosmith) has stereo 3.5 mm
+  line I/O and is a viable bench-prototyping stopgap, but it is a bare board
+  on a 3.5 mm connector, not a pedal enclosure — it does not replace a
+  FunBox-style carrier for the final build.
+- **Terrarium plus a hand-wired stereo mod** was considered and set aside: the
+  Daisy-Seed-side pins are accessible, but Terrarium's schematic isn't
+  open-sourced, no established community mod procedure was found, and it is
+  strictly worse than starting from an already-stereo design like FunBox.
+
+**Net effect on the Decision**: Daisy Seed's stereo gap is resolved as a
+carrier-board choice — use FunBox or DaisySeedProjects instead of Terrarium —
+not a hardware limitation of the module. This removes what had been the
+sharpest argument against Daisy Seed for this project; the remaining
+trade-offs (the control-surface/CLI rewrite cost and `no_std` port in finding
+4, Rust tooling maturity) are unchanged.
 
 ## References
 
@@ -225,7 +282,10 @@ takes effect.
   now-stalled alternative (no release since 2021). [PedalPCB Terrarium](https://www.pedalpcb.com/product/pcb351/)
   is the bare-metal Cortex-M7 candidate's DIY pedal interface (mono stock I/O);
   [daisy.audio](https://daisy.audio/) is the current storefront (Seed3 is the
-  current revision).
+  current revision). [GuitarML/FunBox](https://github.com/GuitarML/FunBox) and
+  [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
+  are open-source stereo carrier boards for Daisy Seed that resolve
+  Terrarium's mono limitation.
 - [Waveshare WM8960 Audio HAT](https://www.waveshare.com/wiki/WM8960_Audio_HAT)
   and [Raspberry Pi Codec Zero](https://www.raspberrypi.com/products/codec-zero/)
   — the domestically stocked but quality-compromised boards.
