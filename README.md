@@ -6,7 +6,7 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 
 ## Status
 
-**Work in progress.** The end goal is a DIY hardware effector: `oxtt` running on a Raspberry Pi 5 with a USB audio interface, controlled by physical switches and potentiometers. Right now, development is at the PC stage — `oxtt` runs as a JACK client with CLI-only parameters, and Raspberry Pi / hardware-control support does not exist yet.
+**Work in progress.** The end goal is a DIY hardware effector: `oxtt` running on a Raspberry Pi 5, controlled by physical switches and potentiometers. Today `oxtt` runs as a JACK client with CLI-only parameters. It has been verified on real hardware — a Raspberry Pi 5 running as a JACK client with a class-compliant USB audio interface (see [`docs/raspberry-pi/`](docs/raspberry-pi/)) — but physical hardware controls do not exist yet. The audio path is planned to move from the USB interface to an I2S HAT (see [ADR 0008](docs/decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
 
 `oxtt` does not aim for binary, preset, or sample-accurate output compatibility with Xfer OTT or any other reference implementation; it is an independent implementation of well-known DSP techniques.
 
