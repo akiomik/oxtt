@@ -61,6 +61,12 @@ Before running the binary, confirm that `rustc -vV` reports
 `host: aarch64-unknown-linux-gnu`, `file` reports an AArch64 ELF binary, and
 `ldd` resolves `libjack.so.0`.
 
+For the full reproducible setup on real hardware — the build/run split, realtime
+privileges, ALSA card naming, JACK port mapping, and the audio-stability and
+latency verification with a class-compliant USB audio interface — see
+[`raspberry-pi/usb-audio-setup.md`](raspberry-pi/usb-audio-setup.md) and
+[`raspberry-pi/usb-audio-verification.md`](raspberry-pi/usb-audio-verification.md).
+
 ### Why macOS cross-compilation is not the baseline
 
 Adding `aarch64-unknown-linux-gnu` to `rust-toolchain.toml` only installs that

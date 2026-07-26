@@ -14,7 +14,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/pi-latency-test.sh \
+  scripts/pi-jack-usb-latency-test.sh \
     --card CARD --frames FRAMES --periods PERIODS --mode direct|oxtt \
     --duration SECONDS --playback PORT --capture PORT --output-dir DIRECTORY
 

@@ -6,7 +6,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/pi-soak-test.sh \
+  scripts/pi-jack-usb-soak-test.sh \
     --card CARD --frames FRAMES --periods PERIODS --mode direct|oxtt \
     --duration SECONDS --capture-left PORT --capture-right PORT \
     --playback-left PORT --playback-right PORT --output-dir DIRECTORY
