@@ -79,18 +79,34 @@ findings drive the reopening.
 
 The dedicated-board candidates weighed (not decided) are:
 
-- **Bela** (embedded Linux, Xenomai): stereo line I/O, roughly 1 ms round-trip
-  latency, purpose-built for low-latency instruments and documented for
-  guitar-pedal enclosures. Because it runs full Linux, the Rust DSP compiles
-  unchanged; adopting it is a new host adapter over its render callback (via the C
-  API or `bela-rs`) — the same "add an adapter" move as ADR 0007. Higher unit cost
-  (roughly $80–250 by variant), import only.
-- **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7): stereo codec up to
-  24-bit / 192 kHz, sub-1 ms latency, a strong DIY guitar-pedal ecosystem
-  (PedalPCB Terrarium), the cheapest (~$30), smallest, and fanless. Rust support
-  exists (`daisy`, `libdaisy-rust`, `daisy-embassy`) but is evolving, so it carries
+- **Bela** (embedded Linux, Xenomai; current product line is **Bela Gem** on
+  PocketBeagle 2 — the "Bela Mini" this investigation initially assumed is
+  discontinued): stereo line I/O, roughly 1 ms round-trip latency, purpose-built
+  for low-latency instruments and documented for guitar-pedal enclosures. Because
+  it runs full Linux, the Rust DSP compiles unchanged; adopting it is a new host
+  adapter over its render callback via the C API — **not** via `bela-rs`, which
+  has had no commits since 2021, predates the Gem/PocketBeagle 2 hardware, and
+  was already documented as incomplete (missing `rt_printf`, unresolved
+  panic-unwind safety on the render thread) at its last update. Budget a
+  from-scratch `bindgen` binding rather than a ready-made wrapper. Verified
+  price for the Gem Stereo Starter Kit: $149.00 + $21.00 tracked/signed shipping
+  = $170.00, landing at roughly ¥28,000 in Japan after import consumption tax
+  (see addendum). Import only, no Japanese distributor.
+- **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
+  **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
+  older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
+  sub-1 ms latency, a DIY guitar-pedal ecosystem via PedalPCB Terrarium — note
+  Terrarium's stock I/O is **mono, not stereo**; Electrosmith's stereo-native
+  pedal enclosure ("Petal") could not be found for sale on Reverb or Perfect
+  Circuit at time of writing and has no confirmed purchase path. Cheapest
+  candidate, smallest, and fanless. Rust support has consolidated:
+  `daisy-embassy` (Embassy async) is the actively maintained option, while
+  `libdaisy-rust` has had no release since 2021; either way it carries
   embedded-Rust glue plus the small `no_std` port and gives up the
-  develop-on-PC / deploy-the-same-binary workflow. Import only.
+  develop-on-PC / deploy-the-same-binary workflow. Verified price: $29.99 +
+  $12.36 standard shipping = $42.35 for either Seed3 or Seed2 DFM, landing
+  under Japan's ¥10,000 duty/tax-free threshold at roughly ¥6,600 (see
+  addendum). Import only.
 - **Pi 5 + HAT** remains the incumbent: zero software change, ~2 ms with Pisound,
   but the worst on pedal thermal and form.
 
@@ -154,6 +170,36 @@ share the audio clock in hardware).
 - ADR 0008's `48 kHz` / `128×3` / ~11 ms USB figure remains the latency comparison
   baseline for any platform evaluation.
 
+## Addendum: verified landed pricing for Bela and Daisy (2026-07-26)
+
+The unit-cost figures in the Decision/Context above were checked against real
+checkout totals (item + shipping to Japan) rather than list price alone, since
+list price understates what actually lands. Recorded here so the estimate
+isn't redone from scratch later; assumes $1 ≈ ¥155, the goods-plus-shipping
+total is the customs base, and Japan's simplified personal-import consumption
+tax applies at 10% of 60% of that base (audio/computing boards are duty-free;
+see ADR 0008's sibling investigation notes on HS classification). Amounts
+below are the total charged at checkout, not list price only.
+
+| Platform | Checkout total (USD) | Landed estimate (JPY) | Notes |
+|---|---|---|---|
+| Bela Gem Stereo Starter Kit | $149.00 + $21.00 shipping = $170.00 | ≈ ¥28,000 | Tracked/signed shipping from shop.bela.io; above the ¥10,000 tax-free threshold, so import consumption tax applies. |
+| Daisy Seed3 | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Standard shipping from daisy.audio; under the ¥10,000 threshold, so likely tax/duty-free under current rules. |
+| Daisy Seed2 DFM | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Same checkout total as Seed3 (older codec revision, same price point). |
+| Electrosmith Petal | — | — | Electrosmith's own store lists it as legacy/discontinued; not found for sale on Reverb or Perfect Circuit either. No confirmed purchase path at time of writing, so it cannot be priced. This removes the only stereo-native turnkey pedal enclosure for Daisy — a build on Daisy currently means Terrarium (mono stock I/O, needs modification for stereo) or a fully custom enclosure. |
+
+This changes two things from the unverified figures the Decision previously
+carried: Bela's real entry cost is close to the top of the old "$80–250"
+range once a working kit (not a bare board) and shipping are counted, while
+Daisy's stays close to the bottom and likely clears Japan's import tax
+threshold entirely — the cost gap between the two candidates is larger in
+practice than the old range implied. Japan's small-import tax exemption is
+scheduled for repeal per the FY2026 tax reform outline
+(<https://www.mof.go.jp/tax_policy/tax_reform/outline/fy2026/08taikou_gaiyou.pdf>),
+decided 2025-12-26 with no enforcement date set yet; the Daisy figure above
+assumes current rules and should be rechecked if ordering after that repeal
+takes effect.
+
 ## References
 
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — the USB clock-slip
@@ -169,11 +215,17 @@ share the audio clock in hardware).
 - [Bela documentation](https://docs.bela.io/) and
   [Bela audio latency](https://learn.bela.io/using-bela/about-bela/bela-hardware/)
   — the embedded-Linux dedicated-board candidate; [`bela-rs`](https://github.com/andrewcsmith/bela-rs)
-  is a Rust wrapper over its C API.
-- [Daisy `daisy` crate](https://crates.io/crates/daisy) and
-  [`daisy-embassy`](https://crates.io/crates/daisy-embassy), with the
-  [PedalPCB Terrarium](https://www.pedalpcb.com/product/pcb351/) pedal interface —
-  the bare-metal Cortex-M7 candidate and its Rust support.
+  is a Rust wrapper over its C API but has had no commits since 2021 and
+  predates the current Gem/PocketBeagle 2 hardware, so treat it as
+  unmaintained. [shop.bela.io](https://shop.bela.io/) is the current storefront
+  (Bela Gem Stereo/Multi on PocketBeagle 2; "Bela Mini" is discontinued).
+- [`daisy-embassy`](https://github.com/daisy-embassy/daisy-embassy) — the
+  actively maintained Rust HAL for Daisy Seed (Embassy async runtime);
+  [`libdaisy-rust`](https://github.com/mtthw-meyer/libdaisy-rust) is the older,
+  now-stalled alternative (no release since 2021). [PedalPCB Terrarium](https://www.pedalpcb.com/product/pcb351/)
+  is the bare-metal Cortex-M7 candidate's DIY pedal interface (mono stock I/O);
+  [daisy.audio](https://daisy.audio/) is the current storefront (Seed3 is the
+  current revision).
 - [Waveshare WM8960 Audio HAT](https://www.waveshare.com/wiki/WM8960_Audio_HAT)
   and [Raspberry Pi Codec Zero](https://www.raspberrypi.com/products/codec-zero/)
   — the domestically stocked but quality-compromised boards.
