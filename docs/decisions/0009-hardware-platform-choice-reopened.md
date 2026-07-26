@@ -21,23 +21,27 @@ investigation promoted the HiFiBerry DAC2 ADC Pro to first on the belief that it
 was materially easier to obtain in Japan. **That belief was wrong**, and it is the
 reason this ADR exists.
 
-- **Availability does not differentiate the high-quality HATs.** Neither a current
-  HiFiBerry ADC-Pro board nor Pisound has a Japanese distributor. The specific
-  DAC2 ADC Pro appears on Amazon.co.jp only through overseas importers at a markup
-  (the domestically listed HiFiBerry ADC board is the older, previous-generation
-  DAC+ ADC), and Pisound ships from Blokas in Lithuania. The only ADC-capable HATs
-  genuinely stocked domestically — the first-party Raspberry Pi Codec Zero
-  (through the official Raspberry Pi channel, KSY) and the Waveshare WM8960 — both
-  compromise on audio quality (96 kHz cap; mic / consumer-oriented codecs). So for
-  a high-quality stereo line-level ADC/DAC HAT, **every option is import-tier in
-  Japan**; brand does not change that.
-- Two facts from ADR 0008's era still hold: HiFiBerry's Pi 5 driver maturity has
-  since resolved (mainline overlay, field-validated real-time full-duplex use),
-  and both Pisound and HiFiBerry remove the clock slip by construction because
-  both are I2S.
+### Availability no longer differentiates the high-quality HATs
+
+Neither a current HiFiBerry ADC-Pro board nor Pisound has a Japanese distributor.
+The specific DAC2 ADC Pro appears on Amazon.co.jp only through overseas importers
+at a markup (the domestically listed HiFiBerry ADC board is the older,
+previous-generation DAC+ ADC), and Pisound ships from Blokas in Lithuania. The
+only ADC-capable HATs genuinely stocked domestically — the first-party
+Raspberry Pi Codec Zero (through the official Raspberry Pi channel, KSY) and the
+Waveshare WM8960 — both compromise on audio quality (96 kHz cap; mic / consumer-
+oriented codecs). So for a high-quality stereo line-level ADC/DAC HAT, **every
+option is import-tier in Japan**; brand does not change that.
+
+Two facts from ADR 0008's era still hold: HiFiBerry's Pi 5 driver maturity has
+since resolved (mainline overlay, field-validated real-time full-duplex use), and
+both Pisound and HiFiBerry remove the clock slip by construction because both are
+I2S.
+
+### Why the platform choice reopens
 
 With availability neutralised, the question ADR 0008 explicitly set aside —
-"moving to a different SBC or microcontroller" — comes back onto the table. Three
+"moving to a different SBC or microcontroller" — comes back onto the table. Four
 findings drive the reopening.
 
 1. **The "just buy a HAT" convenience is weaker than assumed.** No high-quality
@@ -47,7 +51,9 @@ findings drive the reopening.
    active cooling — a fan, i.e. noise and bulk inside an audio pedal — and the
    Pi 5 + HAT + cooler + case stack is large. This is precisely the heat and
    form-factor problem ADR 0008 deferred, and it bites hardest in the pedal form
-   the project is aiming at.
+   the project is aiming at. The premise that a dedicated board escapes this —
+   that PocketBeagle 2 actually runs cool enough to seal into an enclosure — is
+   substantiated under *Power draw versus Raspberry Pi 5* below.
 3. **The DSP core's portability cost is small, and now verified — but this
    finding is scoped to `src/dsp/` only.** The real-time signal path uses only
    `exp` and `ln` transcendentals, at block / parameter granularity rather than
@@ -76,83 +82,290 @@ findings drive the reopening.
    For Daisy/Teensy, then, the migration is not "port the DSP plus write a new
    audio adapter" — it is that plus a rewrite of the control-acquisition and CLI
    host layer, a materially larger scope than finding 3 alone suggests. This
-   finding is scoped to the software-driver layer only; it says nothing about
-   hardware reference-design availability for actually building the pedal,
-   where the two candidates diverge in the opposite direction (see the
-   pedal-enclosure-ecosystem addendum below).
+   finding is a software-driver-layer claim only. At the level of actually
+   *building* the pedal — PCB, pots, switches, LEDs, enclosure — the ecosystem
+   gap runs in the opposite direction (see *Building the pedal* below).
+
+### The candidates
 
 The dedicated-board candidates weighed (not decided) are:
 
 - **Bela** (embedded Linux, Xenomai; current product line is **Bela Gem** on
-  PocketBeagle 2 — the "Bela Mini" this investigation initially assumed is
-  discontinued): stereo line I/O, roughly 1 ms round-trip latency, purpose-built
-  for low-latency instruments and documented for guitar-pedal enclosures. Because
-  it runs full Linux, the Rust DSP compiles unchanged; adopting it is a new host
-  adapter over its render callback via the C API — **not** via `bela-rs`, which
-  has had no commits since 2021, predates the Gem/PocketBeagle 2 hardware, and
-  was already documented as incomplete (missing `rt_printf`, unresolved
-  panic-unwind safety on the render thread) at its last update. Budget a
-  from-scratch `bindgen` binding rather than a ready-made wrapper. Verified
-  price for the Gem Stereo Starter Kit: $149.00 + $21.00 tracked/signed shipping
-  = $170.00, landing at roughly ¥28,000 in Japan after import consumption tax
-  (see addendum). Import only, no Japanese distributor. It also has verified
-  headroom for FFT-heavy spectral effects (phase vocoders, spectral
-  bitcrushing) beyond the current IIR-only DSP profile: an official NE10-based
-  phase-vocoder example already ran on far weaker prior-generation Bela
-  hardware (see addendum). Its power draw is now substantiated as sharply
-  lower than Pi 5's, not just architecturally plausible: TI's own benchmark of
-  the same SoC family tops out around 1.5 W under combined CPU+GPU load, and
-  Bela's co-founder measured the Gem Multi drawing only tens of milliwatts
-  more than a first-generation Bela board at 100% 4-core load, versus
-  ">8 W" for a Pi 5 at full clock — supporting the fanless, no-heatsink
-  pedal-form claim, though this rests on a forum statement and a related-SoC
-  benchmark rather than an independent third-party measurement of
-  PocketBeagle 2 itself (see addendum). Set against that: no populate-and-go
-  pedal PCB or enclosure design exists for Bela Gem — its own guitar-pedal
-  precedent (a forum thread of ad-hoc wire-to-header builds, and the one
-  complete "Effect Cape" design) both predate Gem and target the discontinued
-  Bela Mini's different header layout and footprint, so building an actual
-  pedal enclosure currently means original hardware design work from scratch
-  (see addendum).
+  PocketBeagle 2 — the earlier "Bela Mini" this investigation initially assumed
+  is discontinued): stereo line I/O, roughly 1 ms round-trip latency,
+  purpose-built for low-latency instruments. Because it runs full Linux, the Rust
+  DSP compiles unchanged; adopting it is a new host adapter over its render
+  callback via the C API — **not** via `bela-rs`, which has had no commits since
+  2021, predates the Gem/PocketBeagle 2 hardware, and was already documented as
+  incomplete (missing `rt_printf`, unresolved panic-unwind safety on the render
+  thread) at its last update. Budget a from-scratch `bindgen` binding rather than
+  a ready-made wrapper. Landed cost ≈¥28,000 (Gem Stereo Starter Kit, import
+  only, no Japanese distributor). Its multi-core Linux SoC draws roughly an order
+  of magnitude less power than the Pi 5 and has proven headroom for FFT-heavy
+  spectral effects, but no populate-and-go pedal PCB or enclosure design exists
+  for Bela Gem — all three elaborated in the evidence sections below.
 - **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
-  **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
-  older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
-  sub-1 ms latency. The module itself is stereo in hardware — its 40-pin
-  header breaks out dedicated `AUDIO_IN_L`/`AUDIO_IN_R`/`AUDIO_OUT_L`/
-  `AUDIO_OUT_R` pads (pins 16–19), and libDaisy's SAI init is 2-channel — so
-  "Terrarium is mono" is a carrier-board limitation, not a Daisy Seed one
-  (see addendum). PedalPCB Terrarium remains mono-stock and Electrosmith's
-  Petal has no confirmed purchase path, but open-source stereo carrier
-  boards for Daisy Seed already exist and are actively maintained —
+  **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the older
+  Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3), sub-1 ms
+  latency, and the cheapest, smallest, and fanless candidate. The module is
+  stereo in hardware — its 40-pin header breaks out dedicated
+  `AUDIO_IN_L`/`AUDIO_IN_R`/`AUDIO_OUT_L`/`AUDIO_OUT_R` pads (pins 16–19) and
+  libDaisy's SAI init is 2-channel — so the familiar "Terrarium is mono"
+  limitation is a carrier-board choice, not a Daisy Seed one. PedalPCB Terrarium
+  is mono-stock and Electrosmith's Petal has no confirmed purchase path, but
+  actively-maintained open-source stereo carrier boards —
   [GuitarML/FunBox](https://github.com/GuitarML/FunBox) and
   [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
-  — giving a concrete path to stereo without a from-scratch board or a
-  Terrarium mod. This populate-and-go pedal ecosystem (Terrarium, FunBox,
-  DaisySeedProjects) is a maturity gap Bela Gem doesn't currently have an
-  answer for (see addendum). Cheapest candidate, smallest, and fanless. Rust
-  support has consolidated:
+  — give a concrete path to stereo without a from-scratch board or a Terrarium
+  mod (see *Building the pedal* below). Rust support has consolidated:
   `daisy-embassy` (Embassy async) is the actively maintained option, while
   `libdaisy-rust` has had no release since 2021; either way it carries
   embedded-Rust glue plus the small `no_std` port and gives up the
-  develop-on-PC / deploy-the-same-binary workflow. Verified price: $29.99 +
-  $12.36 standard shipping = $42.35 for either Seed3 or Seed2 DFM, landing
-  under Japan's ¥10,000 duty/tax-free threshold at roughly ¥6,600 (see
-  addendum). Import only. Its single Cortex-M7 core is comfortable for the
-  current IIR-only DSP and for additional comb-filter / multi-band-filter
-  effects, but is a tight fit for FFT-heavy spectral effects (phase vocoders):
-  community attempts report high CPU cost and at least one abandoned in favor
-  of a delay-based approach (see addendum).
+  develop-on-PC / deploy-the-same-binary workflow. Landed cost ≈¥6,600 (Seed3 or
+  Seed2 DFM alone, import only; carrier board extra). Its single Cortex-M7 core is
+  comfortable for the current IIR-only DSP and for additional comb-filter /
+  multi-band-filter effects, but is a tight fit for FFT-heavy spectral effects
+  (phase vocoders; see *Compute headroom* below).
 - **Pi 5 + HAT** remains the incumbent: zero software change, ~2 ms with Pisound,
-  but the worst on pedal thermal and form.
+  but the worst on pedal thermal and form factor.
 
 Their trade axis is software-migration cost versus pedal form-factor, not
 availability (all three are import-tier) and not clock correctness (all three
-share the audio clock in hardware). A third axis applies specifically between
-Bela and Daisy if FFT-heavy spectral effects (phase vocoders, spectral
-processing) are pursued later: Daisy's single Cortex-M7 core is a tight fit
-for that workload, while Bela's multi-core Linux SoC has proven headroom
-(see addendum). Pi 5's quad Cortex-A76 has still more headroom than either,
-so this axis does not distinguish it from Bela.
+share the audio clock in hardware). A third axis applies specifically between Bela
+and Daisy if FFT-heavy spectral effects (phase vocoders, spectral processing) are
+pursued later: Daisy's single Cortex-M7 core is a tight fit for that workload,
+while Bela's multi-core Linux SoC has proven headroom. Pi 5's quad Cortex-A76 has
+still more headroom than either, so this axis does not distinguish it from Bela.
+
+The remaining subsections record the sourced detail behind these claims —
+landed pricing, FFT-workload headroom, power draw, and the pedal-hardware
+ecosystem — so the platform ADR can weigh them without re-deriving them.
+
+### Landed pricing in Japan
+
+The unit-cost figures above were checked against real checkout totals (item +
+shipping to Japan) rather than list price alone, since list price understates what
+actually lands. The estimates assume $1 ≈ ¥155, that the goods-plus-shipping total
+is the customs base, and that Japan's simplified personal-import consumption tax
+applies at 10% of 60% of that base (audio/computing boards are duty-free; see
+ADR 0008's sibling investigation notes on HS classification). Amounts below are the
+total charged at checkout, not list price only.
+
+| Platform | Checkout total (USD) | Landed estimate (JPY) | Notes |
+|---|---|---|---|
+| Bela Gem Stereo Starter Kit | $149.00 + $21.00 shipping = $170.00 | ≈ ¥28,000 | Tracked/signed shipping from shop.bela.io; above the ¥10,000 tax-free threshold, so import consumption tax applies. |
+| Daisy Seed3 | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Standard shipping from daisy.audio; under the ¥10,000 threshold, so likely tax/duty-free under current rules. |
+| Daisy Seed2 DFM | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Same checkout total as Seed3 (older codec revision, same price point). |
+| Electrosmith Petal | — | — | `daisy.audio/daisy/petal` redirects to a 404 and Petal is absent from the current product collection; the Legacy page carries no price, purchase button, or explicit "discontinued" label, so treat as unavailable rather than confirmed-discontinued. Not found for sale on Reverb or Perfect Circuit either (tool-access-limited, not confirmed absent). This is not a blocker: stereo does not require Petal or a Terrarium mod (see *Building the pedal*). |
+
+Two consequences follow. Bela's real entry cost is close to the top of the old
+"$80–250" range once a working kit (not a bare board) and shipping are counted,
+while Daisy's stays close to the bottom and likely clears Japan's import-tax
+threshold entirely — the cost gap between the two candidates is larger in practice
+than the old range implied. Japan's small-import tax exemption is scheduled for
+repeal per the FY2026 tax reform outline
+(<https://www.mof.go.jp/tax_policy/tax_reform/outline/fy2026/08taikou_gaiyou.pdf>),
+decided 2025-12-26 with no enforcement date set yet; the Daisy figure assumes
+current rules and should be rechecked if ordering after that repeal takes effect.
+
+### Compute headroom for FFT-heavy spectral effects
+
+The current DSP (`src/dsp/`) is IIR-only (biquads, envelope followers), the
+workload finding 3 verified as cheap to port. Future effects under consideration
+go beyond that profile: a "pitchmap/chroma"-style effect combining a harmonic
+resonator, multi-stage bandpass filter, comb filter, and phase vocoder; and a
+spectral bitcrusher that bit-crushes only a target frequency band. The
+comb-filter / multi-BPF / harmonic-resonator part is still IIR (biquad cascades),
+so it carries the same low cost finding 3 already established. The phase-vocoder
+part is a different workload — FFT/IFFT, phase accumulation, overlap-add — and is
+where Bela and Daisy diverge sharply.
+
+- **Bela**: its official examples repository ships a working phase vocoder
+  (`examples/Audio/FFT-phase-vocoder/render.cpp`), built on the NE10
+  NEON-optimised FFT library, using a 2048-point FFT at a 512-sample hop
+  (4× overlap), with the FFT/IFFT computation offloaded from the audio ISR to a
+  lower-priority Xenomai `AuxiliaryTask` so it can't threaten the audio deadline.
+  This example already ran acceptably on the older, single-core Cortex-A8 @ 1 GHz
+  Bela hardware; the current Bela Gem's PocketBeagle 2 host has 2–4 Cortex-A53
+  cores at up to 1.4 GHz plus a generation of microarchitecture improvement, so
+  materially more headroom is expected, though this has not been benchmarked on
+  Gem hardware itself. Bela also ships a general-purpose `Fft`/`Convolver`
+  library, i.e. FFT-based processing is a supported, ordinary use case there, not
+  a special-case struggle.
+- **Daisy Seed**: DaisySP's stock `PitchShifter` is delay-line/cross-fade based
+  (SOLA-style), not FFT — there is no first-party phase-vocoder implementation.
+  Community attempts exist (`shy_fft.h`-based phase vocoders at FFT sizes
+  1024–4096), but the developer of one such project reported struggling with CPU
+  cost enough to abandon the FFT/PSOLA approach and revert to the delay-based
+  method. A phase-vocoder pitch shifter on Teensy 4 (Cortex-M7 @ 600 MHz — faster
+  than Daisy's 480 MHz) is reported to use roughly 75% CPU on its own. No precise
+  CPU-percentage or latency figure for Daisy itself was obtained, but the pattern
+  across same-class Cortex-M7 chips points the same way: a phase vocoder is
+  achievable as a standalone effect, but running it concurrently, full-tilt,
+  alongside the comb-filter/multi-BPF chain on Daisy's single core is unlikely to
+  fit comfortably. Realistic mitigations if Daisy is chosen and this effect is
+  pursued: a smaller FFT size, a larger hop (trading latency for headroom), or
+  making the phase-vocoder effect and the heavier IIR chains mutually exclusive
+  (one active mode at a time) rather than layering them.
+- **Spectral bitcrusher**: surveying existing plugins (Digital-Hell, Hilofi
+  Multiband Bitcrusher, MeldaProduction MBitFunMB) and one embedded example
+  (`thesquaregroot/uncertainty-dffb`, an 8-band elliptic-IIR multiband bitcrusher
+  on an RP2040) shows the dominant real-world implementation is multiband IIR
+  filtering plus per-band bit reduction, not FFT-bin quantisation. That keeps this
+  effect cheap on either platform; an FFT-bin variant is also possible and would
+  simply reuse whatever phase-vocoder FFT infrastructure already exists.
+
+This favours Bela over Daisy *specifically* if FFT-heavy spectral effects become a
+serious direction; it should be weighed, not treated as settled. No direct
+CPU-load or latency benchmark was obtained for either the Bela Gem or
+PocketBeagle 2's NEON FFT throughput; the Bela headroom claim rests on the
+phase-vocoder example having run on much weaker prior-generation hardware, and the
+Daisy tightness claim rests on cross-project community reports (`shy_fft.h`,
+Teensy 4) rather than a first-party benchmark on this project's own effect chain.
+
+### Power draw versus Raspberry Pi 5
+
+Finding 2 blames Pi 5's active-cooling requirement for its poor fit in a pedal
+enclosure, and Bela's candidacy leans on not having that problem. That only holds
+if PocketBeagle 2 (Cortex-A53, a weaker core family than Pi 5's Cortex-A76)
+actually draws meaningfully less power — a slower core does not automatically mean
+a cooler one. Two independent-ish sources agree that it does.
+
+- **TI's own benchmark** (application note SPRADG1, Feb 2024, on-board
+  current-monitor measurements on SK-AM62B-class hardware — the AM625/AM6254 die
+  family used in Bela Gem/PocketBeagle 2's Rev A1): OS idle 316–443 mW across
+  200 MHz–1.4 GHz, deep sleep 14.6–32.5 mW, and combined CPU+GPU maximum load
+  (4-core stress + glmark2 at 1.4 GHz) **1.54 W**. This is SoC+DDR power only, not
+  a full board, and TI does not publish a single TDP figure — only junction-
+  temperature limits (Commercial 0–95 °C) and a θJA figure TI itself says not to
+  use for thermal design.
+- **Bela's co-founder (giuliomoro) posted measured figures** on the Bela forum
+  ([thread](https://forum.bela.io/d/6483-bela-gem-two-new-boards)): "with the four
+  cores spinning at 100% and the Bela program running, I measured only 60 mW more
+  on the Gem Multi than on a Bela board running a Bela program... That's great also
+  in comparison to the >8 W you get when running a Pi 5 at full clock. For the Gem
+  and the PB2: no heatsink needed, no fan needed, don't be afraid of enclosures."
+  The [Crowd Supply campaign page](https://www.crowdsupply.com/bela/bela-gem-stereo-and-multi)
+  publishes matching board-level figures: 0.10 W (Stereo) / 0.59 W (Multi)
+  board-only, 1.90 W (Stereo) / 2.39 W (Multi) with the SBC, against ">8 W" for
+  Pi5-based comparison products.
+
+These two sources land in the same order of magnitude (TI's SoC-level ~1.5 W max
+versus Bela's board-level 1.9–2.4 W with SBC), which cross-checks each other
+reasonably well and is consistent with Pi 5's already-established 2.7–3.6 W idle /
+up to 15.9–16.8 W combined-load figures being roughly an order of magnitude
+higher. The concern that PocketBeagle 2 might not meaningfully differentiate from
+Pi 5 on heat therefore appears unfounded, and finding 2's argument for Bela over
+Pi 5 stands.
+
+Stated plainly, though, it is not yet fully verified: the "no heatsink, no fan"
+claim is a forum statement by a co-founder, not a datasheet or independent review,
+and no third-party PocketBeagle 2-specific power or thermal benchmark was found.
+TI's own documentation explicitly disclaims using θJA as a design parameter, so
+thermal margin inside a *sealed pedal enclosure* specifically is unverified for
+either platform. The "old-generation Bela has years of pedal-enclosure use"
+precedent is a mechanical-fit precedent only — no thermal data accompanies it, and
+the SoC changed from a single-core Cortex-A8 to a multi-core Cortex-A53 between
+generations, so it doesn't carry over as thermal evidence. (One red herring worth
+flagging so it isn't repeated: warnings about the **original** PocketBeagle
+(2017, OSD3358 chip) overheating are for a different, unrelated chip and do not
+apply to PocketBeagle 2.) Independent, third-party measurement of Bela Gem/
+PocketBeagle 2 power draw and temperature inside a sealed pedal enclosure remains
+an open item for hands-on evaluation before the platform ADR.
+
+### Building the pedal: Daisy's carrier-board ecosystem versus Bela Gem's gap
+
+Stereo I/O is a hard requirement for this project — the intended sources
+(Elektron Digitakt 2 / Digitone 2 / Syntakt, Teenage Engineering OP-1 / OP-XY;
+see Consequences) are all stereo line-output gear. Finding 4 frames Bela's
+control-surface story favorably at the software-API level. Whether either
+candidate makes the pedal easier to *build* — PCB, pot/switch/LED wiring,
+enclosure — is a separate question, and here the ecosystem gap runs the opposite
+way to finding 4.
+
+**Daisy Seed's stereo is a carrier-board choice, and mature stereo carriers
+exist.** The prior framing — "Terrarium is mono, Petal is unavailable" — conflated
+the module with the carrier board. The module itself is stereo in hardware (pins
+16–19 break out `AUDIO_IN_L`/`AUDIO_IN_R`/`AUDIO_OUT_L`/`AUDIO_OUT_R`, same pin
+numbers on Seed3; libDaisy initialises the STM32 SAI for two channels regardless
+of carrier). Terrarium's mono-only wiring is that board's own design choice
+(inferred from GuitarML/DaisyEffects only ever indexing `in[0]`/`out[0]` for
+Terrarium — Terrarium's schematic itself isn't open-sourced, only `terrarium.h`
+pin definitions are, so this is inferred rather than confirmed against the PCB).
+Two open-source stereo carriers avoid both a from-scratch PCB and the unavailable
+Petal:
+
+- [GuitarML/FunBox](https://github.com/GuitarML/FunBox) — by the same author as
+  the Terrarium-oriented DaisyEffects project, explicitly a "stereo guitar pedal
+  platform using Daisy Seed", 125B enclosure, full KiCad schematic/PCB/BOM/Gerbers
+  in-repo, 253 stars, last updated 2026-07-23. Community build notes (an op-amp
+  swap, TL074→MCP6024, to fix noise/phase issues) are documented on the
+  [PedalPCB forum](https://forum.pedalpcb.com/threads/developing-a-custom-pcb-for-daisy-seed-funbox.22152/)
+  and in a [build guide](https://keyth72.medium.com/funbox-build-guide-afbd8046121e).
+- [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
+  — stereo I/O, multiple enclosure sizes (125B/1590B), MIT-licensed PCB files; a
+  second independent option to compare against FunBox.
+
+[Daisy Pod](https://daisy.audio) ($68, in stock direct from Electrosmith) has
+stereo 3.5 mm line I/O and is a viable bench-prototyping stopgap, but it is a bare
+board on a 3.5 mm connector, not a pedal enclosure, so it does not replace a
+FunBox-style carrier for the final build. A Terrarium plus a hand-wired stereo mod
+was considered and set aside: the Daisy-Seed-side pins are accessible, but
+Terrarium's schematic isn't open-sourced, no established community mod procedure
+was found, and it is strictly worse than starting from an already-stereo design
+like FunBox. Net: Daisy's stereo gap is a carrier-board choice (use FunBox or
+DaisySeedProjects), not a hardware limitation — which removes what had been the
+sharpest argument against Daisy.
+
+**Bela Gem has no equivalent populate-and-go pedal design.** The `BelaPlatform`
+GitHub org has no such repository. The clearest evidence is a Bela forum thread
+([STL/3D Models for Bela Gem/Gem Multi](https://forum.bela.io/d/8248-stl-3d-models-for-bela-gemgem-multi),
+2026-07-08): a user asked for an enclosure model, and Bela's own answer was to
+convert the board's KiCad 3D-preview STEP file yourself — over a year after Gem's
+launch, still no ready enclosure design, official or community. The one community
+breakout board found,
+[yannseznec/belaGemWorkshopPCB](https://github.com/yannseznec/belaGemWorkshopPCB),
+only exposes header pins to connectors; it has no pot/switch/LED/enclosure design
+and the author states it hasn't been tested yet. Old-generation Bela's pedal
+precedent was itself ad-hoc DIY, not a manufactured-board ecosystem: in the
+[Embed Bela in a guitar pedal? thread](https://forum.bela.io/d/111-embed-bela-in-a-guitar-pedal)
+(53 posts), Bela's co-founder recommends wiring panel-mount pots/switches directly
+to Bela's analog inputs by hand rather than designing a dedicated expansion board,
+and a contributor's build repurposes a generic Hammond/Farnell diecast enclosure.
+The one complete one-stop design that exists —
+[leheltorok/effect_cape_for_bela_mini](https://github.com/leheltorok/effect_cape_for_bela_mini)
+(KiCad schematic/PCB, BOM, laser-cut acrylic enclosure, CC BY-NC-SA) — targets
+**Bela Mini**, whose PocketBeagle (first-generation, now discontinued) has a
+different header layout and footprint than the Gem's PocketBeagle 2, so it needs
+re-design, not a straight port.
+
+Building a Gem pedal is therefore original hardware-design work. Its physical
+connectors are bare 2.54 mm pin headers (BeagleBone/PocketBeagle cape-compatible
+stacking headers), not locking connectors; direct wiring to panel-mount
+pots/switches is confirmed viable via forum examples (e.g.
+[Bela Gem Stereo digital I/O help!](https://forum.bela.io/d/7747-bela-gem-stereo-digital-io-help)),
+so a breakout board isn't strictly required — but some GPIO pins are shared with
+the PRU real-time coprocessor and need register-level `devmem2` pokes or a custom
+device-tree overlay to use (see
+[Bela Gem Neopixel Pd](https://forum.bela.io/d/7627-bela-gem-neopixel-pd)), a layer
+of complexity beyond Daisy's vendor-HAL-mediated GPIO access. And Bela's official
+hardware design files are CC BY-NC (non-commercial), an additional licensing
+constraint that doesn't apply to Daisy's MIT-licensed FunBox/DaisySeedProjects
+designs. No Gem-specific pedal/stompbox community project was found post-launch
+(Gem shipped 2026-02-04); a 2026-04-08 guitar-pedal-adjacent forum thread
+([~2.7 kHz noise when Bela is connected to guitar pedal ground](https://forum.bela.io/d/7808-27khz-noise-when-bela-is-connected-to-guitar-pedal-ground))
+still references "Bela Rev C" — the old generation — suggesting the pedal-building
+side of the Bela community hasn't migrated to Gem yet. That last point is an
+absence-of-evidence finding, not a confirmed absence: Reddit and Crowd Supply's
+comment section could not be searched (search-quota exhaustion during this
+research), so an undiscovered Gem pedal project can't be ruled out.
+
+The audio-callback-side software win for Bela in finding 4 stands on its own, but
+it doesn't extend to hardware: at the level of actually building the pedal, Daisy
+has multiple mature, populate-and-go reference designs and Bela Gem currently has
+none. The platform ADR should weigh Daisy's hardware-ecosystem maturity as a
+concrete point in Daisy's favor, alongside the points already recorded in Bela's
+favor (FFT-heavy spectral-effect headroom, substantiated lower power draw).
 
 ## Decision
 
@@ -209,17 +422,17 @@ so this axis does not distinguish it from Bela.
   callback, or a bare-metal audio callback) to be decided in the platform ADR.
 - ADR 0008's `48 kHz` / `128×3` / ~11 ms USB figure remains the latency comparison
   baseline for any platform evaluation.
-- **Summary comparison across everything recorded above**, for the later
-  platform ADR to start from (detail and sourcing in the addenda below):
+- **Summary comparison across everything recorded above**, for the later platform
+  ADR to start from (detail and sourcing in the Context sections above):
 
   | Axis | Pi 5 + Pisound | Bela Gem | Daisy Seed |
   |---|---|---|---|
   | DSP portability (finding 3) | Verbatim (incumbent) | Verbatim (full Linux) | Small `no_std` port (mechanical) |
   | Control-surface/CLI software cost (finding 4) | None (incumbent) | Mostly simplifies (`render()` API); still a new host adapter | Rewrite against vendor HAL; CLI dropped |
-  | Pedal thermal / form factor (finding 2, power addendum) | Worst — needs active cooling, large stack | Good — ~10× lower power than Pi 5 (semi-official), fanless claimed | Best — microcontroller, fanless, smallest |
-  | FFT-heavy spectral-effect headroom (addendum) | Most raw compute of the three, untested for this specifically | Proven headroom (official phase-vocoder example, multi-core) | Tight fit — single core, community reports of difficulty |
-  | Hardware reference-design maturity for an actual pedal build (addendum) | Established HAT+case ecosystem (Patchbox OS, `pisound-btn`), but not pedal-specific | None — no populate-and-go PCB/enclosure for Gem exists; direct wire-to-header DIY only | Mature — Terrarium/FunBox/DaisySeedProjects, populate-and-go |
-  | Landed cost, Japan (pricing addendum) | ≈¥22,000 (Pisound, International Post) + Pi 5 separately | ≈¥28,000 (Gem Stereo Starter Kit) | ≈¥6,600 (Seed3/Seed2 DFM alone; carrier board extra) |
+  | Pedal thermal / form factor (finding 2) | Worst — needs active cooling, large stack | Good — ~10× lower power than Pi 5 (semi-official), fanless claimed | Best — microcontroller, fanless, smallest |
+  | FFT-heavy spectral-effect headroom | Most raw compute of the three, untested for this specifically | Proven headroom (official phase-vocoder example, multi-core) | Tight fit — single core, community reports of difficulty |
+  | Hardware reference-design maturity for an actual pedal build | Established HAT+case ecosystem (Patchbox OS, `pisound-btn`), but not pedal-specific | None — no populate-and-go PCB/enclosure for Gem exists; direct wire-to-header DIY only | Mature — Terrarium/FunBox/DaisySeedProjects, populate-and-go |
+  | Landed cost, Japan | ≈¥22,000 (Pisound, International Post) + Pi 5 separately | ≈¥28,000 (Gem Stereo Starter Kit) | ≈¥6,600 (Seed3/Seed2 DFM alone; carrier board extra) |
 
   Reading across the table: Bela's advantages are concentrated in real-time
   audio *software* (proven FFT headroom, lower power, DSP reuse), Daisy's in
@@ -227,273 +440,6 @@ so this axis does not distinguish it from Bela.
   populate-and-go path to a finished pedal), and Pi 5's stay what they always
   were (zero software change, worst thermal/form-factor fit). None of this
   chooses a platform; it's the state the platform ADR should start from.
-
-## Addendum: verified landed pricing for Bela and Daisy (2026-07-26)
-
-The unit-cost figures in the Decision/Context above were checked against real
-checkout totals (item + shipping to Japan) rather than list price alone, since
-list price understates what actually lands. Recorded here so the estimate
-isn't redone from scratch later; assumes $1 ≈ ¥155, the goods-plus-shipping
-total is the customs base, and Japan's simplified personal-import consumption
-tax applies at 10% of 60% of that base (audio/computing boards are duty-free;
-see ADR 0008's sibling investigation notes on HS classification). Amounts
-below are the total charged at checkout, not list price only.
-
-| Platform | Checkout total (USD) | Landed estimate (JPY) | Notes |
-|---|---|---|---|
-| Bela Gem Stereo Starter Kit | $149.00 + $21.00 shipping = $170.00 | ≈ ¥28,000 | Tracked/signed shipping from shop.bela.io; above the ¥10,000 tax-free threshold, so import consumption tax applies. |
-| Daisy Seed3 | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Standard shipping from daisy.audio; under the ¥10,000 threshold, so likely tax/duty-free under current rules. |
-| Daisy Seed2 DFM | $29.99 + $12.36 shipping = $42.35 | ≈ ¥6,600 | Same checkout total as Seed3 (older codec revision, same price point). |
-| Electrosmith Petal | — | — | `daisy.audio/daisy/petal` redirects to a 404 and Petal is absent from the current product collection; the Legacy page carries no price, purchase button, or explicit "discontinued" label, so treat as unavailable rather than confirmed-discontinued. Not found for sale on Reverb or Perfect Circuit either (tool-access-limited, not confirmed absent). No longer the blocker it looked like — stereo doesn't require Petal or a Terrarium mod; see the stereo-I/O addendum below. |
-
-This changes two things from the unverified figures the Decision previously
-carried: Bela's real entry cost is close to the top of the old "$80–250"
-range once a working kit (not a bare board) and shipping are counted, while
-Daisy's stays close to the bottom and likely clears Japan's import tax
-threshold entirely — the cost gap between the two candidates is larger in
-practice than the old range implied. Japan's small-import tax exemption is
-scheduled for repeal per the FY2026 tax reform outline
-(<https://www.mof.go.jp/tax_policy/tax_reform/outline/fy2026/08taikou_gaiyou.pdf>),
-decided 2025-12-26 with no enforcement date set yet; the Daisy figure above
-assumes current rules and should be rechecked if ordering after that repeal
-takes effect.
-
-## Addendum: resolving Daisy Seed's stereo I/O gap (2026-07-26)
-
-Stereo I/O is a hard requirement for this project — the intended sources
-(Elektron Digitakt 2 / Digitone 2 / Syntakt, Teenage Engineering OP-1 / OP-XY;
-see Consequences) are all stereo line-output gear. The prior framing —
-"Terrarium is mono, Petal is unavailable" — made Daisy Seed look unable to
-meet that requirement. That framing conflated the module with the carrier
-board; it does not survive closer inspection.
-
-- **The Daisy Seed module is stereo in hardware, not just in the codec spec.**
-  Its 40-pin header breaks out dedicated `AUDIO_IN_L` (pin 16), `AUDIO_IN_R`
-  (pin 17), `AUDIO_OUT_L` (pin 18), and `AUDIO_OUT_R` (pin 19) pads — the same
-  pin numbers on Seed3 — and libDaisy initialises the STM32's SAI peripheral
-  for 2 channels regardless of carrier board. Any carrier board that wires
-  those four pads gets stereo; Terrarium's mono-only wiring is that board's
-  own design choice, not a Daisy Seed constraint (inferred from
-  GuitarML/DaisyEffects only ever indexing `in[0]`/`out[0]` for Terrarium —
-  Terrarium's schematic itself isn't open-sourced, only `terrarium.h` pin
-  definitions are, so this is inferred rather than confirmed against the PCB
-  pattern).
-- **Open-source stereo carrier boards for Daisy Seed already exist and are
-  actively maintained**, avoiding both a from-scratch PCB design and reliance
-  on the unavailable Petal:
-  - [GuitarML/FunBox](https://github.com/GuitarML/FunBox) — built by the same
-    author as the Terrarium-oriented DaisyEffects project, explicitly a
-    "stereo guitar pedal platform using Daisy Seed", 125B enclosure, full
-    KiCad schematic/PCB/BOM/Gerbers in-repo, 253 stars, last updated
-    2026-07-23. Community build notes (an op-amp swap, TL074→MCP6024, to fix
-    noise/phase issues) are documented on the
-    [PedalPCB forum](https://forum.pedalpcb.com/threads/developing-a-custom-pcb-for-daisy-seed-funbox.22152/)
-    and in a [build guide](https://keyth72.medium.com/funbox-build-guide-afbd8046121e).
-  - [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
-    — stereo I/O, multiple enclosure sizes (125B/1590B), MIT-licensed PCB
-    files; a second independent option to compare against FunBox.
-- **Daisy Pod** ($68, in stock direct from Electrosmith) has stereo 3.5 mm
-  line I/O and is a viable bench-prototyping stopgap, but it is a bare board
-  on a 3.5 mm connector, not a pedal enclosure — it does not replace a
-  FunBox-style carrier for the final build.
-- **Terrarium plus a hand-wired stereo mod** was considered and set aside: the
-  Daisy-Seed-side pins are accessible, but Terrarium's schematic isn't
-  open-sourced, no established community mod procedure was found, and it is
-  strictly worse than starting from an already-stereo design like FunBox.
-
-**Net effect on the Decision**: Daisy Seed's stereo gap is resolved as a
-carrier-board choice — use FunBox or DaisySeedProjects instead of Terrarium —
-not a hardware limitation of the module. This removes what had been the
-sharpest argument against Daisy Seed for this project; the remaining
-trade-offs (the control-surface/CLI rewrite cost and `no_std` port in finding
-4, Rust tooling maturity) are unchanged.
-
-## Addendum: compute headroom for future FFT-heavy spectral effects (2026-07-26)
-
-This project's current DSP (`src/dsp/`) is IIR-only (biquads, envelope
-followers), which is the workload finding 3 verified as cheap to port. Future
-effects under consideration go beyond that profile: a "pitchmap/chroma"-style
-effect combining a harmonic resonator, multi-stage bandpass filter, comb
-filter, and phase vocoder; and a spectral bitcrusher that bit-crushes only a
-target frequency band. The comb-filter / multi-BPF / harmonic-resonator part
-of that is still IIR (biquad cascades), so it carries the same low cost
-finding 3 already established. The phase-vocoder part is a different
-workload — FFT/IFFT, phase accumulation, overlap-add — and is where Bela and
-Daisy diverge sharply.
-
-- **Bela**: its official examples repository ships a working phase vocoder
-  (`examples/Audio/FFT-phase-vocoder/render.cpp`), built on the NE10
-  NEON-optimised FFT library, using a 2048-point FFT at a 512-sample hop
-  (4× overlap), with the FFT/IFFT computation offloaded from the audio ISR to
-  a lower-priority Xenomai `AuxiliaryTask` so it can't threaten the audio
-  deadline. This example already ran acceptably on the older, single-core
-  Cortex-A8 @ 1 GHz Bela hardware; the current Bela Gem's PocketBeagle 2 host
-  has 2–4 Cortex-A53 cores at up to 1.4 GHz plus a generation of
-  microarchitecture improvement, so materially more headroom is expected,
-  though this has not been benchmarked on Gem hardware itself. Bela also
-  ships a general-purpose `Fft`/`Convolver` library, i.e. FFT-based processing
-  is a supported, ordinary use case there, not a special-case struggle.
-- **Daisy Seed**: DaisySP's stock `PitchShifter` is delay-line/cross-fade
-  based (SOLA-style), not FFT — there is no first-party phase-vocoder
-  implementation. Community attempts exist (`shy_fft.h`-based phase vocoders
-  at FFT sizes 1024–4096), but the developer of one such project reported
-  struggling with CPU cost enough to abandon the FFT/PSOLA approach and
-  revert to the delay-based method. A phase-vocoder pitch shifter on Teensy 4
-  (Cortex-M7 @ 600 MHz — faster than Daisy's 480 MHz) is reported to use
-  roughly 75% CPU on its own. No precise CPU-percentage or latency figure for
-  Daisy itself was obtained, but the pattern across same-class Cortex-M7 chips
-  points the same way: a phase vocoder is achievable as a standalone effect,
-  but running it concurrently, full-tilt, alongside the comb-filter/multi-BPF
-  chain on Daisy's single core is unlikely to fit comfortably. Realistic
-  mitigations if Daisy is chosen and this effect is pursued: a smaller FFT
-  size, a larger hop (trading latency for headroom), or making the
-  phase-vocoder effect and the heavier IIR chains mutually exclusive
-  (one active mode at a time) rather than layering them.
-- **Spectral bitcrusher**: surveying existing plugins (Digital-Hell, Hilofi
-  Multiband Bitcrusher, MeldaProduction MBitFunMB) and one embedded example
-  (`thesquaregroot/uncertainty-dffb`, an 8-band elliptic-IIR multiband
-  bitcrusher on an RP2040) shows the dominant real-world implementation is
-  multiband IIR filtering plus per-band bit reduction, not FFT-bin
-  quantisation. That keeps this effect cheap on either platform; an FFT-bin
-  variant is also possible and would simply reuse whatever phase-vocoder FFT
-  infrastructure already exists.
-
-**Net effect on the Decision**: this doesn't change today's decision (the
-platform still isn't chosen), but it adds a real consideration favoring Bela
-over Daisy specifically if FFT-heavy spectral effects are a serious future
-direction, alongside the existing pedal-form-factor and control-surface/CLI
-migration-cost axes. It should be weighed, not treated as settled — no direct
-CPU-load or latency benchmark was obtained for either the Bela Gem or
-PocketBeagle 2's NEON FFT throughput specifically; the Bela headroom claim
-rests on the phase-vocoder example having run on much weaker prior-generation
-hardware; and the Daisy tightness claim rests on cross-project community
-reports (shy_fft.h, Teensy 4) rather than a first-party benchmark on this
-project's own effect chain.
-
-## Addendum: Bela/PocketBeagle 2 power draw versus Raspberry Pi 5 (2026-07-26)
-
-Finding 2 above blames Pi 5's active-cooling requirement for its poor fit in
-a pedal enclosure, and Bela's candidacy leans on not having that problem. That
-only holds if PocketBeagle 2 (Cortex-A53, a weaker core family than Pi 5's
-Cortex-A76) actually draws meaningfully less power — a slower core does not
-automatically mean a cooler one. This was checked rather than assumed.
-
-- **TI's own benchmark** (application note SPRADG1, Feb 2024, on-board
-  current-monitor measurements on SK-AM62B-class hardware — the AM625/AM6254
-  die family used in Bela Gem/PocketBeagle 2's Rev A1): OS idle 316–443 mW
-  across 200 MHz–1.4 GHz, deep sleep 14.6–32.5 mW, and combined CPU+GPU
-  maximum load (4-core stress + glmark2 at 1.4 GHz) **1.54 W**. This is
-  SoC+DDR power only, not a full board, and TI does not publish a single TDP
-  figure — only junction-temperature limits (Commercial 0–95 °C) and a
-  θJA figure TI itself says not to use for thermal design.
-- **Bela's co-founder (giuliomoro) posted measured figures** on the Bela
-  forum ([thread](https://forum.bela.io/d/6483-bela-gem-two-new-boards)):
-  "with the four cores spinning at 100% and the Bela program running, I
-  measured only 60 mW more on the Gem Multi than on a Bela board running a
-  Bela program... That's great also in comparison to the >8 W you get when
-  running a Pi 5 at full clock. For the Gem and the PB2: no heatsink needed,
-  no fan needed, don't be afraid of enclosures." The
-  [Crowd Supply campaign page](https://www.crowdsupply.com/bela/bela-gem-stereo-and-multi)
-  publishes matching board-level figures: 0.10 W (Stereo) / 0.59 W (Multi)
-  board-only, 1.90 W (Stereo) / 2.39 W (Multi) with the SBC, against ">8 W"
-  for Pi5-based comparison products.
-- **These two independent sources land in the same order of magnitude**
-  (TI's SoC-level ~1.5 W max versus Bela's board-level 1.9–2.4 W with SBC),
-  which cross-checks each other reasonably well and is consistent with
-  Pi 5's already-established 2.7–3.6 W idle / up to 15.9–16.8 W combined-load
-  figures being roughly an order of magnitude higher.
-- **Caveats, stated plainly**: the "no heatsink, no fan" claim is a forum
-  statement by a co-founder, not a datasheet or independent review — no
-  third-party PocketBeagle 2-specific power or thermal benchmark was found.
-  TI's own documentation explicitly disclaims using θJA as a design
-  parameter, so thermal margin inside a sealed pedal enclosure specifically
-  is unverified for either platform. The "old-generation Bela has years of
-  pedal-enclosure use" precedent is a mechanical-fit precedent only — no
-  thermal data accompanies it, and the SoC changed from a single-core
-  Cortex-A8 to a multi-core Cortex-A53 between generations, so it doesn't
-  carry over as thermal evidence. One red herring surfaced during this
-  research and is worth flagging so it isn't repeated: warnings about the
-  **original** PocketBeagle (2017, OSD3358 chip) overheating are for a
-  different, unrelated chip and do not apply to PocketBeagle 2.
-
-**Net effect on the Decision**: the concern that PocketBeagle 2 might not
-meaningfully differentiate from Pi 5 on heat appears unfounded — two
-independent-ish sources agree it draws roughly an order of magnitude less
-power under load. This substantiates finding 2's argument for Bela over Pi 5
-rather than undermining it. It is not yet fully verified, though:
-independent, third-party measurement of Bela Gem/PocketBeagle 2 power draw
-and temperature inside a sealed pedal enclosure remains an open item for
-hands-on evaluation before the platform ADR.
-
-## Addendum: pedal-enclosure reference-design gap, Bela Gem vs Daisy Seed (2026-07-26)
-
-Finding 4 frames Bela's control-surface story favorably: its `render()` API
-"mostly simplifies" the software side. That's a software-driver-layer claim
-only. Whether it makes the pedal easier to actually *build* is a separate
-question, and Daisy's ecosystem (Terrarium, FunBox, DaisySeedProjects — a
-buy-or-download-and-populate path covering the PCB, pot/switch/LED wiring,
-and the enclosure) sets a high bar. This was checked against Bela Gem
-specifically, not assumed by analogy to old-generation Bela.
-
-- **No populate-and-go pedal PCB or enclosure design exists for Bela Gem.**
-  The `BelaPlatform` GitHub org has no such repository. The clearest evidence
-  is a Bela forum thread from this month
-  ([STL/3D Models for Bela Gem/Gem Multi](https://forum.bela.io/d/8248-stl-3d-models-for-bela-gemgem-multi),
-  2026-07-08): a user asked for an enclosure model, and Bela's own answer was
-  to convert the board's KiCad 3D-preview STEP file yourself — over a year
-  after Gem's launch, still no ready enclosure design, official or
-  community. The one community breakout board found,
-  [yannseznec/belaGemWorkshopPCB](https://github.com/yannseznec/belaGemWorkshopPCB),
-  only exposes header pins to connectors; it has no pot/switch/LED/enclosure
-  design and the author states it hasn't been tested yet.
-- **Old-generation Bela's pedal precedent was itself ad-hoc DIY, not a
-  manufactured-board ecosystem.** In the
-  [Embed Bela in a guitar pedal? thread](https://forum.bela.io/d/111-embed-bela-in-a-guitar-pedal)
-  (53 posts), Bela's co-founder recommends wiring panel-mount pots/switches
-  directly to Bela's analog inputs by hand rather than designing a dedicated
-  expansion board, and a contributor's build repurposes a generic Hammond/
-  Farnell diecast enclosure, not a Bela-specific one. The one complete
-  one-stop design that does exist —
-  [leheltorok/effect_cape_for_bela_mini](https://github.com/leheltorok/effect_cape_for_bela_mini)
-  (KiCad schematic/PCB, BOM, laser-cut acrylic enclosure, CC BY-NC-SA) —
-  targets **Bela Mini**, whose PocketBeagle (first-generation, now
-  discontinued) has a different header layout and footprint than the Gem's
-  PocketBeagle 2, so it needs re-design, not a straight port.
-- **Bela Gem's physical connectors are bare 2.54 mm pin headers**
-  (BeagleBone/PocketBeagle cape-compatible stacking headers), not locking
-  connectors. Direct wiring to panel-mount pots/switches is confirmed viable
-  via forum examples (e.g.
-  [Bela Gem Stereo digital I/O help!](https://forum.bela.io/d/7747-bela-gem-stereo-digital-io-help)),
-  so a breakout board isn't strictly required. But some GPIO pins are shared
-  with the PRU real-time coprocessor and need register-level `devmem2` pokes
-  or a custom device-tree overlay to use (see
-  [Bela Gem Neopixel Pd](https://forum.bela.io/d/7627-bela-gem-neopixel-pd)) —
-  a layer of complexity beyond Daisy's vendor-HAL-mediated GPIO access.
-- **No Gem-specific pedal/stompbox community project was found post-launch**
-  (Gem shipped 2026-02-04). A 2026-04-08 guitar-pedal-adjacent forum thread
-  ([~2.7 kHz noise when Bela is connected to guitar pedal
-  ground](https://forum.bela.io/d/7808-27khz-noise-when-bela-is-connected-to-guitar-pedal-ground))
-  still references "Bela Rev C" — the old generation — suggesting the
-  pedal-building side of the Bela community hasn't migrated to Gem yet. This
-  is an absence-of-evidence finding, not a confirmed absence: Reddit and
-  Crowd Supply's comment section could not be searched (search-quota
-  exhaustion during this research), so an undiscovered Gem pedal project
-  can't be ruled out.
-- **Bela's official hardware design files are CC BY-NC** (non-commercial),
-  an additional licensing constraint that doesn't apply to Daisy's
-  MIT-licensed FunBox/DaisySeedProjects designs.
-
-**Net effect on the Decision**: finding 4's claim that Bela "mostly
-simplifies" the control-surface layer is accurate at the software-API level,
-but doesn't extend to hardware. At the level of actually building a pedal —
-pots, switches, LEDs, enclosure — the ecosystem gap runs the opposite
-direction: Daisy has multiple mature, populate-and-go reference designs;
-Bela Gem currently has none, and building one means original schematic/PCB/
-enclosure design work. This nuances finding 4 rather than reversing it — the
-audio-callback-side software win for Bela stands on its own — but the
-platform ADR should weigh Daisy's hardware-ecosystem maturity as a concrete
-point in Daisy's favor, alongside the points already recorded in Bela's
-favor (FFT-heavy spectral effect headroom, substantiated lower power draw).
 
 ## References
 
