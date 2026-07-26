@@ -117,6 +117,47 @@ USB host path, not the DSP.
   property, not a JACK-operation problem, so it is not the "JACK operational cost"
   trigger that ADR 0007 reserves for reconsidering ALSA direct.
 
+## Addendum: search for prior reports of this pattern (2026-07-26)
+
+A search across raspberrypi/linux GitHub issues, the Raspberry Pi Forums, RME's
+user forum, linuxmusicians.com, the Blokas/Pisound community, Reddit, and Linux
+kernel mailing lists found no report matching this ADR's specific pattern: a
+periodic one-period slip at `128×2` that neither JACK nor the client-side xrun
+counter detects, visible only in sample-level analysis of the recorded audio,
+on the Pi 5's xHCI (RP1) controller. This is recorded here so a future
+investigation does not repeat the same search from scratch.
+
+The closest related reports, and why none of them match:
+
+- [raspberrypi/linux#3795](https://github.com/raspberrypi/linux/issues/3795)
+  (already cited below) — the known `dwc_otg.fiq_fsm_enable=0` fix targets the
+  pre-Pi-5 `dwc_otg` controller and its ARMv8 FIQ limitation; it does not apply
+  to the Pi 5's `xhci-hcd`.
+- [raspberrypi/linux#5743](https://github.com/raspberrypi/linux/issues/5743)
+  ("Pi 5 and soundcards") — the main open Pi 5 audio issue, but it concerns I2S
+  clock producer/consumer overlay selection, not USB clock slip.
+- [raspberrypi/linux#5759](https://github.com/raspberrypi/linux/issues/5759) —
+  a Pi 5 USB DAC sizzling sound at 176.4/352.8 kHz only; a Raspberry Pi engineer
+  measured Pi 5 SOF packet intervals at 125 µs ± 0.0625 µs on that report,
+  finding no gross timing fault. Different symptom (audible only at high sample
+  rates, not a `128×2`-specific slip invisible to xrun counters).
+- [Pi 5 `xhci_hcd` "disabled endpoint" errors during
+  playback](https://forums.raspberrypi.com/viewtopic.php?t=375580) — the
+  reporter states playback itself sounds unaffected; the thread ends
+  unresolved and locked.
+- An xHCI isochronous ring xrun-handling kernel patch ([LKML, Feb
+  2025](https://lkml.iu.edu/hypermail/linux/kernel/2502.3/04994.html)) — fixes
+  a race in explicit xrun event handling (data loss / early TD completion), a
+  different failure mode from a slip that produces no xrun event at all.
+
+No public report describes the few-ppm clock-recovery/crystal-difference
+mechanism this ADR attributes the `128×2` failure to, specific to the Pi 5's
+RP1 xHCI controller. The soak-test findings in
+`docs/raspberry-pi/usb-audio-verification.md` may be the first documented
+isolation of this pattern; if reporting it upstream, that document's
+cause-elimination list and period-length match are the primary evidence to
+cite.
+
 ## References
 
 - `docs/raspberry-pi/usb-audio-verification.md` — the full procedure, pass
