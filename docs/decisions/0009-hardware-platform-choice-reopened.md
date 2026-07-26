@@ -75,7 +75,11 @@ findings drive the reopening.
    (`src/params/preset.rs`) is `const` data with no file I/O and is unaffected.
    For Daisy/Teensy, then, the migration is not "port the DSP plus write a new
    audio adapter" — it is that plus a rewrite of the control-acquisition and CLI
-   host layer, a materially larger scope than finding 3 alone suggests.
+   host layer, a materially larger scope than finding 3 alone suggests. This
+   finding is scoped to the software-driver layer only; it says nothing about
+   hardware reference-design availability for actually building the pedal,
+   where the two candidates diverge in the opposite direction (see the
+   pedal-enclosure-ecosystem addendum below).
 
 The dedicated-board candidates weighed (not decided) are:
 
@@ -103,7 +107,13 @@ The dedicated-board candidates weighed (not decided) are:
   ">8 W" for a Pi 5 at full clock — supporting the fanless, no-heatsink
   pedal-form claim, though this rests on a forum statement and a related-SoC
   benchmark rather than an independent third-party measurement of
-  PocketBeagle 2 itself (see addendum).
+  PocketBeagle 2 itself (see addendum). Set against that: no populate-and-go
+  pedal PCB or enclosure design exists for Bela Gem — its own guitar-pedal
+  precedent (a forum thread of ad-hoc wire-to-header builds, and the one
+  complete "Effect Cape" design) both predate Gem and target the discontinued
+  Bela Mini's different header layout and footprint, so building an actual
+  pedal enclosure currently means original hardware design work from scratch
+  (see addendum).
 - **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
   **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
   older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
@@ -117,8 +127,10 @@ The dedicated-board candidates weighed (not decided) are:
   [GuitarML/FunBox](https://github.com/GuitarML/FunBox) and
   [bkshepherd/DaisySeedProjects](https://github.com/bkshepherd/DaisySeedProjects)
   — giving a concrete path to stereo without a from-scratch board or a
-  Terrarium mod. Cheapest candidate, smallest, and fanless. Rust support has
-  consolidated:
+  Terrarium mod. This populate-and-go pedal ecosystem (Terrarium, FunBox,
+  DaisySeedProjects) is a maturity gap Bela Gem doesn't currently have an
+  answer for (see addendum). Cheapest candidate, smallest, and fanless. Rust
+  support has consolidated:
   `daisy-embassy` (Embassy async) is the actively maintained option, while
   `libdaisy-rust` has had no release since 2021; either way it carries
   embedded-Rust glue plus the small `no_std` port and gives up the
@@ -395,6 +407,76 @@ independent, third-party measurement of Bela Gem/PocketBeagle 2 power draw
 and temperature inside a sealed pedal enclosure remains an open item for
 hands-on evaluation before the platform ADR.
 
+## Addendum: pedal-enclosure reference-design gap, Bela Gem vs Daisy Seed (2026-07-26)
+
+Finding 4 frames Bela's control-surface story favorably: its `render()` API
+"mostly simplifies" the software side. That's a software-driver-layer claim
+only. Whether it makes the pedal easier to actually *build* is a separate
+question, and Daisy's ecosystem (Terrarium, FunBox, DaisySeedProjects — a
+buy-or-download-and-populate path covering the PCB, pot/switch/LED wiring,
+and the enclosure) sets a high bar. This was checked against Bela Gem
+specifically, not assumed by analogy to old-generation Bela.
+
+- **No populate-and-go pedal PCB or enclosure design exists for Bela Gem.**
+  The `BelaPlatform` GitHub org has no such repository. The clearest evidence
+  is a Bela forum thread from this month
+  ([STL/3D Models for Bela Gem/Gem Multi](https://forum.bela.io/d/8248-stl-3d-models-for-bela-gemgem-multi),
+  2026-07-08): a user asked for an enclosure model, and Bela's own answer was
+  to convert the board's KiCad 3D-preview STEP file yourself — over a year
+  after Gem's launch, still no ready enclosure design, official or
+  community. The one community breakout board found,
+  [yannseznec/belaGemWorkshopPCB](https://github.com/yannseznec/belaGemWorkshopPCB),
+  only exposes header pins to connectors; it has no pot/switch/LED/enclosure
+  design and the author states it hasn't been tested yet.
+- **Old-generation Bela's pedal precedent was itself ad-hoc DIY, not a
+  manufactured-board ecosystem.** In the
+  [Embed Bela in a guitar pedal? thread](https://forum.bela.io/d/111-embed-bela-in-a-guitar-pedal)
+  (53 posts), Bela's co-founder recommends wiring panel-mount pots/switches
+  directly to Bela's analog inputs by hand rather than designing a dedicated
+  expansion board, and a contributor's build repurposes a generic Hammond/
+  Farnell diecast enclosure, not a Bela-specific one. The one complete
+  one-stop design that does exist —
+  [leheltorok/effect_cape_for_bela_mini](https://github.com/leheltorok/effect_cape_for_bela_mini)
+  (KiCad schematic/PCB, BOM, laser-cut acrylic enclosure, CC BY-NC-SA) —
+  targets **Bela Mini**, whose PocketBeagle (first-generation, now
+  discontinued) has a different header layout and footprint than the Gem's
+  PocketBeagle 2, so it needs re-design, not a straight port.
+- **Bela Gem's physical connectors are bare 2.54 mm pin headers**
+  (BeagleBone/PocketBeagle cape-compatible stacking headers), not locking
+  connectors. Direct wiring to panel-mount pots/switches is confirmed viable
+  via forum examples (e.g.
+  [Bela Gem Stereo digital I/O help!](https://forum.bela.io/d/7747-bela-gem-stereo-digital-io-help)),
+  so a breakout board isn't strictly required. But some GPIO pins are shared
+  with the PRU real-time coprocessor and need register-level `devmem2` pokes
+  or a custom device-tree overlay to use (see
+  [Bela Gem Neopixel Pd](https://forum.bela.io/d/7627-bela-gem-neopixel-pd)) —
+  a layer of complexity beyond Daisy's vendor-HAL-mediated GPIO access.
+- **No Gem-specific pedal/stompbox community project was found post-launch**
+  (Gem shipped 2026-02-04). A 2026-04-08 guitar-pedal-adjacent forum thread
+  ([~2.7 kHz noise when Bela is connected to guitar pedal
+  ground](https://forum.bela.io/d/7808-27khz-noise-when-bela-is-connected-to-guitar-pedal-ground))
+  still references "Bela Rev C" — the old generation — suggesting the
+  pedal-building side of the Bela community hasn't migrated to Gem yet. This
+  is an absence-of-evidence finding, not a confirmed absence: Reddit and
+  Crowd Supply's comment section could not be searched (search-quota
+  exhaustion during this research), so an undiscovered Gem pedal project
+  can't be ruled out.
+- **Bela's official hardware design files are CC BY-NC** (non-commercial),
+  an additional licensing constraint that doesn't apply to Daisy's
+  MIT-licensed FunBox/DaisySeedProjects designs.
+
+**Net effect on the Decision**: finding 4's claim that Bela "mostly
+simplifies" the control-surface layer is accurate at the software-API level,
+but doesn't extend to hardware. At the level of actually building a pedal —
+pots, switches, LEDs, enclosure — the ecosystem gap runs the opposite
+direction: Daisy has multiple mature, populate-and-go reference designs;
+Bela Gem currently has none, and building one means original schematic/PCB/
+enclosure design work. This nuances finding 4 rather than reversing it — the
+audio-callback-side software win for Bela stands on its own — but the
+platform ADR should weigh Daisy's hardware-ecosystem maturity as a concrete
+point in Daisy's favor, alongside the points already recorded in Bela's
+favor (FFT-heavy spectral effect headroom, substantiated lower power draw).
+
 ## References
 
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — the USB clock-slip
@@ -455,3 +537,19 @@ hands-on evaluation before the platform ADR.
   [Crowd Supply campaign](https://www.crowdsupply.com/bela/bela-gem-stereo-and-multi)
   publishes matching board-level figures (0.10–0.59 W board only, 1.90–2.39 W
   with the SBC).
+- [STL/3D Models for Bela Gem/Gem Multi (forum, 2026-07-08)](https://forum.bela.io/d/8248-stl-3d-models-for-bela-gemgem-multi)
+  — confirms no ready Gem enclosure design exists over a year after launch;
+  [yannseznec/belaGemWorkshopPCB](https://github.com/yannseznec/belaGemWorkshopPCB)
+  is the one (untested) community Gem breakout board, with no pot/switch/
+  enclosure design. [Embed Bela in a guitar pedal?](https://forum.bela.io/d/111-embed-bela-in-a-guitar-pedal)
+  and [leheltorok/effect_cape_for_bela_mini](https://github.com/leheltorok/effect_cape_for_bela_mini)
+  are the old-generation Bela Mini pedal precedents (ad-hoc wiring and the
+  one complete KiCad/enclosure design, respectively) that don't carry over to
+  Gem's different header layout. [Bela Gem Stereo digital I/O
+  help!](https://forum.bela.io/d/7747-bela-gem-stereo-digital-io-help) and
+  [Bela Gem Neopixel Pd](https://forum.bela.io/d/7627-bela-gem-neopixel-pd)
+  — confirm direct header wiring works but some GPIO needs PRU-level
+  workarounds. [~2.7 kHz noise when Bela is connected to guitar pedal
+  ground](https://forum.bela.io/d/7808-27khz-noise-when-bela-is-connected-to-guitar-pedal-ground)
+  — a 2026-04-08 guitar-pedal thread still on old-generation "Bela Rev C",
+  evidence the pedal-building community hasn't visibly migrated to Gem yet.
