@@ -2,7 +2,15 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0009](0009-hardware-platform-choice-reopened.md)
+
+ADR 0009 corrects an availability premise in this ADR's HAT ranking below — all
+high-quality stereo line ADC/DAC HATs are import-tier in Japan, so availability
+does not differentiate them — re-ranks the HATs, and reopens the SBC /
+microcontroller platform question this ADR kept out of scope. The USB clock-slip
+findings, the `128×3` baseline, and the requirement that the audio interface
+share its clock in hardware (not USB isochronous) are unchanged and carry
+forward.
 
 Builds on [ADR 0007](0007-alsa-direct-not-cpal-for-pi-native-backend.md), which
 kept JACK as the baseline while its latency and stability targets held. This ADR
