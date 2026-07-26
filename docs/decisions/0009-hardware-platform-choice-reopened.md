@@ -95,7 +95,15 @@ The dedicated-board candidates weighed (not decided) are:
   headroom for FFT-heavy spectral effects (phase vocoders, spectral
   bitcrushing) beyond the current IIR-only DSP profile: an official NE10-based
   phase-vocoder example already ran on far weaker prior-generation Bela
-  hardware (see addendum).
+  hardware (see addendum). Its power draw is now substantiated as sharply
+  lower than Pi 5's, not just architecturally plausible: TI's own benchmark of
+  the same SoC family tops out around 1.5 W under combined CPU+GPU load, and
+  Bela's co-founder measured the Gem Multi drawing only tens of milliwatts
+  more than a first-generation Bela board at 100% 4-core load, versus
+  ">8 W" for a Pi 5 at full clock — supporting the fanless, no-heatsink
+  pedal-form claim, though this rests on a forum statement and a related-SoC
+  benchmark rather than an independent third-party measurement of
+  PocketBeagle 2 itself (see addendum).
 - **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
   **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
   older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
@@ -332,6 +340,61 @@ hardware; and the Daisy tightness claim rests on cross-project community
 reports (shy_fft.h, Teensy 4) rather than a first-party benchmark on this
 project's own effect chain.
 
+## Addendum: Bela/PocketBeagle 2 power draw versus Raspberry Pi 5 (2026-07-26)
+
+Finding 2 above blames Pi 5's active-cooling requirement for its poor fit in
+a pedal enclosure, and Bela's candidacy leans on not having that problem. That
+only holds if PocketBeagle 2 (Cortex-A53, a weaker core family than Pi 5's
+Cortex-A76) actually draws meaningfully less power — a slower core does not
+automatically mean a cooler one. This was checked rather than assumed.
+
+- **TI's own benchmark** (application note SPRADG1, Feb 2024, on-board
+  current-monitor measurements on SK-AM62B-class hardware — the AM625/AM6254
+  die family used in Bela Gem/PocketBeagle 2's Rev A1): OS idle 316–443 mW
+  across 200 MHz–1.4 GHz, deep sleep 14.6–32.5 mW, and combined CPU+GPU
+  maximum load (4-core stress + glmark2 at 1.4 GHz) **1.54 W**. This is
+  SoC+DDR power only, not a full board, and TI does not publish a single TDP
+  figure — only junction-temperature limits (Commercial 0–95 °C) and a
+  θJA figure TI itself says not to use for thermal design.
+- **Bela's co-founder (giuliomoro) posted measured figures** on the Bela
+  forum ([thread](https://forum.bela.io/d/6483-bela-gem-two-new-boards)):
+  "with the four cores spinning at 100% and the Bela program running, I
+  measured only 60 mW more on the Gem Multi than on a Bela board running a
+  Bela program... That's great also in comparison to the >8 W you get when
+  running a Pi 5 at full clock. For the Gem and the PB2: no heatsink needed,
+  no fan needed, don't be afraid of enclosures." The
+  [Crowd Supply campaign page](https://www.crowdsupply.com/bela/bela-gem-stereo-and-multi)
+  publishes matching board-level figures: 0.10 W (Stereo) / 0.59 W (Multi)
+  board-only, 1.90 W (Stereo) / 2.39 W (Multi) with the SBC, against ">8 W"
+  for Pi5-based comparison products.
+- **These two independent sources land in the same order of magnitude**
+  (TI's SoC-level ~1.5 W max versus Bela's board-level 1.9–2.4 W with SBC),
+  which cross-checks each other reasonably well and is consistent with
+  Pi 5's already-established 2.7–3.6 W idle / up to 15.9–16.8 W combined-load
+  figures being roughly an order of magnitude higher.
+- **Caveats, stated plainly**: the "no heatsink, no fan" claim is a forum
+  statement by a co-founder, not a datasheet or independent review — no
+  third-party PocketBeagle 2-specific power or thermal benchmark was found.
+  TI's own documentation explicitly disclaims using θJA as a design
+  parameter, so thermal margin inside a sealed pedal enclosure specifically
+  is unverified for either platform. The "old-generation Bela has years of
+  pedal-enclosure use" precedent is a mechanical-fit precedent only — no
+  thermal data accompanies it, and the SoC changed from a single-core
+  Cortex-A8 to a multi-core Cortex-A53 between generations, so it doesn't
+  carry over as thermal evidence. One red herring surfaced during this
+  research and is worth flagging so it isn't repeated: warnings about the
+  **original** PocketBeagle (2017, OSD3358 chip) overheating are for a
+  different, unrelated chip and do not apply to PocketBeagle 2.
+
+**Net effect on the Decision**: the concern that PocketBeagle 2 might not
+meaningfully differentiate from Pi 5 on heat appears unfounded — two
+independent-ish sources agree it draws roughly an order of magnitude less
+power under load. This substantiates finding 2's argument for Bela over Pi 5
+rather than undermining it. It is not yet fully verified, though:
+independent, third-party measurement of Bela Gem/PocketBeagle 2 power draw
+and temperature inside a sealed pedal enclosure remains an open item for
+hands-on evaluation before the platform ADR.
+
 ## References
 
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — the USB clock-slip
@@ -382,3 +445,13 @@ project's own effect chain.
   Daisy. [thesquaregroot/uncertainty-dffb](https://github.com/thesquaregroot/uncertainty-dffb)
   — an embedded (RP2040) multiband IIR bitcrusher, evidence for the
   filter-bank (non-FFT) approach to a spectral bitcrusher.
+- [TI AM625 power benchmark (SPRADG1)](https://www.ti.com/lit/pdf/spradg1) and
+  [AM625 datasheet](https://www.ti.com/lit/ds/symlink/am625.pdf) — official
+  SoC-family power figures (idle ~0.3–0.4 W, max CPU+GPU load ~1.5 W) for the
+  AM6254 used in Bela Gem/PocketBeagle 2 Rev A1. [Bela Gem: two new boards
+  (forum)](https://forum.bela.io/d/6483-bela-gem-two-new-boards) — Bela
+  co-founder's measured power-draw comparison against Pi 5 (">8 W") and the
+  "no heatsink, no fan needed" claim; the
+  [Crowd Supply campaign](https://www.crowdsupply.com/bela/bela-gem-stereo-and-multi)
+  publishes matching board-level figures (0.10–0.59 W board only, 1.90–2.39 W
+  with the SBC).
