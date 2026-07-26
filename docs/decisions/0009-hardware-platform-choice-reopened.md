@@ -48,14 +48,34 @@ findings drive the reopening.
    Pi 5 + HAT + cooler + case stack is large. This is precisely the heat and
    form-factor problem ADR 0008 deferred, and it bites hardest in the pedal form
    the project is aiming at.
-3. **The DSP core's portability cost is small, and now verified.** The real-time
-   signal path in `src/dsp/` uses only `exp` and `ln` transcendentals, at
-   block / parameter granularity rather than per sample; its only `std` dependence
-   is `std::{f32,f64}::consts`, which exist identically in `core`; there are no
-   heap allocations on the audio path. A `no_std` port is therefore a mechanical
-   swap (`core::` constants plus `libm` for the transcendentals), not a rewrite,
-   and the `f64` used in frequency smoothing runs in hardware on a Cortex-M7 with a
-   double-precision FPU.
+3. **The DSP core's portability cost is small, and now verified — but this
+   finding is scoped to `src/dsp/` only.** The real-time signal path uses only
+   `exp` and `ln` transcendentals, at block / parameter granularity rather than
+   per sample; its only `std` dependence is `std::{f32,f64}::consts`, which exist
+   identically in `core`; there are no heap allocations on the audio path. A
+   `no_std` port is therefore a mechanical swap (`core::` constants plus `libm`
+   for the transcendentals), not a rewrite, and the `f64` used in frequency
+   smoothing runs in hardware on a Cortex-M7 with a double-precision FPU. It says
+   nothing about the cost of the non-DSP layers below.
+4. **The control-surface layer (potentiometers, bypass switch) is not yet
+   written, and its migration cost differs sharply by candidate.** The design
+   sketched in `docs/architecture.md` and `docs/contracts.md` §6 — an SPI-attached
+   ADC and GPIO read from a Linux userspace thread, handed to the audio callback
+   through a bounded non-blocking queue — assumes an OS. On Bela, still embedded
+   Linux, this mostly simplifies: Bela exposes its own analog/digital I/O read
+   synchronously inside its `render()` callback, so the SPI/GPIO driver swaps to
+   Bela's API and the separate thread-plus-queue plumbing may not even be needed.
+   On Daisy Seed or Teensy, both bare-metal, there is no Linux under the control
+   layer at all: no `rppal` / `spidev` / sysfs GPIO, and no OS thread to run one
+   on. Potentiometer and switch reads move to the vendor's `no_std` HAL
+   (`stm32h7xx-hal` / `libdaisy-rust` for Daisy, `imxrt-hal` / `teensy4-rs` for
+   Teensy), read directly in the control loop instead of through a queue from a
+   separate thread. The CLI layer (`src/cli.rs`, `src/main.rs`) is `std`-dependent
+   (`clap`) and does not carry over to bare metal either, though the preset table
+   (`src/params/preset.rs`) is `const` data with no file I/O and is unaffected.
+   For Daisy/Teensy, then, the migration is not "port the DSP plus write a new
+   audio adapter" — it is that plus a rewrite of the control-acquisition and CLI
+   host layer, a materially larger scope than finding 3 alone suggests.
 
 The dedicated-board candidates weighed (not decided) are:
 
@@ -111,10 +131,19 @@ share the audio clock in hardware).
   Syntakt and Teenage Engineering OP-1 / OP-XY — so no DI / high-impedance
   front-end is designed for. This holds for every candidate platform.
 - The DSP portability finding is now a recorded asset: every candidate keeps the
-  DSP in Rust; only Daisy requires the small `no_std` port, while Bela and the Pi
-  reuse it verbatim. This is what makes reopening the platform question cheap
-  rather than a rewrite, and it should be confirmed by reading the `process()`
-  hot loop before any port.
+  DSP in Rust; only Daisy (and Teensy) require the small `no_std` port, while
+  Bela and the Pi reuse it verbatim. It should be confirmed by reading the
+  `process()` hot loop before any port.
+- That DSP finding does not extend to the not-yet-written control-surface layer
+  (potentiometers, bypass switch) or the CLI/host shell. Bela's own analog/
+  digital I/O API is expected to simplify that layer (synchronous reads inside
+  `render()`, possibly no separate thread/queue at all). Daisy and Teensy instead
+  require rewriting it against a vendor `no_std` HAL and dropping the `clap`-based
+  CLI, since there is no Linux underneath to run the Pi-era SPI/GPIO/thread
+  design on. This asymmetry — small DSP cost everywhere, but a real
+  control-layer/CLI rewrite specific to Daisy/Teensy — is part of the software-
+  migration side of the trade-off any later platform ADR must weigh, alongside
+  pedal form-factor.
 - Whichever platform is chosen, ADR 0008's requirement stands that the audio
   interface share its clock in hardware (I2S-class), not via USB isochronous
   transfer; all three candidates satisfy it.
