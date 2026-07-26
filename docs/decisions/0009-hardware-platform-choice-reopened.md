@@ -209,6 +209,24 @@ so this axis does not distinguish it from Bela.
   callback, or a bare-metal audio callback) to be decided in the platform ADR.
 - ADR 0008's `48 kHz` / `128×3` / ~11 ms USB figure remains the latency comparison
   baseline for any platform evaluation.
+- **Summary comparison across everything recorded above**, for the later
+  platform ADR to start from (detail and sourcing in the addenda below):
+
+  | Axis | Pi 5 + Pisound | Bela Gem | Daisy Seed |
+  |---|---|---|---|
+  | DSP portability (finding 3) | Verbatim (incumbent) | Verbatim (full Linux) | Small `no_std` port (mechanical) |
+  | Control-surface/CLI software cost (finding 4) | None (incumbent) | Mostly simplifies (`render()` API); still a new host adapter | Rewrite against vendor HAL; CLI dropped |
+  | Pedal thermal / form factor (finding 2, power addendum) | Worst — needs active cooling, large stack | Good — ~10× lower power than Pi 5 (semi-official), fanless claimed | Best — microcontroller, fanless, smallest |
+  | FFT-heavy spectral-effect headroom (addendum) | Most raw compute of the three, untested for this specifically | Proven headroom (official phase-vocoder example, multi-core) | Tight fit — single core, community reports of difficulty |
+  | Hardware reference-design maturity for an actual pedal build (addendum) | Established HAT+case ecosystem (Patchbox OS, `pisound-btn`), but not pedal-specific | None — no populate-and-go PCB/enclosure for Gem exists; direct wire-to-header DIY only | Mature — Terrarium/FunBox/DaisySeedProjects, populate-and-go |
+  | Landed cost, Japan (pricing addendum) | ≈¥22,000 (Pisound, International Post) + Pi 5 separately | ≈¥28,000 (Gem Stereo Starter Kit) | ≈¥6,600 (Seed3/Seed2 DFM alone; carrier board extra) |
+
+  Reading across the table: Bela's advantages are concentrated in real-time
+  audio *software* (proven FFT headroom, lower power, DSP reuse), Daisy's in
+  *hardware* (cheapest, smallest, and the only candidate with a mature,
+  populate-and-go path to a finished pedal), and Pi 5's stay what they always
+  were (zero software change, worst thermal/form-factor fit). None of this
+  chooses a platform; it's the state the platform ADR should start from.
 
 ## Addendum: verified landed pricing for Bela and Daisy (2026-07-26)
 
