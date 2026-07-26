@@ -91,7 +91,11 @@ The dedicated-board candidates weighed (not decided) are:
   from-scratch `bindgen` binding rather than a ready-made wrapper. Verified
   price for the Gem Stereo Starter Kit: $149.00 + $21.00 tracked/signed shipping
   = $170.00, landing at roughly ¥28,000 in Japan after import consumption tax
-  (see addendum). Import only, no Japanese distributor.
+  (see addendum). Import only, no Japanese distributor. It also has verified
+  headroom for FFT-heavy spectral effects (phase vocoders, spectral
+  bitcrushing) beyond the current IIR-only DSP profile: an official NE10-based
+  phase-vocoder example already ran on far weaker prior-generation Bela
+  hardware (see addendum).
 - **Daisy Seed** (Electrosmith, STM32H750 Cortex-M7; current revision is
   **Seed3**, 32-bit / 192 kHz codec, same price and pin-compatible with the
   older Seed2 DFM): stereo codec up to 24-bit / 192 kHz (32-bit on Seed3),
@@ -113,13 +117,22 @@ The dedicated-board candidates weighed (not decided) are:
   develop-on-PC / deploy-the-same-binary workflow. Verified price: $29.99 +
   $12.36 standard shipping = $42.35 for either Seed3 or Seed2 DFM, landing
   under Japan's ¥10,000 duty/tax-free threshold at roughly ¥6,600 (see
-  addendum). Import only.
+  addendum). Import only. Its single Cortex-M7 core is comfortable for the
+  current IIR-only DSP and for additional comb-filter / multi-band-filter
+  effects, but is a tight fit for FFT-heavy spectral effects (phase vocoders):
+  community attempts report high CPU cost and at least one abandoned in favor
+  of a delay-based approach (see addendum).
 - **Pi 5 + HAT** remains the incumbent: zero software change, ~2 ms with Pisound,
   but the worst on pedal thermal and form.
 
 Their trade axis is software-migration cost versus pedal form-factor, not
 availability (all three are import-tier) and not clock correctness (all three
-share the audio clock in hardware).
+share the audio clock in hardware). A third axis applies specifically between
+Bela and Daisy if FFT-heavy spectral effects (phase vocoders, spectral
+processing) are pursued later: Daisy's single Cortex-M7 core is a tight fit
+for that workload, while Bela's multi-core Linux SoC has proven headroom
+(see addendum). Pi 5's quad Cortex-A76 has still more headroom than either,
+so this axis does not distinguish it from Bela.
 
 ## Decision
 
@@ -257,6 +270,68 @@ sharpest argument against Daisy Seed for this project; the remaining
 trade-offs (the control-surface/CLI rewrite cost and `no_std` port in finding
 4, Rust tooling maturity) are unchanged.
 
+## Addendum: compute headroom for future FFT-heavy spectral effects (2026-07-26)
+
+This project's current DSP (`src/dsp/`) is IIR-only (biquads, envelope
+followers), which is the workload finding 3 verified as cheap to port. Future
+effects under consideration go beyond that profile: a "pitchmap/chroma"-style
+effect combining a harmonic resonator, multi-stage bandpass filter, comb
+filter, and phase vocoder; and a spectral bitcrusher that bit-crushes only a
+target frequency band. The comb-filter / multi-BPF / harmonic-resonator part
+of that is still IIR (biquad cascades), so it carries the same low cost
+finding 3 already established. The phase-vocoder part is a different
+workload — FFT/IFFT, phase accumulation, overlap-add — and is where Bela and
+Daisy diverge sharply.
+
+- **Bela**: its official examples repository ships a working phase vocoder
+  (`examples/Audio/FFT-phase-vocoder/render.cpp`), built on the NE10
+  NEON-optimised FFT library, using a 2048-point FFT at a 512-sample hop
+  (4× overlap), with the FFT/IFFT computation offloaded from the audio ISR to
+  a lower-priority Xenomai `AuxiliaryTask` so it can't threaten the audio
+  deadline. This example already ran acceptably on the older, single-core
+  Cortex-A8 @ 1 GHz Bela hardware; the current Bela Gem's PocketBeagle 2 host
+  has 2–4 Cortex-A53 cores at up to 1.4 GHz plus a generation of
+  microarchitecture improvement, so materially more headroom is expected,
+  though this has not been benchmarked on Gem hardware itself. Bela also
+  ships a general-purpose `Fft`/`Convolver` library, i.e. FFT-based processing
+  is a supported, ordinary use case there, not a special-case struggle.
+- **Daisy Seed**: DaisySP's stock `PitchShifter` is delay-line/cross-fade
+  based (SOLA-style), not FFT — there is no first-party phase-vocoder
+  implementation. Community attempts exist (`shy_fft.h`-based phase vocoders
+  at FFT sizes 1024–4096), but the developer of one such project reported
+  struggling with CPU cost enough to abandon the FFT/PSOLA approach and
+  revert to the delay-based method. A phase-vocoder pitch shifter on Teensy 4
+  (Cortex-M7 @ 600 MHz — faster than Daisy's 480 MHz) is reported to use
+  roughly 75% CPU on its own. No precise CPU-percentage or latency figure for
+  Daisy itself was obtained, but the pattern across same-class Cortex-M7 chips
+  points the same way: a phase vocoder is achievable as a standalone effect,
+  but running it concurrently, full-tilt, alongside the comb-filter/multi-BPF
+  chain on Daisy's single core is unlikely to fit comfortably. Realistic
+  mitigations if Daisy is chosen and this effect is pursued: a smaller FFT
+  size, a larger hop (trading latency for headroom), or making the
+  phase-vocoder effect and the heavier IIR chains mutually exclusive
+  (one active mode at a time) rather than layering them.
+- **Spectral bitcrusher**: surveying existing plugins (Digital-Hell, Hilofi
+  Multiband Bitcrusher, MeldaProduction MBitFunMB) and one embedded example
+  (`thesquaregroot/uncertainty-dffb`, an 8-band elliptic-IIR multiband
+  bitcrusher on an RP2040) shows the dominant real-world implementation is
+  multiband IIR filtering plus per-band bit reduction, not FFT-bin
+  quantisation. That keeps this effect cheap on either platform; an FFT-bin
+  variant is also possible and would simply reuse whatever phase-vocoder FFT
+  infrastructure already exists.
+
+**Net effect on the Decision**: this doesn't change today's decision (the
+platform still isn't chosen), but it adds a real consideration favoring Bela
+over Daisy specifically if FFT-heavy spectral effects are a serious future
+direction, alongside the existing pedal-form-factor and control-surface/CLI
+migration-cost axes. It should be weighed, not treated as settled — no direct
+CPU-load or latency benchmark was obtained for either the Bela Gem or
+PocketBeagle 2's NEON FFT throughput specifically; the Bela headroom claim
+rests on the phase-vocoder example having run on much weaker prior-generation
+hardware; and the Daisy tightness claim rests on cross-project community
+reports (shy_fft.h, Teensy 4) rather than a first-party benchmark on this
+project's own effect chain.
+
 ## References
 
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — the USB clock-slip
@@ -289,3 +364,21 @@ trade-offs (the control-surface/CLI rewrite cost and `no_std` port in finding
 - [Waveshare WM8960 Audio HAT](https://www.waveshare.com/wiki/WM8960_Audio_HAT)
   and [Raspberry Pi Codec Zero](https://www.raspberrypi.com/products/codec-zero/)
   — the domestically stocked but quality-compromised boards.
+- [Bela FFT-phase-vocoder example](https://github.com/BelaPlatform/Bela/blob/master/examples/Audio/FFT-phase-vocoder/render.cpp)
+  and [Fft](https://github.com/BelaPlatform/Bela/blob/master/libraries/Fft/Fft.h) /
+  [Convolver](https://github.com/BelaPlatform/Bela/blob/master/libraries/Convolver/Convolver.h)
+  libraries — Bela's proven, standard-supported FFT-based spectral processing;
+  [NE10](https://github.com/projectNe10/Ne10) is the NEON FFT library they use.
+- [DaisySP `PitchShifter`](https://github.com/electro-smith/DaisySP/blob/master/Source/Effects/pitchshifter.h)
+  — the stock delay-line/cross-fade pitch shifter (not FFT-based);
+  [community discussion of `shy_fft.h` phase-vocoder attempts](https://community.daisy.audio/t/my-battle-with-shy-fft-h-and-what-it-taught-me-shyfft-quick-guide/8455)
+  and [DD4WH/BirdSongPitchShifter](https://github.com/DD4WH/BirdSongPitchShifter)
+  (a Teensy 4 phase-vocoder pitch shifter reported at ~75% CPU) — evidence for
+  the Cortex-M7-class compute ceiling on FFT-heavy spectral effects.
+- [jazamatronic/ParametricChorus](https://github.com/jazamatronic/ParametricChorus)
+  and [jazamatronic/ModalResonators](https://github.com/jazamatronic/ModalResonators)
+  — existing Daisy Pod projects running 8–20 parallel biquads in real time,
+  evidence that comb-filter / multi-BPF / harmonic-resonator work is cheap on
+  Daisy. [thesquaregroot/uncertainty-dffb](https://github.com/thesquaregroot/uncertainty-dffb)
+  — an embedded (RP2040) multiband IIR bitcrusher, evidence for the
+  filter-bank (non-FFT) approach to a spectral bitcrusher.
