@@ -1,10 +1,11 @@
 [workspace]
-members = ["tools"]
+members = ["jack-tools"]
 resolver = "3"
 
 [workspace.dependencies]
-# Shared between `oxtt` and the `tools` crate so both link the same JACK
-# binding; keeping them in sync avoids `clippy::multiple_crate_versions`.
+# Shared between `oxtt` and the `jack-tools` crate (directory `jack-tools/`,
+# package `oxtt-jack-tools`) so both link the same JACK binding; keeping them
+# in sync avoids `clippy::multiple_crate_versions`.
 jack = "0.13"
 proptest = "1"
 thiserror = "2"
