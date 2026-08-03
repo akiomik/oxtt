@@ -1,6 +1,6 @@
 # Contracts and Invariants
 
-This is the normative reference for the public DSP API (`src/dsp.rs`, `src/params.rs`) and the JACK audio callback (`src/jack_host.rs`). It states observable guarantees and real-time requirements; it intentionally does not repeat constructor plumbing, CLI error rendering, lint configuration, or individual test names. `docs/development.md` describes how to run verification, and `docs/decisions/` records the rationale.
+This is the normative reference for the public DSP API (`src/dsp.rs`, `src/params.rs`), the JACK audio callback (`src/jack_host.rs`), and the physical control surface (`src/control.rs`). It states observable guarantees and real-time requirements; it intentionally does not repeat constructor plumbing, CLI error rendering, lint configuration, or individual test names. `docs/development.md` describes how to run verification, and `docs/decisions/` records the rationale.
 
 ## 1. Parameter validation
 
@@ -55,10 +55,40 @@ During a transition, coefficients may be updated as needed. Once both cutoffs ar
 
 `AudioProcessHandler::process` and its transitive DSP calls must not allocate or free heap memory; acquire or wait on a lock; use a blocking channel operation; perform file or standard-stream I/O; spawn, join, or sleep a thread; panic or unwind; or take more than time proportional to the callback's frame count.
 
-The current JACK callbacks communicate shutdown, sample-rate changes, and xrun diagnostics through atomics. An xrun notification increments a diagnostic counter only; it must not format or emit a log record from the JACK-managed thread. Any future control path into the audio callback must preserve these non-blocking, allocation-free requirements.
+The current JACK callbacks communicate shutdown, sample-rate changes, and xrun diagnostics through atomics. An xrun notification increments a diagnostic counter only; it must not format or emit a log record from the JACK-managed thread. The control surface's path into the callback (section 8) satisfies these same non-blocking, allocation-free requirements, and any further control path must too.
 
 ## 7. JACK host lifecycle
 
 `jack_host::run` creates the `oxtt` client with exactly four ports: `input_l`, `input_r`, `output_l`, and `output_r`. It does not hardcode physical port names or auto-connect ports.
 
-The host uses JACK's assigned sample rate and buffer size. It reports connection/setup failures to stderr and returns a non-zero exit status, and it stops safely after JACK shutdown, `SIGINT`, or `SIGTERM`. After a normal stop it returns the number of JACK xrun notifications to its caller. The CLI prints that value only when `--report-xruns-on-exit` is requested; normal operation has no mandatory diagnostic output. After a JACK sample-rate notification, the audio callback resets the processor before later processing; a reset failure is contained in the callback rather than causing a panic.
+The host uses JACK's assigned sample rate and buffer size. It reports connection/setup failures to stderr and returns a non-zero exit status, and it stops safely after JACK shutdown, `SIGINT`, or `SIGTERM`. After a normal stop it returns a run summary to its caller: the number of JACK xrun notifications, and the number of failed control-surface reads if the run had a control surface at all (section 8). The CLI prints those values only when `--report-xruns-on-exit` is requested; normal operation has no mandatory diagnostic output. After a JACK sample-rate notification, the audio callback resets the processor before later processing; a reset failure is contained in the callback rather than causing a panic.
+
+## 8. Control surface
+
+This section applies to a run with a physical control surface attached: four potentiometers and a momentary bypass switch (`--controls`, available only in a `pi-controls` build). A run without one behaves exactly as sections 1–7 describe, including its exit report.
+
+Separation from the audio callback:
+
+- Hardware is never read from the audio callback. Potentiometer and switch reads happen on a separate control thread; the callback only ever consumes finished `OttParams` snapshots.
+- The handoff into the callback is non-blocking, allocation-free, and lock-free in the callback's direction, and takes constant time whether or not a control moved. It satisfies section 6 in full.
+- Per cycle the callback takes at most the newest published snapshot. It never drains a backlog; intermediate positions a control passed through are not queued.
+- A snapshot is applied strictly after any pending sample-rate reset in the same cycle, so a reset never discards it.
+- A snapshot rejected by `set_params` leaves the processor unchanged (section 2). The callback neither reports nor retries it; the next accepted snapshot supersedes it.
+
+Failure behaviour:
+
+- Failing to acquire the hardware at startup is fatal: the process reports it to stderr and exits non-zero rather than running with controls that do nothing.
+- A hardware read failure once running stops neither audio, nor the control thread, nor the process. It publishes nothing, so the last good snapshot stays in force, and it is counted. Stderr reporting from the control thread is throttled; the exact total is printed after a normal stop, alongside the xrun count and under the same `--report-xruns-on-exit` flag (section 7).
+
+Parameter ownership:
+
+- `depth`, `time`, `upward`, and `downward` are owned by the control surface from its first successful read onward. The CLI values for those four describe only the state before that read.
+- Every other parameter — input/output gain, the crossover pair, all per-band values — is passed through from the CLI unchanged; no control is wired to it.
+- Every snapshot the control surface publishes is a complete `OttParams` that satisfies section 1.
+
+Bypass:
+
+- The bypass is an effect bypass: while engaged the published `depth` is 0 regardless of the Depth control, and the signal stays on the input-gain/crossover-reconstruction/output-gain path (section 4). It is never a raw-signal bypass.
+- The switch is momentary, so bypass is latched state: a debounced press toggles it, a release does not, and contact bounce toggles it exactly once per press.
+- The other three parameters keep tracking their controls while bypassed. Disengaging the bypass restores the Depth control's position at that moment, not the position it held when the bypass was engaged.
+- A switch already held down when the process starts is a baseline, not a press: the run comes up un-bypassed.

@@ -6,7 +6,7 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 
 ## Status
 
-**Work in progress.** The end goal is a DIY hardware effector: `oxtt` running on a Raspberry Pi 5, controlled by physical switches and potentiometers. Today `oxtt` runs as a JACK client with CLI-only parameters. It has been verified on real hardware — a Raspberry Pi 5 running as a JACK client with a class-compliant USB audio interface (see [`docs/raspberry-pi/`](docs/raspberry-pi/)) — but physical hardware controls do not exist yet. The audio path is planned to move from the USB interface to an I2S HAT (see [ADR 0008](docs/decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
+**Work in progress.** The end goal is a DIY hardware effector: `oxtt` running on a Raspberry Pi 5, controlled by physical switches and potentiometers. Today `oxtt` runs as a JACK client whose parameters come from the CLI and, on a Raspberry Pi build with `--controls`, from a physical control surface: four potentiometers on an MCP3008 SPI ADC drive depth/time/upward/downward, and a momentary switch bypasses the effect. Both the JACK client (with a class-compliant USB audio interface) and the control surface have been verified on real hardware (see [`docs/raspberry-pi/`](docs/raspberry-pi/)). What is not done: the control surface is a breadboard rather than a pedal, the hardware platform itself is still an open question (see [ADR 0009](docs/decisions/0009-hardware-platform-choice-reopened.md)), and the audio path is planned to move from the USB interface to an I2S HAT (see [ADR 0008](docs/decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
 
 `oxtt` does not aim for binary, preset, or sample-accurate output compatibility with Xfer OTT or any other reference implementation; it is an independent implementation of well-known DSP techniques.
 
@@ -45,4 +45,4 @@ Technical documentation lives under `docs/`:
 - [`docs/contracts.md`](docs/contracts.md) — normative DSP and real-time audio-callback contracts
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs)
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes
-- [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5 (JACK over a USB audio interface): setup, audio-stability and latency verification, and results
+- [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5: JACK-over-USB setup, audio-stability and latency verification, and the physical control surface's hardware verification

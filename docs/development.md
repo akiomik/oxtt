@@ -67,6 +67,50 @@ latency verification with a class-compliant USB audio interface — see
 [`raspberry-pi/usb-audio-setup.md`](raspberry-pi/usb-audio-setup.md) and
 [`raspberry-pi/usb-audio-verification.md`](raspberry-pi/usb-audio-verification.md).
 
+### The `pi-controls` feature
+
+The physical control surface (`src/control/pi.rs`: MCP3008 pots over SPI0/CE0, a
+bypass switch on GPIO17) is behind the optional `pi-controls` Cargo feature,
+which is **off by default**. `rppal` is Linux-only, so a default build stays
+buildable on macOS and every host runs exactly as it did before the control
+surface existed. Enable it on the Pi:
+
+```sh
+cargo build --release --locked --features pi-controls
+```
+
+The feature only compiles the hardware layer in; it does not turn it on. The
+`--controls` flag — which exists only in a `pi-controls` build — is what starts
+the control thread, so the same binary still runs on a Pi with no breadboard
+attached. See [`raspberry-pi/control-surface-verification.md`](raspberry-pi/control-surface-verification.md)
+for the hardware verification and
+[`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`](decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
+for the design.
+
+Because `rppal` cannot compile on macOS, two kinds of command **fail there**: any
+workspace-wide one (`cargo build --workspace`, `cargo clippy --workspace
+--all-targets`), because the `oxtt-pi-tools` crate depends on `rppal`
+unconditionally; and any command that enables `pi-controls`. Scope macOS work to
+`-p oxtt` (or plain `cargo build`/`cargo clippy --all-targets`, which already
+build only the root package) and leave the feature off.
+
+The feature-gated module can still be type-checked from macOS by
+cross-compiling. Nothing links, so no Linux linker or sysroot is needed:
+
+```sh
+rustup target add aarch64-unknown-linux-gnu
+PKG_CONFIG_ALLOW_CROSS=1 cargo clippy -p oxtt --features pi-controls --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
+```
+
+`PKG_CONFIG_ALLOW_CROSS=1` is required because `jack-sys`'s build script
+otherwise refuses to run `pkg-config` for a foreign target. Since `cargo
+check`/`cargo clippy` never link, that is sufficient to type-check and lint
+`src/control/pi.rs` without a Pi in reach — it is not a way to produce a
+runnable binary (see the next section).
+
+CI covers the feature natively on Linux in the `pi-controls` job, which lints,
+tests, and builds it on an `ubuntu-latest` runner.
+
 ### Why macOS cross-compilation is not the baseline
 
 Adding `aarch64-unknown-linux-gnu` to `rust-toolchain.toml` only installs that
@@ -94,7 +138,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` panic-free (docs/contracts.md §6); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` and `ControlMapping::update` panic-free (docs/contracts.md §6); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
 
 The suite is organized by module and none of it requires a running JACK server:
 
@@ -105,6 +149,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `src/dsp/smooth.rs` — parameter-smoothing tests
+- `src/control/` — control-surface conditioning (jitter filter, deadband, bypass latch), the control thread and its handoff, and, only under `--features pi-controls`, the MCP3008 command/response encoding
 
 See `contracts.md` for the guarantees those tests protect.
 
