@@ -57,13 +57,132 @@ const FILTER_COEFFICIENT: f32 = 0.2;
 /// moves in one direction cannot accumulate an offset.
 const DEADBAND_COUNTS: f32 = 8.0;
 
-/// The conditioning state, absent until the first [`ControlMapping::update`].
+/// How many consecutive identical readings the bypass switch's level must
+/// survive before it is believed.
+///
+/// Counted in reads rather than milliseconds for the same reason as
+/// [`FILTER_COEFFICIENT`]: this layer has no clock. At the
+/// [`DEFAULT_POLL_INTERVAL`](crate::control::DEFAULT_POLL_INTERVAL) of 2 ms
+/// (500 Hz), five reads means the contact has to hold its new level for 8 ms
+/// after the first read that sees it — comfortably past the single-digit
+/// milliseconds a small momentary switch's contacts bounce for, and past the
+/// worst case for the candidate panel part.
+///
+/// The cost is latency: an edge is acted on at the fifth read, so up to 10 ms
+/// (five poll intervals — four of debounce plus up to one interval of
+/// sampling delay) passes between the finger landing and `depth` reaching 0.
+/// That is an order of magnitude below the ~50 ms at which a foot- or
+/// finger-operated switch starts to feel late, and the DSP's 20 ms smoothing
+/// dominates what is actually heard anyway (docs/architecture.md).
+///
+/// Raising the poll rate shortens the latency and weakens the debounce in
+/// exact proportion, which is the trade to re-make if the interval changes.
+const BYPASS_DEBOUNCE_READS: u8 = 5;
+
+/// The debounced bypass switch and the latch it drives.
+///
+/// The panel part is a *momentary* push switch, so "bypassed" cannot be the
+/// switch's position — it is software state that a press toggles. A release
+/// edge is deliberately inert: the switch springs back after every press, so
+/// acting on both edges would toggle twice per press and leave the latch
+/// exactly where it started.
+///
+/// What the latch does when engaged is an *effect* bypass: `depth = 0`, which
+/// keeps the signal on the split-and-reconstruct path and disables only the
+/// dynamics. It is not a raw dry signal, because the raw input and the
+/// reconstructed signal do not share a phase response and crossfading between
+/// them would comb-filter (ADR 0004, docs/contracts.md §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassLatch {
+    /// The switch level currently believed: the last one to survive
+    /// [`BYPASS_DEBOUNCE_READS`] consecutive readings.
+    settled: bool,
+    /// How many consecutive readings have disagreed with `settled`.
+    disagreements: u8,
+    /// Whether the effect bypass is engaged.
+    engaged: bool,
+}
+
+impl BypassLatch {
+    /// Seeds the latch from the very first reading, un-bypassed.
+    ///
+    /// The first reading is a baseline, not an edge. A switch that happens to
+    /// be held down as the process starts therefore comes up with the effect
+    /// *active* — the same reasoning as the filter seeding itself from the
+    /// first reading instead of fading in from zero: there is no earlier state
+    /// to have moved away from.
+    const fn seeded(pressed: bool) -> Self {
+        Self {
+            settled: pressed,
+            disagreements: 0,
+            engaged: false,
+        }
+    }
+
+    /// Feeds one reading in, toggling the latch on a debounced press edge.
+    const fn update(&mut self, pressed: bool) {
+        if pressed == self.settled {
+            self.disagreements = 0;
+            return;
+        }
+
+        // `saturating_add` rather than `+`: the counter is reset the moment it
+        // reaches a threshold far below `u8::MAX`, so overflow is unreachable,
+        // and saturating keeps that a property of the arithmetic rather than a
+        // claim about the flow — which is what `update`'s no-panic proof needs.
+        self.disagreements = self.disagreements.saturating_add(1);
+        if self.disagreements < BYPASS_DEBOUNCE_READS {
+            return;
+        }
+
+        self.settled = pressed;
+        self.disagreements = 0;
+        if pressed {
+            self.engaged = !self.engaged;
+        }
+    }
+
+    /// Applies the latch to a conditioned pot set.
+    ///
+    /// Only `depth` is touched, and only by being forced to 0: the Time,
+    /// Upward and Downward pots keep working while bypassed, so releasing the
+    /// bypass brings back an effect set up meanwhile rather than a stale one.
+    const fn applied_to(self, conditioned: Pots<f32>) -> Pots<f32> {
+        if self.engaged {
+            Pots {
+                depth: 0.0,
+                ..conditioned
+            }
+        } else {
+            conditioned
+        }
+    }
+}
+
+/// The conditioning and latch state, absent until the first
+/// [`ControlMapping::update`].
+///
+/// `reference` and `published` are deliberately two fields rather than one.
+/// The deadband is hysteresis against where the *pots* were last taken
+/// seriously, so it has to keep tracking the real Depth pot even while
+/// bypassed — otherwise the band would be compared against a forced zero and
+/// un-bypassing would jump. The publish decision, in contrast, has to be made
+/// against what the caller was actually last handed, or turning Depth while
+/// bypassed would publish a snapshot identical to the previous one on every
+/// poll.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Conditioned {
     /// Low-pass filter state, in ADC counts.
     filtered: Pots<f32>,
-    /// The filtered values as of the most recent publish, in ADC counts.
+    /// The deadband reference: the filtered values as of the last time a pot
+    /// cleared [`DEADBAND_COUNTS`], in ADC counts, and always the real pot
+    /// positions — never the bypassed ones.
+    reference: Pots<f32>,
+    /// The values behind the most recent published snapshot, in ADC counts,
+    /// after [`BypassLatch::applied_to`].
     published: Pots<f32>,
+    /// The debounced switch and the bypass latch.
+    bypass: BypassLatch,
 }
 
 /// Turns raw control-surface readings into complete [`OttParams`] (layer B).
@@ -74,6 +193,9 @@ struct Conditioned {
 /// arrives. Every other field of the base parameters — input/output gain,
 /// crossover pair, all per-band values — is passed through unchanged, since
 /// no pot is wired to it.
+///
+/// The bypass switch overrides one of those four: while [`BypassLatch`] is
+/// engaged the published `global.depth` is 0 regardless of the Depth pot.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlMapping {
     base: OttParams,
@@ -89,23 +211,26 @@ impl ControlMapping {
 
     /// Conditions one reading and returns the parameters to publish, if any.
     ///
-    /// Returns `Some` only when the conditioned value actually moved:
-    /// `FILTER_COEFFICIENT` first low-passes the raw counts, then
-    /// `DEADBAND_COUNTS` compares the result against the last published
-    /// value. A motionless pot therefore yields `None` forever, which is what
+    /// Returns `Some` only when the snapshot this would publish differs from
+    /// the one it published last: `FILTER_COEFFICIENT` first low-passes the
+    /// raw counts, then `DEADBAND_COUNTS` compares the result against the
+    /// deadband reference, then the bypass latch is applied. A motionless pot
+    /// and an untouched switch therefore yield `None` forever, which is what
     /// keeps the transport layer from being handed a fresh snapshot on every
     /// poll for no reason.
     ///
     /// The very first call seeds the filter from the reading itself and
     /// publishes immediately, rather than starting from zero and fading in —
     /// the same reasoning as `OttProcessor::new` snapping its smoothers to
-    /// their targets (docs/contracts.md §2).
+    /// their targets (docs/contracts.md §2). It seeds the switch the same way,
+    /// as a baseline rather than an edge (see [`BypassLatch::seeded`]).
     ///
-    /// [`RawControls::bypass_pressed`] is deliberately ignored for now.
-    /// Debouncing it, latching the state in software, and applying the latch
-    /// as an effect bypass (`depth = 0`) is a follow-up change; accepting the
-    /// field here means the reading layer and its wiring are already final
-    /// when that lands.
+    /// [`RawControls::bypass_pressed`] drives [`BypassLatch`]: a debounced
+    /// press toggles an *effect* bypass, which publishes `depth = 0` and
+    /// leaves the other three pots alone (ADR 0004, docs/contracts.md §4).
+    /// Because the deadband keeps tracking the real Depth pot underneath,
+    /// un-bypassing republishes the pot's position *now*, not the position it
+    /// held when the bypass was engaged.
     // Proves this function can never panic, the same way `OttProcessor::process`
     // does (docs/contracts.md §6), checked by `cargo test --release`. It matters
     // here for the same reason: on Bela this runs inside the real-time callback.
@@ -116,11 +241,18 @@ impl ControlMapping {
 
         let published = match self.state.as_mut() {
             None => {
+                let bypass = BypassLatch::seeded(raw.bypass_pressed);
+                // `applied_to` is a no-op on a freshly seeded latch, which is
+                // exactly the point: it is written here anyway so that
+                // `published` means the same thing in both arms.
+                let published = bypass.applied_to(counts);
                 self.state = Some(Conditioned {
                     filtered: counts,
-                    published: counts,
+                    reference: counts,
+                    published,
+                    bypass,
                 });
-                counts
+                published
             }
             Some(state) => {
                 // `filtered + a * (raw - filtered)` rather than the equivalent
@@ -131,15 +263,28 @@ impl ControlMapping {
                     FILTER_COEFFICIENT.mul_add(raw - filtered, filtered)
                 });
 
-                let next = state
-                    .filtered
-                    .zip_with(state.published, |filtered, published| {
-                        if (filtered - published).abs() >= DEADBAND_COUNTS {
-                            filtered
-                        } else {
-                            published
-                        }
-                    });
+                // Against `reference`, never against `published`: while
+                // bypassed the published depth is a forced zero, and comparing
+                // the band against that would make every position of the Depth
+                // pot look like a large move away from the bottom of its travel.
+                state.reference =
+                    state
+                        .filtered
+                        .zip_with(state.reference, |filtered, reference| {
+                            if (filtered - reference).abs() >= DEADBAND_COUNTS {
+                                filtered
+                            } else {
+                                reference
+                            }
+                        });
+
+                state.bypass.update(raw.bypass_pressed);
+
+                // Against `published`, never against `reference`: a Depth turn
+                // made while bypassed moves the reference but not the snapshot,
+                // and re-publishing an identical snapshot on every poll is the
+                // exact thing the deadband exists to prevent.
+                let next = state.bypass.applied_to(state.reference);
                 if next == state.published {
                     return None;
                 }
@@ -200,6 +345,9 @@ mod tests {
 
     const PROPERTY_CASES: u32 = 128;
     const SAMPLE_RATE: f32 = 48_000.0;
+    /// Long enough for the filter to converge on a held position and for the
+    /// deadband to have taken it, at `FILTER_COEFFICIENT`'s 11-read 90% point.
+    const HELD_READS: usize = 100;
 
     fn count(raw: u16) -> AdcCount {
         AdcCount::try_new(raw).unwrap()
@@ -223,6 +371,31 @@ mod tests {
 
     fn normalized(raw: u16) -> f32 {
         f32::from(raw) / f32::from(ADC_MAX_COUNT)
+    }
+
+    /// The same reading with the switch held down or released.
+    fn switched(raw: RawControls, bypass_pressed: bool) -> RawControls {
+        RawControls {
+            bypass_pressed,
+            ..raw
+        }
+    }
+
+    /// Feeds one reading in `reads` times, returning the last snapshot published.
+    fn feed(mapping: &mut ControlMapping, raw: RawControls, reads: usize) -> Option<OttParams> {
+        let mut last = None;
+        for _ in 0..reads {
+            if let Some(params) = mapping.update(raw) {
+                last = Some(params);
+            }
+        }
+        last
+    }
+
+    /// Feeds a switch level in exactly [`BYPASS_DEBOUNCE_READS`] times, which
+    /// is the shortest run the debounce believes.
+    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<OttParams> {
+        feed(mapping, raw, usize::from(BYPASS_DEBOUNCE_READS))
     }
 
     #[test]
@@ -350,26 +523,231 @@ mod tests {
         assert_ne!(params.global.downward, base.global.downward);
     }
 
+    /// The descendant of `the_bypass_switch_is_not_wired_up_yet`, which pinned
+    /// a single pressed reading publishing nothing back when the switch was
+    /// ignored outright. The observation still holds, for a different reason:
+    /// one reading is below [`BYPASS_DEBOUNCE_READS`], so it is bounce until
+    /// proven otherwise.
     #[test]
-    fn the_bypass_switch_is_not_wired_up_yet() {
+    fn a_single_pressed_reading_is_not_enough_to_toggle() {
         let mut mapping = ControlMapping::new(Preset::SafeStart.params());
         mapping
-            .update(RawControls {
-                bypass_pressed: false,
-                ..uniform(500)
-            })
+            .update(switched(uniform(500), false))
             .expect("the first reading must publish");
 
-        // Pressing the switch is a follow-up change; today it must not
-        // publish anything by itself.
         assert!(
-            mapping
-                .update(RawControls {
-                    bypass_pressed: true,
-                    ..uniform(500)
-                })
-                .is_none(),
-            "the bypass switch must not affect this layer yet"
+            mapping.update(switched(uniform(500), true)).is_none(),
+            "an undebounced press must not toggle the bypass"
+        );
+    }
+
+    #[test]
+    fn a_debounced_press_bypasses_by_zeroing_depth() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let idle = reading(600, 700, 800, 900);
+        let before = mapping
+            .update(idle)
+            .expect("the first reading must publish");
+
+        // The edge is acted on at exactly the debounce count, no earlier.
+        for read in 1..BYPASS_DEBOUNCE_READS {
+            assert!(
+                mapping.update(switched(idle, true)).is_none(),
+                "press reading {read} of {BYPASS_DEBOUNCE_READS} must not toggle yet"
+            );
+        }
+        let params = mapping
+            .update(switched(idle, true))
+            .expect("a debounced press must publish the bypass");
+
+        assert_eq!(
+            params.global.depth.get(),
+            0.0,
+            "an engaged bypass must publish depth 0"
+        );
+        assert_eq!(
+            params.global.time.get(),
+            before.global.time.get(),
+            "the bypass must not disturb the Time pot"
+        );
+        assert_eq!(
+            params.global.upward.get(),
+            before.global.upward.get(),
+            "the bypass must not disturb the Upward pot"
+        );
+        assert_eq!(
+            params.global.downward.get(),
+            before.global.downward.get(),
+            "the bypass must not disturb the Downward pot"
+        );
+    }
+
+    #[test]
+    fn un_bypassing_restores_the_depth_pots_current_position() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        mapping
+            .update(reading(600, 500, 500, 500))
+            .expect("the first reading must publish");
+        settle(&mut mapping, switched(reading(600, 500, 500, 500), true))
+            .expect("a debounced press must publish the bypass");
+
+        // Turn Depth right down while the effect is bypassed. Nothing is
+        // published — the snapshot is unchanged — but the deadband reference
+        // underneath must follow the pot.
+        let moved = reading(200, 500, 500, 500);
+        assert!(
+            feed(&mut mapping, switched(moved, true), HELD_READS).is_none(),
+            "a Depth turn made while bypassed must not publish"
+        );
+
+        // A momentary switch is released before it can be pressed again.
+        assert!(
+            settle(&mut mapping, switched(moved, false)).is_none(),
+            "releasing the switch must not publish"
+        );
+        let params = settle(&mut mapping, switched(moved, true))
+            .expect("a second debounced press must un-bypass and republish");
+
+        let depth = params.global.depth.get();
+        assert!(
+            depth > normalized(190) && depth < normalized(210),
+            "un-bypassing must restore the pot's current position, got {depth}"
+        );
+    }
+
+    #[test]
+    fn contact_bounce_toggles_the_latch_exactly_once() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let idle = uniform(600);
+        mapping
+            .update(idle)
+            .expect("the first reading must publish");
+
+        // A bouncing contact: no run of identical readings reaches
+        // `BYPASS_DEBOUNCE_READS` until the contact settles closed, and the
+        // release bounces the same way afterwards.
+        let bounce = [true, false, true, false, true, true, false, true];
+        let levels = bounce
+            .iter()
+            .copied()
+            .chain([true; BYPASS_DEBOUNCE_READS as usize])
+            .chain(bounce.iter().map(|pressed| !pressed))
+            .chain([false; BYPASS_DEBOUNCE_READS as usize]);
+
+        let mut publishes = 0_u32;
+        let mut last = None;
+        for pressed in levels {
+            if let Some(params) = mapping.update(switched(idle, pressed)) {
+                publishes += 1;
+                last = Some(params);
+            }
+        }
+
+        assert_eq!(
+            publishes, 1,
+            "one bouncing press and release must toggle the latch exactly once"
+        );
+        let params = last.expect("the settled press must have published");
+        assert_eq!(
+            params.global.depth.get(),
+            0.0,
+            "the single toggle must have engaged the bypass"
+        );
+    }
+
+    #[test]
+    fn a_release_edge_alone_never_toggles() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let idle = uniform(600);
+        mapping
+            .update(switched(idle, true))
+            .expect("the first reading must publish");
+
+        // The switch is let go, well past the debounce count. A release is not
+        // an event, so nothing is published — had it toggled, the latch would
+        // have engaged and published depth 0.
+        assert!(
+            feed(&mut mapping, switched(idle, false), HELD_READS).is_none(),
+            "a release edge must not toggle the bypass"
+        );
+
+        // And the latch is genuinely still un-bypassed, not merely quiet.
+        let params = settle(&mut mapping, switched(idle, true))
+            .expect("a press after the release must publish");
+        assert_eq!(
+            params.global.depth.get(),
+            0.0,
+            "the first press after a release must engage the bypass"
+        );
+    }
+
+    #[test]
+    fn a_switch_held_down_at_startup_does_not_come_up_bypassed() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let idle = reading(600, 500, 500, 500);
+        let params = mapping
+            .update(switched(idle, true))
+            .expect("the first reading must publish");
+
+        assert_eq!(
+            params.global.depth.get(),
+            normalized(600),
+            "a switch already down at startup must be a baseline, not an edge"
+        );
+        assert!(
+            feed(&mut mapping, switched(idle, true), HELD_READS).is_none(),
+            "holding the baseline level must never toggle"
+        );
+    }
+
+    #[test]
+    fn turning_depth_while_bypassed_publishes_nothing() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        mapping
+            .update(reading(600, 500, 500, 500))
+            .expect("the first reading must publish");
+        settle(&mut mapping, switched(reading(600, 500, 500, 500), true))
+            .expect("a debounced press must publish the bypass");
+
+        // Far past the deadband, and past the filter's settling time. The
+        // snapshot would be identical to the last one every time, so the
+        // transport layer must not see any of it.
+        assert!(
+            feed(
+                &mut mapping,
+                switched(reading(0, 500, 500, 500), true),
+                HELD_READS
+            )
+            .is_none(),
+            "a Depth turn made while bypassed must not publish"
+        );
+    }
+
+    #[test]
+    fn turning_time_while_bypassed_still_publishes_with_depth_zero() {
+        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        mapping
+            .update(reading(600, 200, 500, 500))
+            .expect("the first reading must publish");
+        settle(&mut mapping, switched(reading(600, 200, 500, 500), true))
+            .expect("a debounced press must publish the bypass");
+
+        let params = feed(
+            &mut mapping,
+            switched(reading(600, 900, 500, 500), true),
+            HELD_READS,
+        )
+        .expect("a Time turn made while bypassed must still publish");
+
+        assert!(
+            params.global.time.get() > normalized(890),
+            "the Time pot must keep working while bypassed, got {}",
+            params.global.time.get()
+        );
+        assert_eq!(
+            params.global.depth.get(),
+            0.0,
+            "a publish made while bypassed must still carry depth 0"
         );
     }
 
@@ -409,6 +787,29 @@ mod tests {
             for raw in readings {
                 if let Some(params) = mapping.update(raw) {
                     prop_assert!(params.validate(SAMPLE_RATE).is_ok());
+                }
+            }
+        }
+
+        /// Stated as a property because the interesting part is that it holds
+        /// for *every* way the pots can move, not for one chosen sweep: while
+        /// the switch stays down after a debounced press, no pot position and
+        /// no amount of jitter can put a nonzero depth back on the output.
+        #[test]
+        fn nothing_leaks_through_an_engaged_bypass(
+            start in arbitrary_reading(),
+            moves in prop::collection::vec(arbitrary_reading(), 1..64),
+        ) {
+            let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+            mapping.update(switched(start, false));
+            // Whether the press publishes is not the property: a Depth pot
+            // already sitting at 0 makes engaging the bypass a no-op on the
+            // snapshot. What follows must hold either way.
+            settle(&mut mapping, switched(start, true));
+
+            for raw in moves {
+                if let Some(params) = mapping.update(switched(raw, true)) {
+                    prop_assert_eq!(params.global.depth.get(), 0.0);
                 }
             }
         }

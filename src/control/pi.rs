@@ -199,9 +199,9 @@ impl ControlSource for PiControls {
         // Active-low against the internal pull-up: the switch shorts the pin
         // to ground, so Low is the switch closed. `RawControls::bypass_pressed`
         // is the switch's logical state, so the level is inverted here and
-        // nowhere else. The field is filled on every poll even though
-        // `ControlMapping` currently ignores it, so that landing debounce and
-        // effect bypass changes only the mapping layer.
+        // nowhere else. Every poll reads the raw level; debouncing it and
+        // latching the effect bypass belong to `ControlMapping`, which has no
+        // hardware to know about.
         let bypass_pressed = self.bypass.read() == Level::Low;
 
         Ok(RawControls {
