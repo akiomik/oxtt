@@ -22,5 +22,5 @@ band_output = lerp(band_input, wet_band, depth)
 ## Consequences
 
 - Summing all three bands after this blend, even at `depth = 0`, reconstructs the same phase-flat signal described in ADR 0001 — there is no comb-filtering risk from mixing differently-phased copies of the signal.
-- `depth_zero_matches_pure_crossover_reconstruction` (`src/dsp/mod.rs`) compares against "input gain -> LR4 reconstruction -> output gain", not against the unmodified input signal — this is the correct reference for any future test of `depth`'s boundary behavior.
+- `depth_zero_matches_pure_crossover_reconstruction` (`src/dsp.rs`) compares against "input gain -> LR4 reconstruction -> output gain", not against the unmodified input signal — this is the correct reference for any future test of `depth`'s boundary behavior.
 - A true, phase-identical "raw bypass" is out of scope for the DSP core as specified. If one is ever wanted, it must be a separate signal path (e.g. a switch upstream of the crossover), not an extension of `depth`.

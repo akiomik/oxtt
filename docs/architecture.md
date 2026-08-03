@@ -22,7 +22,7 @@ main.rs
        -> Notifications           JACK notification callback (shutdown, sample-rate change)
 ```
 
-`OttProcessor` (`src/dsp/mod.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let the Linux-only ALSA-direct adapter selected for a future Raspberry Pi native backend be added without touching `dsp/` (see `decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md`).
+`OttProcessor` (`src/dsp.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let the Linux-only ALSA-direct adapter selected for a future Raspberry Pi native backend be added without touching `dsp/` (see `decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md`).
 
 The control surface (`src/control.rs`) is layered on the same principle. Layer A is the hardware read behind the `ControlSource` trait — the only platform-specific piece, implemented for the Raspberry Pi by `PiControls` (`src/control/pi.rs`) behind the `pi-controls` feature. Layer B, `ControlMapping` (`src/control/mapping.rs`), turns raw ADC counts into a complete `OttParams` and is pure, allocation-free and panic-free, so it holds itself to the audio callback's own prohibitions (`contracts.md` section 6) even though only layer C calls it today. Layer C, `ControlHandle` (`src/control/thread.rs`), is the polling thread and the handoff into the callback, and is the only layer a platform that reads its controls inside its own real-time callback would drop. See `decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`.
 
@@ -56,7 +56,7 @@ input_l, input_r
 - `Crossover`: log-smoothed low/high cutoff, plus, per channel, three independent `Lr4` pairs (low split, high split, phase compensator) — six second-order biquad cascades per channel, twelve total.
 - `Bands<BandProcessor>`: smoothed per-band thresholds/amounts/makeup gain, and one `DualThresholdCompressor` (two envelope states, `low_env` and `high_env`) each. `Bands<T>` (`src/bands.rs`) fixes the arity at exactly `low`/`mid`/`high` rather than `[T; 3]`, since oxtt is architecturally a 3-band compressor — used the same way for `OttParams::bands` and for `Crossover`'s per-band filter outputs, so the "3 bands" concept has one representation from config through to the real-time core.
 
-There is no intermediate buffer sized to the host's callback buffer. Processing is frame-by-frame: one stereo sample is split, processed by all three bands, summed, and written, before moving to the next sample. This is what makes `process()`'s output independent of how the caller chunks the input slices — verified by `chunking_does_not_affect_output` (`src/dsp/mod.rs`).
+There is no intermediate buffer sized to the host's callback buffer. Processing is frame-by-frame: one stereo sample is split, processed by all three bands, summed, and written, before moving to the next sample. This is what makes `process()`'s output independent of how the caller chunks the input slices — verified by `chunking_does_not_affect_output` (`src/dsp.rs`).
 
 With a control surface attached, two more owners exist, both outside the DSP:
 
