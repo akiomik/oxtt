@@ -1,15 +1,17 @@
-//! Wiring verification for oxtt's stage-3 physical controls
-//! (`tmp/spec.md` §6): reads MCP3008 channels 0-3 (Depth, Time, Upward,
-//! Downward) over SPI0 and the Bypass switch on GPIO17, printing raw and
-//! normalized values to stdout in a loop.
+//! Wiring verification for oxtt's physical control surface: reads MCP3008
+//! channels 0-3 (Depth, Time, Upward, Downward) over SPI0 and the Bypass
+//! switch on GPIO17, printing raw and normalized values to stdout in a loop.
+//! The same wiring, and the reasoning behind each constant, is documented in
+//! `src/control/pi.rs`, which reproduces this read inside `oxtt` itself.
 //!
 //! Normalization is a plain linear scale (raw / 1023), with no per-pot
 //! calibration offsets: the potentiometers are linear-taper (B-curve) and
-//! their measured range already covers the full 0-1023 scale (`tmp/todo.md`).
-//! This is a display-only sanity check, not the real `NormalizedF32`
-//! (`src/params`) conversion, which lands with the read-thread/queue
-//! integration into `oxtt` proper -- this tool stays independent of the
-//! `oxtt` crate by design.
+//! their range, measured with this tool on the assembled hardware, already
+//! covers the full 0-1023 scale. This is a display-only sanity check, not the
+//! real `NormalizedF32` (`src/params`) conversion -- that, and the same read
+//! against the same wiring, now live in `oxtt` proper under `src/control/`,
+//! while this tool stays independent of the `oxtt` crate by design so it can
+//! be run on a Pi with nothing else working.
 
 use std::error::Error;
 use std::thread;
