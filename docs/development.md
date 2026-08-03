@@ -82,8 +82,10 @@ cargo build --release --locked --features pi-controls
 The feature only compiles the hardware layer in; it does not turn it on. The
 `--controls` flag — which exists only in a `pi-controls` build — is what starts
 the control thread, so the same binary still runs on a Pi with no breadboard
-attached. See [`raspberry-pi/control-surface-verification.md`](raspberry-pi/control-surface-verification.md)
-for the hardware verification and
+attached. See [`raspberry-pi/control-surface-setup.md`](raspberry-pi/control-surface-setup.md)
+for wiring the hardware and enabling SPI0,
+[`raspberry-pi/control-surface-verification.md`](raspberry-pi/control-surface-verification.md)
+for the hardware verification, and
 [`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`](decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
 for the design.
 

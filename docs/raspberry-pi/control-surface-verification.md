@@ -5,7 +5,11 @@ potentiometers on an MCP3008 SPI ADC driving `depth`/`time`/`upward`/`downward`,
 plus a momentary bypass switch — and the results it produced. It assumes the
 environment from [`usb-audio-setup.md`](usb-audio-setup.md): the same Raspberry
 Pi 5, the same native build, the same JACK server over a class-compliant USB
-audio interface. The design these results verify is
+audio interface. It also assumes the surface itself is already assembled and
+enabled per [`control-surface-setup.md`](control-surface-setup.md) — the wiring,
+the electrical rules, enabling SPI0 on the 40-pin header, and confirming that
+`/dev/spidev0.0` is genuinely the header's bus. The design these results verify
+is
 [ADR 0010](../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md);
 the guarantees it must satisfy are `docs/contracts.md` §8.
 

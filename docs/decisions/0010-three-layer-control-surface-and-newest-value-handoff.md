@@ -175,6 +175,9 @@ with the re-check rule kept next to the constants themselves in
   normative guarantees.
 - [`../architecture.md`](../architecture.md) — where the three layers sit in the
   component structure and how they cross the real-time boundary.
+- [`../raspberry-pi/control-surface-setup.md`](../raspberry-pi/control-surface-setup.md)
+  — the wiring this decision assumes, and how SPI0 is enabled and confirmed to
+  be the header's bus rather than the SoC's boot-flash controller.
 - [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
   — the idle-jitter measurement behind the filter and deadband constants, and
   the hardware verification of the assembled surface.

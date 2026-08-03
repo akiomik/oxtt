@@ -10,6 +10,8 @@ configuration is planned but not yet documented (see
 For the results this setup produced, see
 [`usb-audio-verification.md`](usb-audio-verification.md). For the decision it led
 to, see [ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md).
+The physical controls come afterwards and build on this environment: see
+[`control-surface-setup.md`](control-surface-setup.md).
 
 Concrete names in this document — the host name `oxtt-pi`, the shared home server
 `daphnis`, the ALSA card name `Pro73056544`, the workspace path

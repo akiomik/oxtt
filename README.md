@@ -45,4 +45,4 @@ Technical documentation lives under `docs/`:
 - [`docs/contracts.md`](docs/contracts.md) — normative DSP and real-time audio-callback contracts
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs)
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes
-- [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5: JACK-over-USB setup, audio-stability and latency verification, and the physical control surface's hardware verification
+- [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5: JACK-over-USB setup, audio-stability and latency verification, and the physical control surface's wiring/SPI setup and hardware verification
