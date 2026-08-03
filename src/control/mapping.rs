@@ -17,9 +17,16 @@ use super::raw::{ADC_MAX_COUNT, Pots, RawControls};
 
 /// One-pole low-pass coefficient applied to each pot's raw count, per read.
 ///
-/// Idle jitter measured on the assembled hardware is ±10–20 counts out of
-/// 1023 (`pi-tools` readout). At 0.2 the filter attenuates white jitter to
-/// about `sqrt(a / (2 - a))` = 1/3 of its amplitude — roughly ±7 counts —
+/// Idle jitter on the assembled hardware, measured with `pi-tools` over 300
+/// readings per position on all four channels, has a standard deviation of
+/// 5.23–6.48 counts out of 1023 with the pots at full travel and 3.14–4.09
+/// counts at mid travel. The worst case is therefore σ ≈ 6.5, at the end
+/// stop rather than at mid scale — the opposite of what a divider's source
+/// impedance alone would predict, which is why it was measured rather than
+/// assumed.
+///
+/// At 0.2 the filter attenuates white noise by exactly
+/// `sqrt(a / (2 - a))` = 1/3, taking that worst case down to σ ≈ 2.2 counts,
 /// while reaching 63% of a step in 5 reads and 90% in 11, so a deliberate
 /// knob turn still tracks the hand that makes it.
 ///
@@ -31,12 +38,16 @@ const FILTER_COEFFICIENT: f32 = 0.2;
 
 /// Hysteresis deadband against the last published value, in ADC counts.
 ///
-/// Sized above the ~±7 counts of jitter that survive [`FILTER_COEFFICIENT`],
-/// so a motionless pot is quiet rather than provably silent: the residual is
-/// noise, and an excursion past the band still publishes occasionally. That
-/// costs nothing audible — the value published then differs by under 1% of
-/// travel, and the DSP smooths it over 20 ms — but it does mean this pair of
-/// constants is provisional until measured against a real idle pot on the Pi.
+/// Eight counts is 3.7 times the σ ≈ 2.2 that survives
+/// [`FILTER_COEFFICIENT`], so a motionless pot is quiet rather than provably
+/// silent: the residual is noise, and an excursion past 3.7σ still publishes
+/// every so often. That costs nothing audible — the value published then
+/// differs by under 1% of travel, and the DSP smooths it over 20 ms.
+///
+/// Since this filter's noise gain is exactly 1/3, keeping three sigma of
+/// margin reduces to `DEADBAND_COUNTS >= σ` of the *raw* jitter, which is
+/// the form to re-check against if the pots, the wiring, or the ADC change.
+///
 /// As a fraction of travel the band is 8/1023 ≈ 0.8%, leaving roughly 128
 /// distinct positions across a pot's full sweep — finer than a hand can hold,
 /// and far finer than the parameters' audible resolution.
@@ -250,7 +261,10 @@ mod tests {
             "the first reading must publish"
         );
 
-        // The measured idle jitter: ±10–20 counts around a motionless pot.
+        // Deliberately harsher than the hardware: the measured idle spread is
+        // 32 counts peak-to-peak over 300 readings (σ ≈ 6.5, see
+        // `FILTER_COEFFICIENT`), so ±20 exercises excursions beyond anything
+        // a motionless pot was seen to produce.
         let jitter = [20_i32, -20, 15, -15, 10, -10, 18, -12, -20, 20];
         for step in 0..200 {
             let offset = jitter[step % jitter.len()];
