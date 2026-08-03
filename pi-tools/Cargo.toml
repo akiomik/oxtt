@@ -10,7 +10,6 @@ publish = false
 
 [dependencies]
 rppal = "0.22"
-spidev = "0.7"
 
 # This is a standalone wiring-verification binary, not the real-time audio
 # path, so it doesn't carry `oxtt`'s real-time-safety lints (no-panic, no
