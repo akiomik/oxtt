@@ -18,7 +18,7 @@ thiserror = "2"
 name = "oxtt"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 description = "A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT"
 repository = "https://github.com/akiomik/oxtt"
 license = "MIT OR Apache-2.0"
@@ -40,7 +40,8 @@ signal-hook = "0.4"
 thiserror = { workspace = true }
 # Hands whole `OttParams` snapshots from the control thread to the audio
 # callback without a lock or an allocation (docs/contracts.md §6). Pinned to
-# the 8.x line: 9.0 raises its MSRV to 1.86, above this crate's 1.85.
+# the 8.x line; migrating to 9.0 (MSRV 1.86, now within this crate's 1.88)
+# hasn't been evaluated yet.
 triple_buffer = "8.1.1"
 
 [dev-dependencies]

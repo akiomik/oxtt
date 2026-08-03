@@ -62,23 +62,23 @@ jobs:
         run: cargo build -p oxtt --features pi-controls --locked
 
   msrv:
-    name: MSRV (1.85.0)
+    name: MSRV (1.88.0)
     runs-on: ubuntu-latest
     # `dtolnay/rust-toolchain` only runs `rustup default`, which rustup ranks
     # *below* a `rust-toolchain.toml` — so the repository's 1.91.1 pin would win
     # and this job would silently re-test the same toolchain as everything else.
     # `RUSTUP_TOOLCHAIN` outranks the file, so it is what actually pins the job
-    # to the MSRV. Setting it at job level also keys `rust-cache` on 1.85.0,
+    # to the MSRV. Setting it at job level also keys `rust-cache` on 1.88.0,
     # keeping this cache separate from the other jobs'.
     env:
-      RUSTUP_TOOLCHAIN: "1.85.0"
+      RUSTUP_TOOLCHAIN: "1.88.0"
     steps:
       - uses: actions/checkout@v7
       - name: Install JACK development headers
         run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.88.0"
       - uses: Swatinem/rust-cache@v2
       - name: cargo build (MSRV)
         run: cargo build --workspace --all-targets --locked

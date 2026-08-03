@@ -271,10 +271,9 @@ fn write_wav(
         thread::sleep(Duration::from_millis(1));
     }
     file.flush()?;
-    if written_bytes
-        % u64::try_from(FRAME_BYTES).map_err(|_| io::Error::other("frame size overflow"))?
-        != 0
-    {
+    if !written_bytes.is_multiple_of(
+        u64::try_from(FRAME_BYTES).map_err(|_| io::Error::other("frame size overflow"))?,
+    ) {
         return Err(io::Error::other("WAV data is not frame-aligned"));
     }
     Ok(written_bytes

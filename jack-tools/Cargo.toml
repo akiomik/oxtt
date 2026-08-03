@@ -2,7 +2,7 @@
 name = "oxtt-jack-tools"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 description = "JACK development helpers and soak-test tools for oxtt"
 repository = "https://github.com/akiomik/oxtt"
 license = "MIT OR Apache-2.0"

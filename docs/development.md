@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Rust, edition 2024 (rustc >= 1.85).
+- Rust, edition 2024 (rustc >= 1.88).
 - A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary. Not required to build the crate or run `cargo test`.
 
 ## Build

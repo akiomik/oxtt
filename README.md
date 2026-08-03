@@ -16,7 +16,7 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 
 ## Requirements
 
-- Rust, edition 2024 (rustc >= 1.85)
+- Rust, edition 2024 (rustc >= 1.88)
 - A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer)
 
 ## Build
