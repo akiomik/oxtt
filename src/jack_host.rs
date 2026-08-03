@@ -11,6 +11,7 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::flag;
 use thiserror::Error;
 
+use crate::control::ControlHandle;
 use crate::dsp::OttProcessor;
 use crate::params::{ConfigError, OttParams};
 
@@ -39,6 +40,7 @@ pub enum HostError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunSummary {
     xrun_count: u64,
+    control_read_failures: Option<u64>,
 }
 
 impl RunSummary {
@@ -46,6 +48,19 @@ impl RunSummary {
     #[must_use]
     pub const fn xrun_count(self) -> u64 {
         self.xrun_count
+    }
+
+    /// Number of control-surface reads that failed while the client was
+    /// active, or `None` if the run had no control surface at all.
+    ///
+    /// The distinction matters to the caller: a healthy control thread and an
+    /// absent one both failed zero reads, but only one of them is worth
+    /// printing. Reported after the fact for the same reason as `xrun_count`:
+    /// the control thread throttles its own stderr output, so this is the only
+    /// exact figure.
+    #[must_use]
+    pub const fn control_read_failures(self) -> Option<u64> {
+        self.control_read_failures
     }
 }
 
@@ -89,6 +104,10 @@ struct AudioProcessHandler {
     output_l: Port<AudioOut>,
     output_r: Port<AudioOut>,
     pending_sample_rate: Arc<AtomicU32>,
+    /// The reading end of the control thread's handoff, absent for a build
+    /// with no control surface attached. Reading it is wait-free and
+    /// allocation-free, so it is legal here (docs/contracts.md §6).
+    control: Option<triple_buffer::Output<OttParams>>,
 }
 
 impl jack::ProcessHandler for AudioProcessHandler {
@@ -101,6 +120,26 @@ impl jack::ProcessHandler for AudioProcessHandler {
             // JACK sample rates stay far below f32's 16.7M exact-integer range.
             #[allow(clippy::cast_precision_loss)]
             let _ = self.processor.reset(pending as f32);
+        }
+
+        // Strictly after the reset above: `reset` rebuilds the processor from
+        // the targets it already holds (docs/contracts.md §2), so a snapshot
+        // applied before it would be thrown away on a sample-rate change.
+        if let Some(control) = self.control.as_mut() {
+            // `update` is the swap; it returns whether a new snapshot actually
+            // arrived, so `set_params` runs when a knob moved rather than on
+            // every cycle. `peek_output_buffer` then reads what was just
+            // swapped in without swapping again.
+            if control.update() {
+                // A rejected update leaves the processor unchanged
+                // (docs/contracts.md §2), and the callback has no way to
+                // report an error in any case (docs/contracts.md §6) — so
+                // there is nothing to do with the result but drop it. Every
+                // snapshot the mapping layer produces is built from validated
+                // base parameters, so a rejection would mean the sample rate
+                // changed underneath it, and the next reading corrects that.
+                let _ = self.processor.set_params(*control.peek_output_buffer());
+            }
         }
 
         let in_l = self.input_l.as_slice(ps);
@@ -131,12 +170,18 @@ impl jack::ProcessHandler for AudioProcessHandler {
 /// Connects to JACK and starts `oxtt`. Blocks until SIGINT/SIGTERM/JACK
 /// shutdown is received, then stops safely (docs/contracts.md §7).
 ///
+/// `control` is an already-running control thread, or `None` for a build with
+/// no control surface — a plain desktop JACK client, or any host without the
+/// hardware. It arrives as a concrete [`ControlHandle`] rather than a generic
+/// [`ControlSource`](crate::control::ControlSource), so which hardware is
+/// behind it stays entirely the caller's concern.
+///
 /// # Errors
 ///
 /// Returns a [`RunSummary`] after a normal shutdown. Returns `HostError` if
 /// connecting to JACK, registering ports, validating `params`, installing the
 /// SIGINT/SIGTERM handler, or deactivating the client fails.
-pub fn run(params: OttParams) -> Result<RunSummary, HostError> {
+pub fn run(params: OttParams, mut control: Option<ControlHandle>) -> Result<RunSummary, HostError> {
     let (client, _status) = Client::new(CLIENT_NAME, ClientOptions::default())?;
 
     // Never auto-connects to physical ports (docs/contracts.md §7).
@@ -170,6 +215,7 @@ pub fn run(params: OttParams) -> Result<RunSummary, HostError> {
         output_l,
         output_r,
         pending_sample_rate,
+        control: control.as_mut().and_then(ControlHandle::take_output),
     };
 
     let active_client = client.activate_async(notifications, process_handler)?;
@@ -181,9 +227,17 @@ pub fn run(params: OttParams) -> Result<RunSummary, HostError> {
         thread::sleep(Duration::from_millis(50));
     }
 
-    active_client.deactivate()?;
+    // Stop the control thread only after JACK has let go of the callback, so
+    // nothing is publishing into a buffer whose reader is being torn down.
+    // Held rather than propagated so that a failing `deactivate` still joins
+    // the thread instead of leaving it polling the hardware forever.
+    let deactivated = active_client.deactivate();
+    let control_read_failures = control.map(ControlHandle::stop_and_join);
+    deactivated?;
+
     Ok(RunSummary {
         xrun_count: xrun_count.load(Ordering::Relaxed),
+        control_read_failures,
     })
 }
 
@@ -192,8 +246,24 @@ mod tests {
     use super::RunSummary;
 
     #[test]
-    fn run_summary_exposes_xrun_count() {
-        let summary = RunSummary { xrun_count: 3 };
+    fn run_summary_exposes_its_diagnostic_counts() {
+        let summary = RunSummary {
+            xrun_count: 3,
+            control_read_failures: Some(7),
+        };
         assert_eq!(summary.xrun_count(), 3);
+        assert_eq!(summary.control_read_failures(), Some(7));
+    }
+
+    #[test]
+    fn a_run_without_a_control_surface_reports_no_count_at_all() {
+        // Not `Some(0)`: the CLI decides whether to print the line from this,
+        // and a desktop run must keep its exit report byte-for-byte what it
+        // has always been (the Pi verification scripts match it exactly).
+        let summary = RunSummary {
+            xrun_count: 0,
+            control_read_failures: None,
+        };
+        assert_eq!(summary.control_read_failures(), None);
     }
 }

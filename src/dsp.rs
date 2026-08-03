@@ -256,6 +256,11 @@ impl OttProcessor {
     ///
     /// Returns `ConfigError` if `params` fail validation against the current
     /// sample rate (docs/contracts.md §1).
+    // Proves this function can never panic (docs/contracts.md §6); see the
+    // note on `process` below. It is held to the callback contract because the
+    // control surface applies its snapshots from inside the audio callback
+    // (`AudioProcessHandler::process`), not from the control thread.
+    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn set_params(&mut self, params: OttParams) -> Result<(), ConfigError> {
         params.validate(self.sample_rate)?;
         self.global.set_targets(&params.global);

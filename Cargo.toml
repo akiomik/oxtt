@@ -8,6 +8,10 @@ resolver = "3"
 # in sync avoids `clippy::multiple_crate_versions`.
 jack = "0.13"
 proptest = "1"
+# Shared between `oxtt`'s optional `pi-controls` feature and the `pi-tools`
+# crate (directory `pi-tools/`, package `oxtt-pi-tools`), for the same
+# single-version reason as `jack` above.
+rppal = "0.22"
 thiserror = "2"
 
 [package]
@@ -21,12 +25,23 @@ license = "MIT OR Apache-2.0"
 keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
 categories = ["multimedia::audio"]
 
+[features]
+# The Raspberry Pi control surface (SPI ADC + GPIO). Off by default because
+# `rppal` is Linux-only and fails to compile on macOS, where the DSP core and
+# its tests are developed; only a build targeting the Pi itself enables this.
+pi-controls = ["dep:rppal"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 jack = { workspace = true }
 nutype = "0.7.0"
+rppal = { workspace = true, optional = true }
 signal-hook = "0.4"
 thiserror = { workspace = true }
+# Hands whole `OttParams` snapshots from the control thread to the audio
+# callback without a lock or an allocation (docs/contracts.md §6). Pinned to
+# the 8.x line: 9.0 raises its MSRV to 1.86, above this crate's 1.85.
+triple_buffer = "8.1.1"
 
 [dev-dependencies]
 no-panic = "0.1"

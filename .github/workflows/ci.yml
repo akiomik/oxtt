@@ -41,6 +41,26 @@ jobs:
       - name: cargo test --release (no-panic proof, docs/contracts.md §6)
         run: cargo test --release --locked
 
+  pi-controls:
+    # The `pi-controls` feature is off by default and cannot build on macOS
+    # (`rppal` is Linux-only), so nothing above compiles `src/control/pi.rs`
+    # at all. `rppal` builds natively here, so this job type-checks, lints and
+    # tests that module on the same runner as everything else rather than
+    # needing a cross-compiler or a Raspberry Pi.
+    name: Pi controls feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install JACK development headers
+        run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --features pi-controls
+        run: cargo clippy -p oxtt --features pi-controls --all-targets -- -D warnings
+      - name: cargo test --features pi-controls
+        run: cargo test -p oxtt --features pi-controls --all-targets --locked
+      - name: cargo build --features pi-controls
+        run: cargo build -p oxtt --features pi-controls --locked
+
   msrv:
     name: MSRV (1.85.0)
     runs-on: ubuntu-latest

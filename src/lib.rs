@@ -5,6 +5,7 @@
 
 pub mod bands;
 pub mod cli;
+pub mod control;
 pub mod dsp;
 pub mod jack_host;
 pub mod params;

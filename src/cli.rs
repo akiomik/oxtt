@@ -57,6 +57,18 @@ pub struct Cli {
     /// print the JACK xrun count to stderr after a normal exit
     #[arg(long)]
     pub report_xruns_on_exit: bool,
+
+    /// drive depth/time/upward/downward from the hardware control surface
+    /// (MCP3008 pots on SPI0/CE0, bypass switch on GPIO17)
+    ///
+    /// Opt-in rather than on by default even in a `pi-controls` build: the
+    /// same binary has to stay runnable on a Pi with no breadboard attached,
+    /// which is how the audio verification scripts under `scripts/` run it.
+    /// The flag does not exist at all without the feature, so a build that
+    /// cannot read the hardware cannot be asked to.
+    #[cfg(feature = "pi-controls")]
+    #[arg(long)]
+    pub controls: bool,
 }
 
 /// Crossover octave separation is checked here, immediately after parsing
@@ -143,6 +155,27 @@ mod tests {
     fn xrun_report_is_opt_in() {
         assert!(!Cli::parse_from(["oxtt"]).report_xruns_on_exit);
         assert!(Cli::parse_from(["oxtt", "--report-xruns-on-exit"]).report_xruns_on_exit);
+    }
+
+    /// The control surface must stay off unless it is asked for, so that a
+    /// `pi-controls` build with no breadboard attached still starts (see the
+    /// flag's own documentation).
+    #[cfg(feature = "pi-controls")]
+    #[test]
+    fn the_control_surface_is_opt_in() {
+        assert!(!Cli::parse_from(["oxtt"]).controls);
+        assert!(Cli::parse_from(["oxtt", "--controls"]).controls);
+    }
+
+    /// Without the feature the flag is not merely off, it does not exist —
+    /// asking for it is an argument error rather than a silent no-op.
+    #[cfg(not(feature = "pi-controls"))]
+    #[test]
+    fn there_is_no_control_surface_flag_without_the_feature() {
+        assert!(
+            Cli::try_parse_from(["oxtt", "--controls"]).is_err(),
+            "--controls must not parse in a build that cannot read the hardware"
+        );
     }
 
     #[test]
