@@ -1,11 +1,15 @@
 //! Wiring verification for oxtt's stage-3 physical controls
 //! (`tmp/spec.md` §6): reads MCP3008 channels 0-3 (Depth, Time, Upward,
-//! Downward) over SPI0 and the Bypass switch on GPIO17, printing raw values
-//! to stdout in a loop.
+//! Downward) over SPI0 and the Bypass switch on GPIO17, printing raw and
+//! normalized values to stdout in a loop.
 //!
-//! This deliberately does nothing else — no calibration, no normalization,
-//! no oxtt integration — so the electrical/wiring layer can be verified
-//! before any of that is built on top of it.
+//! Normalization is a plain linear scale (raw / 1023), with no per-pot
+//! calibration offsets: the potentiometers are linear-taper (B-curve) and
+//! their measured range already covers the full 0-1023 scale (`tmp/todo.md`).
+//! This is a display-only sanity check, not the real `NormalizedF32`
+//! (`src/params`) conversion, which lands with the read-thread/queue
+//! integration into `oxtt` proper -- this tool stays independent of the
+//! `oxtt` crate by design.
 
 use std::error::Error;
 use std::thread;
@@ -20,6 +24,7 @@ const BYPASS_GPIO: u8 = 17;
 // this tool cares about clean wiring verification, not throughput.
 const SPI_CLOCK_HZ: u32 = 500_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+const ADC_MAX: f32 = 1023.0;
 
 /// Reads one MCP3008 channel (0-7) in single-ended mode and returns the raw
 /// 10-bit count (0-1023).
@@ -28,6 +33,12 @@ fn read_channel(spi: &Spi, channel: u8) -> Result<u16, rppal::spi::Error> {
     let mut read = [0u8; 3];
     spi.transfer(&mut read, &write)?;
     Ok((u16::from(read[1] & 0x03) << 8) | u16::from(read[2]))
+}
+
+/// Linear raw-to-normalized scale (see the module doc for why no
+/// per-pot calibration is needed).
+fn normalize(raw: u16) -> f32 {
+    f32::from(raw) / ADC_MAX
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -46,7 +57,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             Level::High => "released",
         };
 
-        println!("Depth={depth} Time={time} Upward={upward} Downward={downward} Bypass={bypass}");
+        println!(
+            "Depth={depth} ({:.3}) Time={time} ({:.3}) Upward={upward} ({:.3}) Downward={downward} ({:.3}) Bypass={bypass}",
+            normalize(depth),
+            normalize(time),
+            normalize(upward),
+            normalize(downward)
+        );
 
         thread::sleep(POLL_INTERVAL);
     }
