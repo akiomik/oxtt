@@ -140,7 +140,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` and `ControlMapping::update` panic-free (docs/contracts.md §6); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` and `ControlMapping::update` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
 
 The suite is organized by module and none of it requires a running JACK server:
 
@@ -153,7 +153,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/smooth.rs` — parameter-smoothing tests
 - `src/control/` — control-surface conditioning (jitter filter, deadband, bypass override), the control thread and its handoff, and, only under `--features pi-controls`, the MCP3008 command/response encoding
 
-See `contracts.md` for the guarantees those tests protect.
+See [contracts.md](contracts.md) for the guarantees those tests protect.
 
 ## Inspecting Generated Code
 
