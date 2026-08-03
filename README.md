@@ -17,12 +17,19 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 ## Requirements
 
 - Rust, edition 2024 (rustc >= 1.88)
-- A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer)
+- A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary — not required to build the crate or run `cargo test`
+- To use the physical control surface (`--controls`, the `pi-controls` Cargo feature): a Raspberry Pi 5 wired up as described in [`docs/raspberry-pi/`](docs/raspberry-pi/)
 
 ## Build
 
 ```sh
 cargo build --release
+```
+
+The physical control surface is behind the optional `pi-controls` Cargo feature, off by default because it depends on `rppal` (Linux-only):
+
+```sh
+cargo build --release --features pi-controls
 ```
 
 ## Run
@@ -36,6 +43,16 @@ cargo run --release -- --preset safe-start
 Run `cargo run --release -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
 
 **Note:** the `default` preset is intentionally strong and can exceed 0 dBFS. Start with `safe-start` and a low monitor level.
+
+### `--controls`
+
+On a `pi-controls` build (see Build above) running on a Raspberry Pi 5, pass `--controls` to drive parameters from the physical control surface instead of the CLI flags:
+
+```sh
+cargo run --release --features pi-controls -- --controls
+```
+
+Six potentiometers on an MCP3008 SPI ADC drive depth/time/upward/downward and the input/output gains, and a latching switch on GPIO17 bypasses the effect. The flag is opt-in and only exists in `pi-controls` builds, so the same binary still runs off CLI flags alone on a Pi with no hardware attached. See [`docs/raspberry-pi/`](docs/raspberry-pi/) for the wiring and setup.
 
 ## Documentation
 
