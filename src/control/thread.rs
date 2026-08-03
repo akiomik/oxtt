@@ -379,7 +379,7 @@ mod tests {
         // Before `update`, the callback sees exactly what the processor was
         // built with rather than an uninitialized or defaulted snapshot.
         assert_eq!(
-            *output.peek_output_buffer(),
+            *output.output_buffer(),
             base,
             "the buffer must start seeded with the CLI parameters"
         );
@@ -391,17 +391,17 @@ mod tests {
         let (source, position, _reads) = TurnablePot::at(100);
         with_control(source, |output, _handle| {
             wait_until("the initial position to be published", || {
-                output.update() && output.peek_output_buffer().global.depth.get() > 0.0
+                output.update() && output.output_buffer().global.depth.get() > 0.0
             });
 
             position.store(900, Ordering::Release);
             wait_until("the turned position to reach the output", || {
                 output.update();
-                output.peek_output_buffer().global.depth.get() > normalized(880)
+                output.output_buffer().global.depth.get() > normalized(880)
             });
 
             // The turn drives all six pots, not just the one asserted above.
-            let params = *output.peek_output_buffer();
+            let params = *output.output_buffer();
             assert!(
                 params.global.time.get() > normalized(880)
                     && params.global.upward.get() > normalized(880)
@@ -422,7 +422,7 @@ mod tests {
         with_control(source, |output, _handle| {
             wait_until("the first reading to be published", || output.update());
             assert_eq!(
-                output.peek_output_buffer().global.depth.get(),
+                output.output_buffer().global.depth.get(),
                 normalized(400),
                 "the first publish must carry the pot's position"
             );
@@ -458,7 +458,7 @@ mod tests {
             // publish, which is the whole point of not treating a read error
             // as fatal.
             wait_until("a publish after the failures", || {
-                output.update() && output.peek_output_buffer().global.depth.get() == normalized(700)
+                output.update() && output.output_buffer().global.depth.get() == normalized(700)
             });
         });
 
@@ -538,7 +538,7 @@ mod tests {
     }
 
     /// The chain the audio callback actually runs, minus JACK: `update` gates
-    /// the work, `peek_output_buffer` reads the snapshot without a second
+    /// the work, `output_buffer` reads the snapshot without a second
     /// swap, and `set_params` applies it (docs/contracts.md §2, §6). Proves
     /// the whole control surface end to end on a development machine.
     #[test]
@@ -557,11 +557,11 @@ mod tests {
         wait_until("the processor to be handed the turned position", || {
             // Byte-for-byte the callback's snapshot step.
             if output.update() {
-                let accepted = processor.set_params(*output.peek_output_buffer()).is_ok();
+                let accepted = processor.set_params(*output.output_buffer()).is_ok();
                 assert!(accepted, "a mapped snapshot must always validate");
                 applied = applied.saturating_add(1);
             }
-            output.peek_output_buffer().global.depth.get() > normalized(1000)
+            output.output_buffer().global.depth.get() > normalized(1000)
         });
         assert!(applied > 0, "the callback pattern must apply at least once");
 

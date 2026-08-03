@@ -39,10 +39,8 @@ rppal = { workspace = true, optional = true }
 signal-hook = "0.4"
 thiserror = { workspace = true }
 # Hands whole `OttParams` snapshots from the control thread to the audio
-# callback without a lock or an allocation (docs/contracts.md §6). Pinned to
-# the 8.x line; migrating to 9.0 (MSRV 1.86, now within this crate's 1.88)
-# hasn't been evaluated yet.
-triple_buffer = "8.1.1"
+# callback without a lock or an allocation (docs/contracts.md §6).
+triple_buffer = "9"
 
 [dev-dependencies]
 no-panic = "0.1"

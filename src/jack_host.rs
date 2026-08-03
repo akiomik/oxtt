@@ -128,8 +128,8 @@ impl jack::ProcessHandler for AudioProcessHandler {
         if let Some(control) = self.control.as_mut() {
             // `update` is the swap; it returns whether a new snapshot actually
             // arrived, so `set_params` runs when a knob moved rather than on
-            // every cycle. `peek_output_buffer` then reads what was just
-            // swapped in without swapping again.
+            // every cycle. `output_buffer` then reads what was just swapped
+            // in without swapping again.
             if control.update() {
                 // A rejected update leaves the processor unchanged
                 // (docs/contracts.md §2), and the callback has no way to
@@ -138,7 +138,7 @@ impl jack::ProcessHandler for AudioProcessHandler {
                 // snapshot the mapping layer produces is built from validated
                 // base parameters, so a rejection would mean the sample rate
                 // changed underneath it, and the next reading corrects that.
-                let _ = self.processor.set_params(*control.peek_output_buffer());
+                let _ = self.processor.set_params(*control.output_buffer());
             }
         }
 
