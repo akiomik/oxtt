@@ -32,6 +32,11 @@ fn read_channel(spi: &Spidev, channel: u8) -> io::Result<u16> {
     let mut rx = [0u8; 3];
     let mut transfer = SpidevTransfer::read_write(&tx, &mut rx);
     spi.transfer(&mut transfer)?;
+    // Temporary debug aid: a genuine full-scale conversion echoes 0x03 in
+    // rx[1] (only the 2 valid high bits set); if MISO isn't actually driven
+    // by the MCP3008, rx tends to read back as all-0xff instead. Remove once
+    // the CH0-3 wiring is confirmed.
+    eprintln!("CH{channel} raw={rx:02x?}");
     Ok((u16::from(rx[1] & 0x03) << 8) | u16::from(rx[2]))
 }
 
