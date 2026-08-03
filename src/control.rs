@@ -1,4 +1,4 @@
-//! The physical control surface: four potentiometers and a bypass switch.
+//! The physical control surface: six potentiometers and a latching bypass switch.
 //!
 //! Split into three layers, so that the middle one — the only one with any
 //! behaviour worth testing — is shared by every platform:

@@ -42,7 +42,7 @@ use super::raw::ControlSource;
 /// immediate — the callback would simply find the same snapshot twice — while
 /// polling much slower would let the callback outrun the control surface and
 /// make a fast turn arrive in visible steps. 500 Hz sits just above the
-/// callback rate, which costs four MCP3008 conversions per 2 ms (a few
+/// callback rate, which costs six MCP3008 conversions per 2 ms (a few
 /// hundred microseconds of SPI on the Pi's bus, on a thread that has nothing
 /// else to do) and leaves headroom for a smaller JACK buffer.
 ///
@@ -87,7 +87,7 @@ impl ControlHandle {
     /// `base` is the CLI parameter set. It seeds both ends: the triple buffer
     /// starts out holding it, so a callback that reads before the first
     /// successful poll sees exactly the parameters the processor was built
-    /// with, and [`ControlMapping`] overlays the four pot-driven fields onto
+    /// with, and [`ControlMapping`] overlays the six pot-driven fields onto
     /// it from the first reading onward.
     ///
     /// [`DEFAULT_POLL_INTERVAL`] is the interval to pass unless a caller has
@@ -283,8 +283,10 @@ mod tests {
                 time: count,
                 upward: count,
                 downward: count,
+                input_gain: count,
+                output_gain: count,
             },
-            bypass_pressed: false,
+            bypass_engaged: false,
         }
     }
 
@@ -398,13 +400,18 @@ mod tests {
                 output.peek_output_buffer().global.depth.get() > normalized(880)
             });
 
-            // The turn drives all four pots, not just the one asserted above.
+            // The turn drives all six pots, not just the one asserted above.
             let params = *output.peek_output_buffer();
             assert!(
                 params.global.time.get() > normalized(880)
                     && params.global.upward.get() > normalized(880)
                     && params.global.downward.get() > normalized(880),
-                "every pot must track the turn, got {params:?}"
+                "every effect pot must track the turn, got {params:?}"
+            );
+            assert!(
+                params.global.input_gain_db.get() > 15.0
+                    && params.global.output_gain_db.get() > 15.0,
+                "both gain pots must track the turn, got {params:?}"
             );
         });
     }

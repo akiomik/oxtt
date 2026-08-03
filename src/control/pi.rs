@@ -1,17 +1,30 @@
-//! Layer A on a Raspberry Pi: four pots on an MCP3008 over SPI, and a bypass
+//! Layer A on a Raspberry Pi: six pots on an MCP3008 over SPI, and a bypass
 //! switch on a GPIO pin (see [`crate::control`] for the layering).
 //!
 //! Behind the `pi-controls` feature, because `rppal` is Linux-only and the
 //! rest of the control surface has to keep building on a development machine.
 //!
-//! The wiring and the read sequence below are not a proposal: they are what
-//! the `pi-tools` binary in this workspace verified against the assembled
-//! hardware, where all four channels track their pots across the full
-//! `0..=1023` range and the switch is detected. This module reproduces that
-//! read exactly — same bus, same mode, same clock, same three-byte
-//! conversation — so that a fault here is a fault in code rather than a
-//! question about the breadboard. Any change to the constants or to
+//! The read sequence below is not a proposal: it is what the `pi-tools` binary
+//! in this workspace verified against the assembled hardware, where CH0..CH3
+//! track their pots across the full `0..=1023` range and the switch is
+//! detected. This module reproduces that read exactly — same bus, same mode,
+//! same clock, same three-byte conversation — so that a fault here is a fault
+//! in code rather than a question about the breadboard. The two gain pots on
+//! CH4 and CH5 are the same part wired the same way and read by the same code
+//! path, but they postdate that verification and have not themselves been on a
+//! bench. Any change to the constants or to
 //! [`command_for`]/[`decode_response`] should be re-verified with that tool.
+//!
+//! CH6 and CH7 are unwired. They must be **tied to ground**, not left
+//! floating: a floating CMOS input reads whatever it has capacitively picked
+//! up, so an unconnected channel returns noise rather than a stable value. That
+//! costs nothing while no code reads those channels, but it is the habit to
+//! keep, because on this board the consequence of getting it wrong is now
+//! concrete — the two channels that *were* unwired until recently are the gain
+//! channels, and a floating gain channel is a gain that wanders at random.
+//! Grounded, a channel reads 0 counts, which on the gain mapping is -24 dB:
+//! quiet, so a mis-wired or dead channel fails towards silence rather than
+//! towards a loud surprise.
 //!
 //! Nothing here is on the real-time path. A conversion is a blocking `ioctl`,
 //! which is exactly why it is polled from the control thread
@@ -33,15 +46,17 @@ use super::raw::{AdcCount, AdcCountError, ControlSource, Pots, RawControls};
 ///
 /// Read with the `SoC`'s internal pull-up and the switch shorting the pin to
 /// ground, so the *electrical* level is inverted with respect to
-/// [`RawControls::bypass_pressed`]; no external resistor is on the board.
+/// [`RawControls::bypass_engaged`]; no external resistor is on the board. The
+/// part is a latching (alternate-action) switch, so the pin sits at whichever
+/// level the switch was last left in rather than pulsing low for a press.
 const BYPASS_GPIO: u8 = 17;
 
 /// SPI clock rate for the MCP3008 conversation.
 ///
 /// Deliberately well under the MCP3008's ~1.35–2 MHz ceiling at 3.3 V
 /// (datasheet): breadboard jumpers pick up noise readily at higher clock
-/// rates, and there is nothing to buy by going faster. Four conversions are 12
-/// bytes, about 200 µs at this rate, against a
+/// rates, and there is nothing to buy by going faster. Six conversions are 18
+/// bytes, about 300 µs at this rate, against a
 /// [`DEFAULT_POLL_INTERVAL`](super::DEFAULT_POLL_INTERVAL) of 2 ms on a thread
 /// that has nothing else to do.
 const SPI_CLOCK_HZ: u32 = 500_000;
@@ -58,6 +73,10 @@ const CHANNEL_TIME: u8 = 1;
 const CHANNEL_UPWARD: u8 = 2;
 /// MCP3008 channel wired to the Downward pot (downward-compression multiplier).
 const CHANNEL_DOWNWARD: u8 = 3;
+/// MCP3008 channel wired to the Input Gain pot (pre-split gain in dB).
+const CHANNEL_INPUT_GAIN: u8 = 4;
+/// MCP3008 channel wired to the Output Gain pot (post-sum gain in dB).
+const CHANNEL_OUTPUT_GAIN: u8 = 5;
 
 /// The MCP3008's start bit, sent alone in the first byte.
 ///
@@ -182,10 +201,10 @@ impl PiControls {
 impl ControlSource for PiControls {
     type Error = PiControlError;
 
-    /// Reads the four channels and the switch as one sample.
+    /// Reads the six channels and the switch as one sample.
     ///
     /// The conversions are sequential and each is a separate SPI transaction —
-    /// the MCP3008 has one converter and no scan mode — so the four counts are
+    /// the MCP3008 has one converter and no scan mode — so the six counts are
     /// staggered by tens of microseconds. That is far below anything a hand
     /// can do to a knob, so they are treated as simultaneous.
     fn read(&mut self) -> Result<RawControls, Self::Error> {
@@ -194,19 +213,22 @@ impl ControlSource for PiControls {
             time: self.read_channel(CHANNEL_TIME)?,
             upward: self.read_channel(CHANNEL_UPWARD)?,
             downward: self.read_channel(CHANNEL_DOWNWARD)?,
+            input_gain: self.read_channel(CHANNEL_INPUT_GAIN)?,
+            output_gain: self.read_channel(CHANNEL_OUTPUT_GAIN)?,
         };
 
         // Active-low against the internal pull-up: the switch shorts the pin
-        // to ground, so Low is the switch closed. `RawControls::bypass_pressed`
-        // is the switch's logical state, so the level is inverted here and
-        // nowhere else. Every poll reads the raw level; debouncing it and
-        // latching the effect bypass belong to `ControlMapping`, which has no
-        // hardware to know about.
-        let bypass_pressed = self.bypass.read() == Level::Low;
+        // to ground, so Low is the switch closed. The part latches, so that is
+        // a resting position rather than a press — the pin holds its level
+        // until a hand moves the switch back. `RawControls::bypass_engaged` is
+        // the switch's logical position, so the level is inverted here and
+        // nowhere else. Every poll reads the raw level; debouncing it belongs
+        // to `ControlMapping`, which has no hardware to know about.
+        let bypass_engaged = self.bypass.read() == Level::Low;
 
         Ok(RawControls {
             pots,
-            bypass_pressed,
+            bypass_engaged,
         })
     }
 }
@@ -244,12 +266,29 @@ mod tests {
             [0x01, 0xB0, 0x00],
             "CH3 must be requested single-ended"
         );
+        assert_eq!(
+            command_for(CHANNEL_INPUT_GAIN),
+            [0x01, 0xC0, 0x00],
+            "CH4 must be requested single-ended"
+        );
+        assert_eq!(
+            command_for(CHANNEL_OUTPUT_GAIN),
+            [0x01, 0xD0, 0x00],
+            "CH5 must be requested single-ended"
+        );
     }
 
     #[test]
     fn the_command_covers_the_channels_this_wiring_does_not_use() {
-        // Nothing calls these today, but the encoding is the datasheet's, not
-        // this board's: the top channel must still land in the same nibble.
+        // Nothing calls these today — CH6 and CH7 are the two the board leaves
+        // unwired (and grounded; see the module doc) — but the encoding is the
+        // datasheet's, not this board's: the top channel must still land in the
+        // same nibble.
+        assert_eq!(
+            command_for(6),
+            [0x01, 0xE0, 0x00],
+            "CH6 must set the two high channel-select bits"
+        );
         assert_eq!(
             command_for(7),
             [0x01, 0xF0, 0x00],

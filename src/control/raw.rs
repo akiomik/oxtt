@@ -41,16 +41,18 @@ impl AdcCount {
     }
 }
 
-/// One `T` per potentiometer: depth, time, upward, downward.
+/// One `T` per potentiometer: depth, time, upward, downward, input gain, output gain.
 ///
-/// Named fields rather than `[T; 4]`, for the same reason as
+/// Named fields rather than `[T; 6]`, for the same reason as
 /// [`Bands<T>`](crate::bands::Bands) (docs/architecture.md): the control
-/// surface has exactly these four pots, so the concept gets one
+/// surface has exactly these six pots, so the concept gets one
 /// representation from the ADC channel order through to the mapped
 /// parameters, and field access cannot go out of range the way an index can
 /// (`clippy::indexing_slicing` never enters the picture).
 ///
-/// Field order matches the wiring verified by `pi-tools`: MCP3008 CH0..CH3.
+/// Field order matches the wiring: MCP3008 CH0..CH5. CH0..CH3 are the four
+/// pots `pi-tools` verified against the assembled hardware; CH4 and CH5 are
+/// the two gain pots, wired the same way on the same part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pots<T> {
     /// The Depth pot (CH0), the dry/wet mix.
@@ -61,10 +63,15 @@ pub struct Pots<T> {
     pub upward: T,
     /// The Downward pot (CH3), the downward-compression multiplier.
     pub downward: T,
+    /// The Input Gain pot (CH4), the pre-split gain in dB.
+    pub input_gain: T,
+    /// The Output Gain pot (CH5), the post-sum gain in dB.
+    pub output_gain: T,
 }
 
 impl<T> Pots<T> {
-    /// Applies `f` to every pot, visiting depth, time, upward, downward in that order.
+    /// Applies `f` to every pot, visiting them in ADC channel order: depth,
+    /// time, upward, downward, input gain, output gain.
     #[must_use]
     pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> Pots<U> {
         Pots {
@@ -72,13 +79,15 @@ impl<T> Pots<T> {
             time: f(self.time),
             upward: f(self.upward),
             downward: f(self.downward),
+            input_gain: f(self.input_gain),
+            output_gain: f(self.output_gain),
         }
     }
 
     /// Combines two sets of pot values field-wise, in the same order as [`Pots::map`].
     ///
     /// The mapping layer's conditioning is entirely field-wise (filter state
-    /// against a new reading, filtered value against the last published one),
+    /// against a new reading, filtered value against the deadband reference),
     /// so pairing by field here keeps that code free of any per-pot repetition.
     #[must_use]
     pub fn zip_with<U, V>(self, other: Pots<U>, mut f: impl FnMut(T, U) -> V) -> Pots<V> {
@@ -87,6 +96,8 @@ impl<T> Pots<T> {
             time: f(self.time, other.time),
             upward: f(self.upward, other.upward),
             downward: f(self.downward, other.downward),
+            input_gain: f(self.input_gain, other.input_gain),
+            output_gain: f(self.output_gain, other.output_gain),
         }
     }
 }
@@ -94,16 +105,22 @@ impl<T> Pots<T> {
 /// One complete sample of the control surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawControls {
-    /// The four pot readings.
+    /// The six pot readings.
     pub pots: Pots<AdcCount>,
-    /// Whether the bypass switch is currently held down.
+    /// Which position the bypass switch is resting in: `true` for bypassed.
+    ///
+    /// The panel part is a mechanically *latching* (alternate-action) switch,
+    /// so there is no press to observe — the switch stays where it was last
+    /// put, and its position is the bypass state itself rather than a stimulus
+    /// that toggles one. Every poll reports the position the switch is in at
+    /// that instant.
     ///
     /// The switch is wired active-low against an internal pull-up, so the
-    /// electrical level is inverted by the reading layer: this field is the
-    /// switch's logical state, not its pin level. Debouncing and the latch
-    /// this drives are not part of this field's meaning — see
+    /// electrical level is still inverted by the reading layer: this field is
+    /// the switch's logical position, not its pin level. Debouncing that
+    /// position is not part of this field's meaning — see
     /// [`ControlMapping::update`](crate::control::ControlMapping::update).
-    pub bypass_pressed: bool,
+    pub bypass_engaged: bool,
 }
 
 /// Layer A: a source of [`RawControls`] readings.
@@ -124,7 +141,7 @@ pub trait ControlSource {
     /// How this source's hardware read can fail.
     type Error: StdError;
 
-    /// Reads all four pots and the bypass switch as one sample.
+    /// Reads all six pots and the bypass switch as one sample.
     ///
     /// # Errors
     ///
@@ -154,6 +171,8 @@ mod tests {
             time: 2,
             upward: 3,
             downward: 4,
+            input_gain: 5,
+            output_gain: 6,
         };
         assert_eq!(
             pots.map(|v| v * 10),
@@ -162,7 +181,39 @@ mod tests {
                 time: 20,
                 upward: 30,
                 downward: 40,
+                input_gain: 50,
+                output_gain: 60,
             }
+        );
+    }
+
+    /// The visiting order is part of [`Pots::map`]'s contract: it is the ADC
+    /// channel order, so a reader can line the fields up against CH0..CH5.
+    #[test]
+    fn map_visits_the_pots_in_adc_channel_order() {
+        let pots = Pots {
+            depth: "depth",
+            time: "time",
+            upward: "upward",
+            downward: "downward",
+            input_gain: "input_gain",
+            output_gain: "output_gain",
+        };
+
+        let mut visited = Vec::new();
+        let _ = pots.map(|name| visited.push(name));
+
+        assert_eq!(
+            visited,
+            [
+                "depth",
+                "time",
+                "upward",
+                "downward",
+                "input_gain",
+                "output_gain"
+            ],
+            "map must visit the pots in MCP3008 channel order"
         );
     }
 
@@ -173,12 +224,16 @@ mod tests {
             time: 2,
             upward: 3,
             downward: 4,
+            input_gain: 5,
+            output_gain: 6,
         };
         let b = Pots {
             depth: 10,
             time: 20,
             upward: 30,
             downward: 40,
+            input_gain: 50,
+            output_gain: 60,
         };
         assert_eq!(
             a.zip_with(b, |x, y| x + y),
@@ -187,6 +242,8 @@ mod tests {
                 time: 22,
                 upward: 33,
                 downward: 44,
+                input_gain: 55,
+                output_gain: 66,
             }
         );
     }
@@ -217,8 +274,10 @@ mod tests {
                 time: AdcCount::try_new(2).unwrap(),
                 upward: AdcCount::try_new(3).unwrap(),
                 downward: AdcCount::try_new(4).unwrap(),
+                input_gain: AdcCount::try_new(5).unwrap(),
+                output_gain: AdcCount::try_new(6).unwrap(),
             },
-            bypass_pressed: true,
+            bypass_engaged: true,
         };
         let mut source = FakeSource { reading, reads: 0 };
 
