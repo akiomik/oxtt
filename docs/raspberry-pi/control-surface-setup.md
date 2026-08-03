@@ -1,8 +1,9 @@
 # Raspberry Pi 5 Setup: `oxtt`'s Physical Control Surface
 
 This is the reproducible setup for `oxtt`'s physical control surface on a
-Raspberry Pi 5 — four potentiometers on an MCP3008 SPI ADC driving
-`depth`/`time`/`upward`/`downward`, plus a momentary bypass switch. It is one of
+Raspberry Pi 5 — six potentiometers on an MCP3008 SPI ADC driving
+`depth`/`time`/`upward`/`downward` and the input/output gains, plus a latching
+bypass switch. It is one of
 the Raspberry Pi configurations under `docs/raspberry-pi/`, and it assumes the
 environment already built by
 [`usb-audio-setup.md`](usb-audio-setup.md): the same Pi 5, the same 64-bit
@@ -37,8 +38,9 @@ environment-specific.
 | --- | --- |
 | SBC | Raspberry Pi 5, set up per [`usb-audio-setup.md`](usb-audio-setup.md) |
 | ADC | MCP3008, single-ended, on SPI0/CE0 at 500 kHz, SPI mode 0 |
-| Pots | Four linear-taper (B-curve) potentiometers, 10 kΩ, on MCP3008 CH0–CH3 |
-| Bypass switch | Momentary push switch on GPIO17 (BCM), active low against the SoC's internal pull-up |
+| Pots | Six linear-taper (B-curve) potentiometers, 10 kΩ, on MCP3008 CH0–CH5 |
+| Unused ADC inputs | CH6 and CH7, tied to ground — never left floating |
+| Bypass switch | Latching (alternate-action) switch on GPIO17 (BCM), active low against the SoC's internal pull-up |
 | Reference | 3.3 V from the Pi header, so full scale is 1023 counts |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
@@ -57,15 +59,19 @@ Generic parts; no specific vendor part number is assumed.
   optional in spirit: it lets you pull the ADC out without disturbing the rest
   of the breadboard, which is exactly the manoeuvre the verification document
   records as too risky to do with a soldered-in part.
-- **Four 10 kΩ potentiometers, linear taper (B-curve).** Not log/audio taper.
-  This is a correctness requirement, not a preference — see below.
-- **One momentary (non-latching) push switch.** Normally open, two terminals
-  used.
+- **Six 10 kΩ potentiometers, linear taper (B-curve).** Not log/audio taper.
+  This is a correctness requirement, not a preference — see below. Four drive
+  `depth`/`time`/`upward`/`downward`; the other two are the input and output
+  gain knobs, and are the same part wired the same way.
+- **One latching (alternate-action) switch.** Two terminals used. It must hold
+  whichever position it is left in — that position *is* the bypass state, so a
+  momentary push switch is the wrong part here and will read as permanently
+  un-bypassed except while it is physically held down.
 - **0.1 µF ceramic capacitors** for supply decoupling on the MCP3008. The MCP3008
   has separate supply and reference pins even though both go to 3.3 V here, so
   buy more than one.
-- **Breadboard and jumper wires**, enough for four pots plus the ADC plus the
-  switch.
+- **Breadboard and jumper wires**, enough for six pots plus the ADC plus the
+  switch, and two more to ground the ADC's unused CH6 and CH7.
 - **A multimeter.** Step 2 is not doable without one, and step 2 is what keeps a
   wiring mistake from becoming a damaged Pi.
 
@@ -77,6 +83,11 @@ scale. That mapping is only correct for a linear-taper pot. A log/audio-taper
 pot will still read 0–1023 end to end and will still look fine in
 `oxtt-pi-tools`, so the mistake does not announce itself — it just makes every
 knob's travel feel wrong, with all the useful range crowded into one end.
+
+The two gain pots go through that same plain scale onto a dB range: count 0 is
+-24 dB, count 1023 is +24 dB, and unity gain is the centre of the rotation. A
+log-taper pot there would move unity off centre, which is the one position on a
+gain knob that has to be findable without looking.
 
 ### Electrical rules
 
@@ -134,12 +145,27 @@ The analog side, and the switch:
 | 2 | `CH1` | Time pot wiper |
 | 3 | `CH2` | Upward pot wiper |
 | 4 | `CH3` | Downward pot wiper |
+| 5 | `CH4` | Input Gain pot wiper |
+| 6 | `CH5` | Output Gain pot wiper |
+| 7 | `CH6` | Ground — unused, see below |
+| 8 | `CH7` | Ground — unused, see below |
 
 Each pot is a divider: top terminal to 3.3 V, bottom terminal to ground, wiper
 to its MCP3008 channel. The channel order matches `CHANNEL_DEPTH = 0`,
-`CHANNEL_TIME = 1`, `CHANNEL_UPWARD = 2`, `CHANNEL_DOWNWARD = 3` in
-`src/control/pi.rs`; swapping two pots here silently swaps two knobs on the
-panel, and nothing downstream can tell.
+`CHANNEL_TIME = 1`, `CHANNEL_UPWARD = 2`, `CHANNEL_DOWNWARD = 3`,
+`CHANNEL_INPUT_GAIN = 4`, `CHANNEL_OUTPUT_GAIN = 5` in `src/control/pi.rs`;
+swapping two pots here silently swaps two knobs on the panel, and nothing
+downstream can tell.
+
+**Tie CH6 and CH7 to ground rather than leaving them floating.** A floating CMOS
+input reads whatever it has capacitively picked up, so an unconnected channel
+returns noise instead of a stable value. Nothing reads those two channels today,
+so grounding them costs a jumper each and buys nothing immediately — but it is
+the habit to keep, and on this board the cost of the other habit is now
+concrete: CH4 and CH5 were the unwired pair until the gain pots arrived, and a
+floating gain channel is a gain that wanders at random. Grounded, a channel
+reads 0 counts, which on the gain mapping is -24 dB, so a mis-wired or dead
+channel fails towards silence rather than towards a loud surprise.
 
 | Signal | BCM | Header pin | Goes to |
 | --- | --- | ---: | --- |
@@ -182,9 +208,13 @@ switch), so this is a mapping to keep rather than to re-derive.
    rather than by eye — a jumper one row off on a breadboard looks correct.
 2. Between the 3.3 V rail and ground: confirm there is **no** continuity, i.e.
    no short. Do this last, after everything is inserted, and before power.
-3. Across the switch: open when released, continuity when pressed. If it reads
-   continuous in both states, it is a latching switch, not a momentary one, and
-   the bypass logic in `src/control/mapping.rs` expects momentary.
+3. Across the switch: continuity in one resting position, open in the other, and
+   it **stays** in whichever one you left it in. That is the part working
+   correctly — the bypass logic in `src/control/mapping.rs` takes the switch's
+   resting position as the bypass state itself. A switch that is only continuous
+   while you hold it and springs back open is a momentary one, which is the
+   wrong part; one that reads the same in both positions is a wiring fault or a
+   dead switch.
 
 **Then power the Pi on**, with nothing running, and measure voltages:
 
@@ -373,23 +403,31 @@ side you invoke this from.
 It prints one line every 200 ms:
 
 ```
-Depth=991 (0.969) Time=1023 (1.000) Upward=1017 (0.994) Downward=1002 (0.980) Bypass=released
+Depth=991 (0.969) Time=1023 (1.000) Upward=1017 (0.994) Downward=1002 (0.980) InputGain=512 (+0.0 dB) OutputGain=300 (-9.9 dB) Bypass=disengaged
 ```
+
+The four dynamics channels are shown as the normalized `0.000..=1.000` the
+effect acts on; the two gain channels are shown in dB, on the same
+`-24..+24` map `src/control/mapping.rs` uses, so a centred gain pot reads
+approximately `+0.0 dB`.
 
 If it fails to start, the error says which device: an SPI error sends you back
 to steps 3–5, a GPIO error to step 5 or to the switch wiring.
 
 Then confirm, by hand:
 
-- each pot moves **its own** channel across the full `0..=1023` range, end to
-  end;
+- each of the six pots moves **its own** channel across the full `0..=1023`
+  range, end to end;
 - no channel moves when a *different* pot is turned — a channel that follows the
   wrong knob is a swapped wiper, and the channel order in step 2 is what fixes
   it;
-- `Bypass` reads `pressed` only while the switch is held down, and returns to
-  `released` when you let go. A `Bypass` that never changes points at the switch
-  wiring or at a latching switch; one that reads `pressed` with nothing touched
-  points at a permanent short to ground.
+- each gain pot reads close to `+0.0 dB` at the centre of its travel, and
+  `-24.0` / `+24.0 dB` at its stops;
+- `Bypass` changes when you throw the switch and then **stays** where you put
+  it. `engaged` is the pin pulled low, i.e. the switch closed, which is the
+  bypassed position. A `Bypass` that never changes points at the switch wiring;
+  one that springs back on its own points at a momentary switch fitted by
+  mistake.
 
 The full pass record for this check, and the idle-jitter measurement that comes
 next, are in

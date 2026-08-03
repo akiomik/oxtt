@@ -151,7 +151,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `src/dsp/smooth.rs` — parameter-smoothing tests
-- `src/control/` — control-surface conditioning (jitter filter, deadband, bypass latch), the control thread and its handoff, and, only under `--features pi-controls`, the MCP3008 command/response encoding
+- `src/control/` — control-surface conditioning (jitter filter, deadband, bypass override), the control thread and its handoff, and, only under `--features pi-controls`, the MCP3008 command/response encoding
 
 See `contracts.md` for the guarantees those tests protect.
 

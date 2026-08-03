@@ -8,8 +8,8 @@ This document describes the internal architecture of the `oxtt` DSP engine, its 
 main.rs
   -> cli::Cli::parse              CLI parsing (clap), presets, per-field validation
   -> control::ControlHandle::spawn  control thread (--controls, `pi-controls` builds only)
-       -> control::PiControls        layer A: MCP3008 pots on SPI0/CE0, bypass switch on GPIO17
-       -> control::ControlMapping    layer B: jitter filter, deadband, bypass latch -> OttParams
+       -> control::PiControls        layer A: six MCP3008 pots on SPI0/CE0, latching bypass switch on GPIO17
+       -> control::ControlMapping    layer B: jitter filter, deadband, bypass override -> OttParams
        -> triple_buffer::Input       layer C: publishes snapshots toward the audio callback
   -> jack_host::run               JACK client lifecycle, port registration
        -> AudioProcessHandler     audio callback (real-time thread)
@@ -60,7 +60,7 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 
 With a control surface attached, two more owners exist, both outside the DSP:
 
-- `ControlMapping` (`src/control/mapping.rs`), owned by the control thread, holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state, the deadband reference, and the last published value — all in ADC counts — and the debounced switch level and bypass latch. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the ADC channel order through to the mapped parameters.
+- `ControlMapping` (`src/control/mapping.rs`), owned by the control thread, holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in ADC counts — and, once per mapping rather than per pot, the last published `OttParams` snapshot and the debounced switch position. The switch latches mechanically, so that position *is* the bypass state rather than an input to a software latch, and while it is engaged the published `depth` is 0 and both published gains are unity. The last published value is a whole snapshot rather than counts because the bypass is applied after the counts have become domain values: unity gain is not count 0. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward`/`input_gain`/`output_gain` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the ADC channel order through to the mapped parameters.
 - `ControlHandle` (`src/control/thread.rs`) owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `OttParams` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side.
 
 Neither of those owns any DSP state, and `OttProcessor` is unaware that they exist: a control snapshot reaches it only through the same `set_params` the CLI path uses.

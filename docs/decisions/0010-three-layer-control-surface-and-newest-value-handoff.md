@@ -2,14 +2,25 @@
 
 ## Status
 
-Accepted
+Accepted, with the points marked **Revised** below changed since.
+
+The layering, the seam, the newest-value handoff and the failure policy stand as
+originally accepted. What changed is the panel: the surface gained two more
+potentiometers (input and output gain, on MCP3008 CH4 and CH5), the momentary
+bypass switch was replaced by a mechanically latching one, and the bypass now
+pins both gains to unity alongside `depth`. This ADR is not superseded — a
+superseding ADR would have to re-argue the three layers, which nothing here
+disturbs — so the four affected points are rewritten in place and marked, each
+one keeping the reasoning it replaces. In most of them what was deleted is the
+part worth remembering. The Context below is left as it was written, describing
+the surface the decision was originally taken against.
 
 ## Context
 
 The end goal is a pedal, so the parameters have to come off a panel rather than
-off a command line. The first physical control surface is four potentiometers —
+off a command line. The first physical control surface was four potentiometers —
 Depth, Time, Upward, Downward — on an MCP3008 SPI ADC, plus one momentary
-bypass switch on a GPIO pin. The wiring is verified on the assembled hardware
+bypass switch on a GPIO pin. That wiring was verified on the assembled hardware
 (see [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)).
 
 Three facts constrain how that reaches the running DSP.
@@ -87,20 +98,60 @@ with the re-check rule kept next to the constants themselves in
   filter and deadband in layer B rather than being handed across the boundary
   for the DSP to smooth away.
 
-- **Let the control surface outrank the CLI for its four parameters, from the
-  first successful read.** `--depth`, `--time`, `--upward` and `--downward`
-  describe only the state before the hardware has been read once; from that
-  read onward the pots own those four fields. Every other parameter is passed
-  through from the CLI untouched. The alternative — treating the CLI as a
-  baseline the pots offset, or requiring the pots to be swept to "pick up" the
-  CLI value — makes the panel lie about what the effect is doing, which is the
-  one thing a physical control must not do.
+- **Revised. Let the control surface outrank the CLI for its six parameters,
+  from the first successful read.** `--depth`, `--time`, `--upward`,
+  `--downward`, `--input-gain` and `--output-gain` describe only the state
+  before the hardware has been read once; from that read onward the pots own
+  those six fields. Every other parameter is passed through from the CLI
+  untouched. The alternative — treating the CLI as a baseline the pots offset,
+  or requiring the pots to be swept to "pick up" the CLI value — makes the panel
+  lie about what the effect is doing, which is the one thing a physical control
+  must not do.
 
-- **Make the bypass switch an effect bypass: `depth = 0`,** not a crossfade to
-  the raw input. ADR 0004 carries the phase argument; nothing about a panel
-  switch changes it. Because the switch is momentary, "bypassed" is latched
-  software state that a debounced press toggles and a release leaves alone,
-  and the other three pots keep working while it is engaged.
+  Originally four fields: the two gain pots on CH4 and CH5 came later. They map
+  linearly across the whole of `IoGain`'s existing `[-24, 24]` dB range rather
+  than a narrower span, so unity falls at the centre of the rotation — the
+  position a player can find without looking, and the one a gain knob should
+  mean "unchanged" at. A `+12` dB cap was considered and rejected: the number
+  came from nowhere, and an arbitrary constant that changes the knob's
+  dB-per-degree cannot be justified.
+
+- **Revised. Make the bypass switch an effect bypass — `depth = 0` and both
+  gains at unity —** not a crossfade to the raw input. ADR 0004 carries the
+  phase argument; nothing about a panel switch changes it. The switch is a
+  mechanically latching (alternate-action) part, so its debounced *position* is
+  the bypass state: there is no press to detect and no software latch to keep.
+  Time, Upward and Downward keep working while it is engaged, so disengaging
+  brings back an effect set up meanwhile rather than a stale one.
+
+  Two things were revised here, and both were revised because the original was
+  wrong in a way only the panel could show.
+
+  The switch was momentary, which made "bypassed" latched software state that a
+  debounced press toggled and a release left alone. A momentary switch's panel
+  can never say what that state is, so the startup state had to be *invented*:
+  the first reading was declared a baseline rather than an edge, and a run came
+  up un-bypassed however the switch was sitting. A latching switch makes
+  position and state the same object, so that rule has no reason to exist and is
+  deleted along with the latch variable and the press-edge detection. A switch
+  resting bypassed at startup now comes up bypassed — the opposite of before,
+  and simply what the panel says. The debounce survives and is sized up, because
+  a switch thrown by a hand makes and breaks for as long as the movement lasts
+  rather than for the single digits a snap-action contact bounces for.
+
+  And the bypass pinned only `depth`, leaving the gains live. Pinning them too
+  matches how a pedal's bypass works — true and buffered bypass both route
+  around the effect circuit, and the level control is a component inside it, so
+  the bypassed signal is the fixed reference a player sets the engaged level
+  against. It also makes the surface consistent: at `depth = 0` the per-band
+  lerp weight is already zero (ADR 0004), so Time, Upward and Downward are
+  *already* inaudible, and leaving the gains live would mean four knobs inert
+  and two live. Most of all it is safer — with the gains pinned the bypassed
+  output cannot exceed the input, so bypass is a guaranteed-unity escape rather
+  than something that could put up to 48 dB on the signal at the moment it is
+  most likely to be reached for. It remains an *effect* bypass, since the signal
+  still travels the crossover split-and-reconstruct path, but it is now the
+  closest approximation to the dry signal this architecture allows.
 
 - **Treat a hardware read failure as survivable and an acquisition failure at
   startup as fatal.** A failed read publishes nothing, is counted, and leaves
@@ -119,7 +170,7 @@ with the re-check rule kept next to the constants themselves in
   against a vendor `no_std` HAL, but also loses the `clap` CLI that supplies
   layer B's base parameters (ADR 0009, finding 4), so the base parameter set
   becomes compiled-in preset data there. In every case the conditioning, the
-  parameter mapping, the deadband, the debounce and the bypass latch move
+  parameter mapping, the deadband, the debounce and the bypass override move
   unchanged.
 
 - The callback never sees intermediate knob positions. At the 2 ms poll
@@ -130,17 +181,35 @@ with the re-check rule kept next to the constants themselves in
   (`docs/architecture.md`), which is far longer than anything dropped between
   polls.
 
-- The four pot-driven CLI flags become startup-only values under `--controls`.
-  A run that wants CLI control of those four does not pass `--controls`; the
-  flag is opt-in even in a `pi-controls` build, so the same binary still runs
-  on a Pi with no breadboard attached, which is how the audio-stability scripts
-  under `scripts/` invoke it.
+- **Revised.** The six pot-driven CLI flags become startup-only values under
+  `--controls`. A run that wants CLI control of those six does not pass
+  `--controls`; the flag is opt-in even in a `pi-controls` build, so the same
+  binary still runs on a Pi with no breadboard attached, which is how the
+  audio-stability scripts under `scripts/` invoke it. Originally four flags; the
+  two gain flags joined them with the gain pots.
 
-- Bypass state does not survive a restart, and it cannot be read off the panel:
-  a momentary switch has no position to read. A run started with the switch
-  held down comes up un-bypassed, because the first reading is a baseline
-  rather than an edge. An indicator LED, when the enclosure gets one, is what
-  makes the latch visible; nothing in this decision provides that yet.
+  `--preset` narrows correspondingly, and further than the count suggests.
+  [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) records
+  that `SafeStart` and `Default` differ only in global `depth` and
+  `output_gain_db`, and the surface now owns both, so under `--controls` today's
+  two presets select identical behaviour — what is left for `--preset` to choose
+  is the per-band values and the crossover pair, which the two share. This is a
+  fact about the two presets that exist, not a reason to change either: a future
+  preset that differs in its band values, which ADR 0006 requires a new tuning
+  to be, makes the choice meaningful again.
+
+- **Revised.** Bypass state survives a restart in the only way that matters: it
+  is written on the panel. The switch latches, so a run started with it in the
+  bypassed position comes up bypassed, and the panel and the software cannot
+  disagree.
+
+  This is the reverse of the original consequence, and the reversal is the point
+  of the part change. With the momentary switch, "bypassed" was software state
+  with no physical representation — the panel had no position to read, a run
+  started with the switch held down came up un-bypassed because the first
+  reading was a baseline rather than an edge, and an indicator LED was the only
+  way the state could ever have become visible. A latching switch is that
+  indicator, mechanically, and needs no enclosure work to become one.
 
 - A control surface that is failing intermittently is not obvious from the
   audio, by design: the effect simply stops responding to the knobs while
@@ -165,8 +234,11 @@ with the re-check rule kept next to the constants themselves in
 ## References
 
 - [ADR 0004](0004-no-raw-dry-mix.md) — why `depth` never blends against the raw
-  input, and therefore why the panel bypass is `depth = 0` rather than a raw
-  bypass.
+  input, and therefore why the panel bypass is `depth = 0` with both gains at
+  unity rather than a raw bypass.
+- [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) — the two
+  presets' only differences are both surface-owned fields, which is why
+  `--preset` chooses nothing today under `--controls`.
 - [ADR 0009](0009-hardware-platform-choice-reopened.md) — the open platform
   question, Bela's synchronous reads inside `render()`, and the asymmetric
   control-layer migration cost this ADR's layering is shaped around.
@@ -179,7 +251,8 @@ with the re-check rule kept next to the constants themselves in
   — the wiring this decision assumes, and how SPI0 is enabled and confirmed to
   be the header's bus rather than the SoC's boot-flash controller.
 - [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
-  — the idle-jitter measurement behind the filter and deadband constants, and
-  the hardware verification of the assembled surface.
+  — the idle-jitter measurement behind the filter and deadband constants, which
+  stands, and the functional hardware checks, which were performed against the
+  behaviour the revisions above replace and are re-listed there as outstanding.
 - [`triple_buffer`](https://docs.rs/triple_buffer/) — the wait-free
   single-producer/single-consumer newest-value handoff used for layer C.

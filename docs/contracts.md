@@ -65,7 +65,7 @@ The host uses JACK's assigned sample rate and buffer size. It reports connection
 
 ## 8. Control surface
 
-This section applies to a run with a physical control surface attached: four potentiometers and a momentary bypass switch (`--controls`, available only in a `pi-controls` build). A run without one behaves exactly as sections 1–7 describe, including its exit report.
+This section applies to a run with a physical control surface attached: six potentiometers and a latching bypass switch (`--controls`, available only in a `pi-controls` build). A run without one behaves exactly as sections 1–7 describe, including its exit report.
 
 Separation from the audio callback:
 
@@ -82,13 +82,16 @@ Failure behaviour:
 
 Parameter ownership:
 
-- `depth`, `time`, `upward`, and `downward` are owned by the control surface from its first successful read onward. The CLI values for those four describe only the state before that read.
-- Every other parameter — input/output gain, the crossover pair, all per-band values — is passed through from the CLI unchanged; no control is wired to it.
+- `depth`, `time`, `upward`, `downward`, input gain, and output gain are owned by the control surface from its first successful read onward. The CLI values for those six describe only the state before that read.
+- Every other parameter — the crossover pair, all per-band values — is passed through from the CLI unchanged; no control is wired to it.
+- `--preset` therefore selects only the per-band values and the crossover pair. `SafeStart` and `Default` differ only in global `depth` and `output_gain_db` (`docs/decisions/0006-preset-band-values-are-a-compatibility-contract.md`), both of which the control surface owns, so today's two presets select identical behaviour under `--controls`. A future preset that differs in its band values — which that decision requires a new tuning to be — makes the choice meaningful again.
+- The two gain controls sweep the whole `[-24, 24]` dB range of section 1, linearly across their travel, so unity gain is at the centre of the rotation.
 - Every snapshot the control surface publishes is a complete `OttParams` that satisfies section 1.
 
 Bypass:
 
-- The bypass is an effect bypass: while engaged the published `depth` is 0 regardless of the Depth control, and the signal stays on the input-gain/crossover-reconstruction/output-gain path (section 4). It is never a raw-signal bypass.
-- The switch is momentary, so bypass is latched state: a debounced press toggles it, a release does not, and contact bounce toggles it exactly once per press.
-- The other three parameters keep tracking their controls while bypassed. Disengaging the bypass restores the Depth control's position at that moment, not the position it held when the bypass was engaged.
-- A switch already held down when the process starts is a baseline, not a press: the run comes up un-bypassed.
+- The bypass is an effect bypass: while engaged the published `depth` is 0 and both published gains are unity, regardless of where the Depth, Input Gain and Output Gain controls sit, and the signal stays on the input-gain/crossover-reconstruction/output-gain path (section 4). It is never a raw-signal bypass.
+- Because both gains are pinned to unity, the bypassed output cannot exceed the input: bypass is a guaranteed-unity escape, not a gain stage.
+- The switch latches mechanically, so its debounced position *is* the bypass state; there is no press to detect and nothing to toggle. A new position is adopted once it has survived 15 consecutive reads (28 ms at the 2 ms poll interval, so up to 30 ms between the throw and the parameters following), which is what makes the contact bounce of a single throw produce exactly one state change.
+- `time`, `upward`, and `downward` keep tracking their controls while bypassed. Disengaging the bypass restores the Depth and gain controls' positions at that moment, not the positions they held when the bypass was engaged.
+- A switch resting in the bypassed position when the process starts comes up bypassed: the panel position is the state, from the first reading onward.
