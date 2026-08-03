@@ -15,7 +15,10 @@ use rppal::gpio::{Gpio, Level};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 
 const BYPASS_GPIO: u8 = 17;
-const SPI_CLOCK_HZ: u32 = 1_000_000;
+// Lower than the MCP3008's ~1.35-2 MHz ceiling at 3.3V (MCP3008 datasheet):
+// breadboard jumpers pick up noise more readily at higher clock rates, and
+// this tool cares about clean wiring verification, not throughput.
+const SPI_CLOCK_HZ: u32 = 500_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Reads one MCP3008 channel (0-7) in single-ended mode and returns the raw
@@ -24,11 +27,6 @@ fn read_channel(spi: &Spi, channel: u8) -> Result<u16, rppal::spi::Error> {
     let write = [0x01, (0x08 | channel) << 4, 0x00];
     let mut read = [0u8; 3];
     spi.transfer(&mut read, &write)?;
-    // Temporary debug aid: a genuine full-scale conversion echoes 0x03 in
-    // read[1] (only the 2 valid high bits set); if MISO isn't actually
-    // driven by the MCP3008, it tends to read back as all-0xff instead.
-    // Remove once the CH0-3 wiring is confirmed.
-    eprintln!("CH{channel} raw={read:02x?}");
     Ok((u16::from(read[1] & 0x03) << 8) | u16::from(read[2]))
 }
 
