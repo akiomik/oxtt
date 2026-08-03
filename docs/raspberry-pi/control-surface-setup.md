@@ -106,29 +106,34 @@ Wire everything with the Pi **powered off and unplugged**.
 
 ### Pin map
 
-Pins are given in BCM numbering throughout, which is what `rppal`,
-`src/control/pi.rs`, and `oxtt-pi-tools` use.
+Software uses BCM numbering — that is what `rppal`, `src/control/pi.rs`, and
+`oxtt-pi-tools` speak. Your hands use physical header positions. Both are given
+below, because confusing the two is the one wiring mistake that damages the Pi
+rather than merely failing to read.
 
-| Signal | Pi 5 GPIO (BCM) | Goes to |
-| --- | --- | --- |
-| SPI SCLK | GPIO11 | MCP3008 `CLK` |
-| SPI MOSI | GPIO10 | MCP3008 `DIN` |
-| SPI MISO | GPIO9 | MCP3008 `DOUT` |
-| SPI CE0 | GPIO8 | MCP3008 `CS/SHDN` |
-| Bypass switch | GPIO17 | one switch terminal; the other terminal to GND |
+| Signal | BCM | Header pin | MCP3008 pin | MCP3008 signal |
+| --- | --- | ---: | ---: | --- |
+| SPI SCLK | GPIO11 | 23 | 13 | `CLK` |
+| SPI MOSI | GPIO10 | 19 | 11 | `DIN` |
+| SPI MISO | GPIO9 | 21 | 12 | `DOUT` |
+| SPI CE0 | GPIO8 | 24 | 10 | `CS/SHDN` |
+| 3.3 V | — | 1 (or 17) | 16 | `VDD` |
+| 3.3 V | — | 1 (or 17) | 15 | `VREF` |
+| Ground | — | 6, 9, 14, 20, 25, 30, 34, 39 | 14 | `AGND` |
+| Ground | — | as above | 9 | `DGND` |
 
-Plus the supply and analog side:
+`DIN` on the ADC is the Pi's **MOSI** and `DOUT` is the Pi's **MISO**. The two
+names invite exactly one transposition, and it is silent: the transfer completes
+and returns zeros.
 
-| MCP3008 pin | Goes to |
-| --- | --- |
-| `VDD` | Pi 3.3 V |
-| `VREF` | Pi 3.3 V |
-| `AGND` | common ground |
-| `DGND` | common ground |
-| `CH0` | Depth pot wiper |
-| `CH1` | Time pot wiper |
-| `CH2` | Upward pot wiper |
-| `CH3` | Downward pot wiper |
+The analog side, and the switch:
+
+| MCP3008 pin | MCP3008 signal | Goes to |
+| ---: | --- | --- |
+| 1 | `CH0` | Depth pot wiper |
+| 2 | `CH1` | Time pot wiper |
+| 3 | `CH2` | Upward pot wiper |
+| 4 | `CH3` | Downward pot wiper |
 
 Each pot is a divider: top terminal to 3.3 V, bottom terminal to ground, wiper
 to its MCP3008 channel. The channel order matches `CHANNEL_DEPTH = 0`,
@@ -136,17 +141,28 @@ to its MCP3008 channel. The channel order matches `CHANNEL_DEPTH = 0`,
 `src/control/pi.rs`; swapping two pots here silently swaps two knobs on the
 panel, and nothing downstream can tell.
 
-Two things this table does *not* give you, on purpose:
+| Signal | BCM | Header pin | Goes to |
+| --- | --- | ---: | --- |
+| Bypass switch | GPIO17 | 11 | one switch terminal; the other terminal to a ground pin |
 
-- **Physical header pin positions.** Confirm the physical pin for each BCM
-  number, and for 3.3 V and GND, against the official pinout for your board
-  before you push a jumper in. A BCM-to-physical mistake is the one wiring
-  mistake that can damage the Pi rather than just failing to read.
-- **MCP3008 package pin numbers.** Locate `VDD`, `VREF`, `AGND`, `DGND`, `CLK`,
-  `DIN`, `DOUT`, `CS/SHDN` and `CH0`–`CH3` on the datasheet pinout for the
-  DIP-16 package you actually have, and note that `DIN` on the ADC is the Pi's
-  *MOSI* and `DOUT` is the Pi's *MISO* — the two names invite exactly one
-  transposition.
+### Orienting the MCP3008 in its socket
+
+The package has a notch at one end. **With the notch toward you, pin 1 (`CH0`)
+and pin 16 (`VDD`) are the two pins nearest the notch** — pin 1 on the left of
+it, pin 16 on the right — and numbering runs 1–8 down the left side and 9–16 up
+the right. Seating the chip 180° out is easy, survivable only sometimes, and
+presents as every channel reading garbage.
+
+Establish which end of the 40-pin header is pin 1 the same way — deliberately,
+before pushing anything in. Odd pins run down one row and even pins down the
+other, so getting the *end* right settles every other position. Rather than rely
+on a remembered landmark, confirm it against the official pinout for your board
+and then verify electrically once the Pi is powered: pin 1 must read 3.3 V and
+pin 6 must read 0 V. If those two do not agree, you are counting from the wrong
+end, and every jumper is off by the width of the header.
+
+The BCM-to-header pairs above are the standard 40-pin layout, which Raspberry
+Pi 5 shares with earlier 40-pin models.
 
 ### Why GPIO8–11 and not some other SPI mapping
 
@@ -161,10 +177,9 @@ switch), so this is a mapping to keep rather than to re-derive.
 
 **With the Pi unplugged**, on continuity/resistance:
 
-1. Every signal in the two tables above: probe from the header pin to the far
-   end of the jumper, at the component, and confirm continuity. Do this per
-   connection rather than by eye — a jumper one row off on a breadboard looks
-   correct.
+1. Every signal in the tables above: probe from the header pin to the far end of
+   the jumper, at the component, and confirm continuity. Do this per connection
+   rather than by eye — a jumper one row off on a breadboard looks correct.
 2. Between the 3.3 V rail and ground: confirm there is **no** continuity, i.e.
    no short. Do this last, after everything is inserted, and before power.
 3. Across the switch: open when released, continuity when pressed. If it reads
@@ -173,17 +188,20 @@ switch), so this is a mapping to keep rather than to re-derive.
 
 **Then power the Pi on**, with nothing running, and measure voltages:
 
-4. MCP3008 `VDD` to ground, and `VREF` to ground: both **3.3 V**. Anything near
+4. Header pin 1 to header pin 6: **3.3 V**. This is the check that confirms you
+   are counting the header from the correct end, and everything below assumes it
+   passed.
+5. MCP3008 `VDD` to ground, and `VREF` to ground: both **3.3 V**. Anything near
    5 V means the supply jumper is on the wrong header pin — power off
    immediately.
-5. Each pot's top terminal to ground: 3.3 V. Each pot's bottom terminal to
+6. Each pot's top terminal to ground: 3.3 V. Each pot's bottom terminal to
    ground: 0 V.
-6. Each pot's wiper to ground, while turning that pot end to end: a smooth
+7. Each pot's wiper to ground, while turning that pot end to end: a smooth
    sweep from 0 V to 3.3 V. A wiper that jumps, sticks, or never reaches an end
    is a wiring or pot fault, and it is far cheaper to find here than to
    misdiagnose later as ADC jitter.
 
-Only after all six checks pass should any software touch the hardware.
+Only after all seven checks pass should any software touch the hardware.
 
 ## 3. Enable SPI0 on the 40-pin header
 
@@ -291,6 +309,12 @@ points at wiring or a disabled SPI0, `PiControlError::Gpio` at the pin or at
 permissions. Check access before you build anything, so that a permission
 problem does not get misread as a wiring problem.
 
+On the environment this document was validated on — 64-bit Raspberry Pi OS Lite
+with the default user — **this needed no configuration at all**: once SPI0 was
+enabled, the default user could open both devices with no group changes and no
+`sudo`. Expect the check below to pass. It is here because a failure at this
+point is otherwise easy to misread as a wiring fault.
+
 1. Ask the shell whether the current user can actually open the SPI device:
 
    ```sh
@@ -299,20 +323,19 @@ problem does not get misread as a wiring problem.
      || echo "spidev0.0 is NOT accessible by $(id -un)"
    ```
 
-2. If that reports no access, look at who *does* own the node, and at what
-   groups you are in:
+2. If — against expectation — that reports no access, look at who *does* own the
+   node, and at what groups you are in:
 
    ```sh
    ls -l /dev/spidev0.0 /dev/gpiochip*
    id -nG
    ```
 
-   **Which group owns these devices, and which file mode they carry, is
-   environment-dependent** — it is set by your distribution's udev rules, not by
-   anything in this repository, and it differs between images and releases.
-   Read the owning group out of the `ls -l` output above and add your user to
-   *that* group (then start a new login session so the membership takes effect).
-   Do not assume a group name from another guide.
+   Which group owns these devices and which file mode they carry comes from your
+   distribution's udev rules, not from anything in this repository, and differs
+   between images and releases. Read the owning group out of the `ls -l` output
+   and add your user to *that* group, then start a new login session so the
+   membership takes effect. Do not assume a group name from another guide.
 
 3. There is no equivalent one-line test for the GPIO character device, because
    which `gpiochip` carries the 40-pin header is firmware-dependent on a Pi 5
