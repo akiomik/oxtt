@@ -12,7 +12,7 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 
 ## What It Does
 
-Each stereo input is split into three bands (low / mid / high) using 4th-order Linkwitz-Riley crossovers, and each band gets an independent upward and downward compressor with its own attack/release timing. The three bands are summed back together and, at zero dry/wet depth, reconstruct the input's amplitude response exactly (see `docs/decisions/0001-phase-compensated-low-branch-crossover.md`).
+Each stereo input is split into three bands (low / mid / high) using 4th-order Linkwitz-Riley crossovers, and each band gets an independent upward and downward compressor with its own attack/release timing. The three bands are summed back together and, at zero dry/wet depth, reconstruct the input's amplitude response exactly (see [ADR 0001](docs/decisions/0001-phase-compensated-low-branch-crossover.md)).
 
 ## Requirements
 
@@ -32,13 +32,15 @@ The physical control surface is behind the optional `pi-controls` Cargo feature,
 cargo build --release --features pi-controls
 ```
 
+See [`docs/development.md`](docs/development.md) for local setup details, including macOS-specific notes.
+
 ## Run
 
 ```sh
 cargo run --release -- --preset safe-start
 ```
 
-`oxtt` connects to the JACK server under the client name `oxtt` and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them — connect them with `jack_connect`, a GUI patchbay, or the bundled `list_ports`/`connect_ports` helpers in the `oxtt-jack-tools` crate. See `docs/development.md` for local setup details, including macOS-specific notes.
+`oxtt` connects to the JACK server under the client name `oxtt` and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them — connect them with `jack_connect`, a GUI patchbay, or the bundled `list_ports`/`connect_ports` helpers in the `oxtt-jack-tools` crate.
 
 Run `cargo run --release -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
 
