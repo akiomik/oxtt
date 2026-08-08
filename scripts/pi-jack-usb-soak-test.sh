@@ -231,7 +231,7 @@ if ! jack_lsp >"$output_dir/control-plane-lsp.txt" 2>&1 || [[ ! -s "$output_dir/
 fi
 # jack_cpu_load streams samples until killed, so `timeout` always ends it with a
 # non-zero exit status even on success; judge it by its output instead.
-timeout 2s jack_cpu_load >"$output_dir/control-plane-cpu-load.txt" 2>&1 || true
+timeout -k 1s 2s jack_cpu_load >"$output_dir/control-plane-cpu-load.txt" 2>&1 || true
 grep -q 'jack DSP load' "$output_dir/control-plane-cpu-load.txt" || {
   printf '%s\n' 'jack_cpu_load did not answer the control plane' >&2
   exit 1
