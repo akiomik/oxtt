@@ -18,15 +18,15 @@ use super::raw::{ADC_MAX_COUNT, Pots, RawControls};
 /// One-pole low-pass coefficient applied to each pot's raw count, per read.
 ///
 /// Idle jitter on the assembled hardware, measured with `pi-tools` over 300
-/// readings per position on all four channels, has a standard deviation of
-/// 5.23–6.48 counts out of 1023 with the pots at full travel and 3.14–4.09
-/// counts at mid travel. The worst case is therefore σ ≈ 6.5, at the end
+/// readings per position on all six channels, has a standard deviation of
+/// 5.30–6.39 counts out of 1023 with the pots at full travel and 2.98–4.19
+/// counts at mid travel. The worst case is therefore σ ≈ 6.4, at the end
 /// stop rather than at mid scale — the opposite of what a divider's source
 /// impedance alone would predict, which is why it was measured rather than
 /// assumed.
 ///
 /// At 0.2 the filter attenuates white noise by exactly
-/// `sqrt(a / (2 - a))` = 1/3, taking that worst case down to σ ≈ 2.2 counts,
+/// `sqrt(a / (2 - a))` = 1/3, taking that worst case down to σ ≈ 2.1 counts,
 /// while reaching 63% of a step in 5 reads and 90% in 11, so a deliberate
 /// knob turn still tracks the hand that makes it.
 ///
@@ -38,9 +38,9 @@ const FILTER_COEFFICIENT: f32 = 0.2;
 
 /// Hysteresis deadband against the last published value, in ADC counts.
 ///
-/// Eight counts is 3.7 times the σ ≈ 2.2 that survives
+/// Eight counts is roughly 3.8 times the σ ≈ 2.1 that survives
 /// [`FILTER_COEFFICIENT`], so a motionless pot is quiet rather than provably
-/// silent: the residual is noise, and an excursion past 3.7σ still publishes
+/// silent: the residual is noise, and an excursion past 3.8σ still publishes
 /// every so often. That costs nothing audible — the value published then
 /// differs by under 1% of travel, and the DSP smooths it over 20 ms.
 ///
@@ -121,11 +121,13 @@ const BYPASSED_GAIN_DB: IoGain = IoGain::new_const(0.0);
 /// 20 ms smoothing dominates what is actually heard anyway
 /// (docs/architecture.md).
 ///
-/// This is provisional. Nothing here has been measured on the new part — the
-/// number is sized from the switch class, not from an oscilloscope — so it is
-/// the first thing to re-derive once the latching switch is on the board and
-/// `pi-tools` can count its transitions. The failure it guards against is
-/// visible in use: too small and a single throw publishes twice.
+/// This was sized from the switch class rather than an oscilloscope, and has
+/// since been confirmed on hardware: a live JACK session exercising the
+/// latching switch repeatedly produced exactly one state change per throw
+/// with no adjustment needed
+/// (`docs/raspberry-pi/control-surface-verification.md`). The failure it
+/// guards against is visible in use: too small and a single throw publishes
+/// twice.
 ///
 /// Raising the poll rate shortens the latency and weakens the debounce in
 /// exact proportion, which is the trade to re-make if the interval changes.
@@ -601,7 +603,7 @@ mod tests {
         );
 
         // Deliberately harsher than the hardware: the measured idle spread is
-        // 32 counts peak-to-peak over 300 readings (σ ≈ 6.5, see
+        // 32 counts peak-to-peak over 300 readings (σ ≈ 6.4, see
         // `FILTER_COEFFICIENT`), so ±20 exercises excursions beyond anything
         // a motionless pot was seen to produce.
         let jitter = [20_i32, -20, 15, -15, 10, -10, 18, -12, -20, 20];

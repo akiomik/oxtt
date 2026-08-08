@@ -251,8 +251,9 @@ with the re-check rule kept next to the constants themselves in
   — the wiring this decision assumes, and how SPI0 is enabled and confirmed to
   be the header's bus rather than the SoC's boot-flash controller.
 - [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
-  — the idle-jitter measurement behind the filter and deadband constants, which
-  stands, and the functional hardware checks, which were performed against the
-  behaviour the revisions above replace and are re-listed there as outstanding.
+  — the idle-jitter measurement behind the filter and deadband constants, and
+  the functional hardware checks against `contracts.md` §8, both passing on
+  the shipped six-pot/latching-switch surface; the ADC-removal check remains
+  outstanding there.
 - [`triple_buffer`](https://docs.rs/triple_buffer/) — the wait-free
   single-producer/single-consumer newest-value handoff used for layer C.
