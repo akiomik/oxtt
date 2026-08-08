@@ -1,14 +1,17 @@
 # Test scripts
 
-These scripts verify `oxtt` on a Raspberry Pi 5 running as a JACK client with a
-class-compliant USB audio interface, driven from the Pi host. They depend on a
-running JACK server and a physical loopback cable on that USB interface — they
-are **not** generic audio tests. They are also **test-only**: neither embeds an
-adopted period setting, and neither is meant to launch `oxtt` for normal playing.
-For the full procedure, pass criteria, and recorded results, see
+`pi-jack-usb-soak-test.sh` and `pi-jack-usb-latency-test.sh` verify `oxtt` on a
+Raspberry Pi 5 running as a JACK client with a class-compliant USB audio
+interface, driven from the Pi host. They depend on a running JACK server and a
+physical loopback cable on that USB interface — they are **not** generic audio
+tests. They are also **test-only**: neither embeds an adopted period setting,
+and neither is meant to launch `oxtt` for normal playing. For the full
+procedure, pass criteria, and recorded results, see
 [`docs/raspberry-pi/usb-audio-verification.md`](../docs/raspberry-pi/usb-audio-verification.md).
 
-Both require the Pi host setup from
+`pi-idle-jitter.sh` is unrelated to JACK or audio; see its own section below.
+
+Both audio scripts require the Pi host setup from
 [`docs/raspberry-pi/usb-audio-setup.md`](../docs/raspberry-pi/usb-audio-setup.md): a running JACK
 environment, realtime privileges, and release builds of both `oxtt` and the
 `oxtt-jack-tools` binaries (`soak_source`, `soak_recorder`, `soak_analyze`) under
@@ -92,3 +95,32 @@ Physical wiring: interface Phones L → interface Line/Instrument 3 input
 The `final:` line in `<output-dir>/result.txt` holds the most-converged
 `total roundtrip latency` in frames and ms; `roundtrip-latency.txt` keeps every
 update line so you can confirm the figure converged rather than drifted.
+
+## `pi-idle-jitter.sh` — control-surface idle jitter
+
+Captures readings from `oxtt-pi-tools` and reduces them to n/min/max/spread/sd
+per channel (Depth, Time, Upward, Downward, InputGain, OutputGain). This is
+unrelated to the two audio scripts above: no JACK, no USB audio interface, no
+`usb-audio-setup.md`. It needs SPI0 enabled and the control surface wired per
+[`docs/raspberry-pi/control-surface-setup.md`](../docs/raspberry-pi/control-surface-setup.md),
+and builds `oxtt-pi-tools` itself via `cargo run --release -p oxtt-pi-tools`.
+
+Move all six pots to the position being measured and leave them completely
+untouched before running — the result is only meaningful for a motionless pot.
+Run it again after repositioning to capture a different position; nothing here
+automates the physical move.
+
+| Argument | Meaning |
+| --- | --- |
+| `--readings` | Readings per channel (default `300`; 60 s at the tool's 200 ms poll interval) |
+
+```sh
+./scripts/pi-idle-jitter.sh
+```
+
+Prints one `n=... min=... max=... spread=... sd=...` line per channel to
+stdout; redirect or `tee` to save it. Exits non-zero, with a message per
+channel on stderr, if any channel got fewer readings than requested.
+
+For what this measures, why, and the recorded results, see
+[`docs/raspberry-pi/control-surface-verification.md`](../docs/raspberry-pi/control-surface-verification.md).

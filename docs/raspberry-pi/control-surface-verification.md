@@ -100,32 +100,15 @@ the duration of each: full travel (against the upper end stop) and mid travel
 six channels rather than one pot at a time; at `oxtt-pi-tools`'s 200 ms poll
 interval that is 60 seconds per capture.
 
-Take 300 readings and reduce them per channel — the first line of output is
-the tool's banner, so it is dropped:
+`scripts/pi-idle-jitter.sh` captures one position and reduces it to
+n/min/max/spread/sd per channel. Position all six pots, leave them untouched,
+then run it (redirect or `tee` to save the output):
 
 ```sh
-cargo run --release -p oxtt-pi-tools \
-  | head -n 301 | tail -n 300 \
-  | awk '
-      {
-        for (i = 1; i <= NF; i++) {
-          if (split($i, kv, "=") == 2 && kv[1] ~ /^(Depth|Time|Upward|Downward|InputGain|OutputGain)$/) {
-            c = kv[1]; v = kv[2] + 0
-            n[c]++; sum[c] += v; sq[c] += v * v
-            if (n[c] == 1 || v < min[c]) min[c] = v
-            if (n[c] == 1 || v > max[c]) max[c] = v
-          }
-        }
-      }
-      END {
-        split("Depth Time Upward Downward InputGain OutputGain", order, " ")
-        for (i = 1; i <= 6; i++) {
-          c = order[i]; mean = sum[c] / n[c]
-          printf "%-11s n=%3d min=%4d max=%4d spread=%3d sd=%.2f\n",
-                 c, n[c], min[c], max[c], max[c] - min[c], sqrt(sq[c] / n[c] - mean * mean)
-        }
-      }'
+scripts/pi-idle-jitter.sh
 ```
+
+Run it once per position.
 
 ### Results
 

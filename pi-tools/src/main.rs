@@ -23,6 +23,7 @@
 //! `engaged`/`disengaged` accordingly.
 
 use std::error::Error;
+use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
@@ -65,7 +66,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let spi = Spi::new(Bus::Spi0, SlaveSelect::Ss0, SPI_CLOCK_HZ, Mode::Mode0)?;
     let bypass_pin = Gpio::new()?.get(BYPASS_GPIO)?.into_input_pullup();
 
-    println!("Reading MCP3008 CH0-5 and Bypass (GPIO{BYPASS_GPIO}). Ctrl+C to stop.");
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+
+    if writeln!(
+        out,
+        "Reading MCP3008 CH0-5 and Bypass (GPIO{BYPASS_GPIO}). Ctrl+C to stop."
+    )
+    .is_err()
+    {
+        return Ok(());
+    }
 
     loop {
         let depth = read_channel(&spi, 0)?;
@@ -82,7 +93,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         // One sample per line, with every value as `Name=raw`, so the awk
         // reduction in docs/raspberry-pi/control-surface-verification.md can
         // pick out any channel by name.
-        println!(
+        let wrote = writeln!(
+            out,
             "Depth={depth} ({:.3}) Time={time} ({:.3}) Upward={upward} ({:.3}) Downward={downward} ({:.3}) InputGain={input_gain} ({:+.1} dB) OutputGain={output_gain} ({:+.1} dB) Bypass={bypass}",
             normalize(depth),
             normalize(time),
@@ -91,6 +103,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             gain_db(input_gain),
             gain_db(output_gain)
         );
+        // The reader closed the pipe (e.g. `head -n N` in a capture script) --
+        // that's an expected way for a consumer to stop listening, not a
+        // fault, so exit quietly instead of panicking on the write error.
+        if wrote.is_err() {
+            return Ok(());
+        }
 
         thread::sleep(POLL_INTERVAL);
     }
