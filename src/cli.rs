@@ -14,7 +14,7 @@ use crate::params::{
     version,
     about,
     long_about = None,
-    after_help = "NOTE: `default` preset is intentionally strong and can exceed 0 dBFS.\nStart with `safe-start` and a low monitor level.",
+    after_help = "NOTE: `default` and `riot` presets are intentionally strong and can exceed 0 dBFS.\nStart with `safe-start` and a low monitor level.",
     allow_negative_numbers = true
 )]
 pub struct Cli {
@@ -120,6 +120,13 @@ mod tests {
         let cli = Cli::parse_from(["oxtt", "--preset", "default", "--output-gain", "-6"]);
         let params = OttParams::try_from(cli).unwrap();
         assert_eq!(params.global.output_gain_db.get(), -6.0);
+    }
+
+    #[test]
+    fn riot_selects_its_complete_v0_parameters() {
+        let cli = Cli::parse_from(["oxtt", "--preset", "riot"]);
+        let params = OttParams::try_from(cli).unwrap();
+        assert_eq!(params, Preset::Riot.params());
     }
 
     #[test]

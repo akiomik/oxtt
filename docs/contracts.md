@@ -84,7 +84,7 @@ Parameter ownership:
 
 - `depth`, `time`, `upward`, `downward`, input gain, and output gain are owned by the control surface from its first successful read onward. The CLI values for those six describe only the state before that read.
 - Every other parameter — the crossover pair, all per-band values — is passed through from the CLI unchanged; no control is wired to it.
-- `--preset` therefore selects only the per-band values and the crossover pair. `SafeStart` and `Default` differ only in global `depth` and `output_gain_db` (`docs/decisions/0006-preset-band-values-are-a-compatibility-contract.md`), both of which the control surface owns, so today's two presets select identical behaviour under `--controls`. A future preset that differs in its band values — which that decision requires a new tuning to be — makes the choice meaningful again.
+- `--preset` therefore selects only the per-band values and the crossover pair. `SafeStart` and `Default` differ only in global `depth` and `output_gain_db` (`docs/decisions/0006-preset-band-values-are-a-compatibility-contract.md`), both of which the control surface owns, so they select identical behaviour under `--controls`. `Riot` differs in its per-band values and crossover pair, so it remains meaningful with controls enabled.
 - The two gain controls sweep the whole `[-24, 24]` dB range of section 1, linearly across their travel, so unity gain is at the centre of the rotation.
 - Every snapshot the control surface publishes is a complete `OttParams` that satisfies section 1.
 

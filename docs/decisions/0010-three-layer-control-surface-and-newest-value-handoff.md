@@ -191,12 +191,11 @@ with the re-check rule kept next to the constants themselves in
   `--preset` narrows correspondingly, and further than the count suggests.
   [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) records
   that `SafeStart` and `Default` differ only in global `depth` and
-  `output_gain_db`, and the surface now owns both, so under `--controls` today's
-  two presets select identical behaviour — what is left for `--preset` to choose
-  is the per-band values and the crossover pair, which the two share. This is a
-  fact about the two presets that exist, not a reason to change either: a future
-  preset that differs in its band values, which ADR 0006 requires a new tuning
-  to be, makes the choice meaningful again.
+  `output_gain_db`, and the surface now owns both, so under `--controls` those
+  presets select identical behaviour — what is left for `--preset` to choose is
+  the per-band values and the crossover pair, which those two share. `Riot` is
+  the new-tuning case ADR 0006 requires: its per-band values and crossover pair
+  differ, so it remains meaningful under `--controls`.
 
 - **Revised.** Bypass state survives a restart in the only way that matters: it
   is written on the panel. The switch latches, so a run started with it in the
@@ -236,9 +235,9 @@ with the re-check rule kept next to the constants themselves in
 - [ADR 0004](0004-no-raw-dry-mix.md) — why `depth` never blends against the raw
   input, and therefore why the panel bypass is `depth = 0` with both gains at
   unity rather than a raw bypass.
-- [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) — the two
-  presets' only differences are both surface-owned fields, which is why
-  `--preset` chooses nothing today under `--controls`.
+- [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) — the
+  compatibility contract that requires a distinct preset such as `Riot` for a
+  new band tuning.
 - [ADR 0009](0009-hardware-platform-choice-reopened.md) — the open platform
   question, Bela's synchronous reads inside `render()`, and the asymmetric
   control-layer migration cost this ADR's layering is shaped around.

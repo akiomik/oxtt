@@ -44,7 +44,7 @@ cargo run --release -- --preset safe-start
 
 Run `cargo run --release -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
 
-**Note:** the `default` preset is intentionally strong and can exceed 0 dBFS. Start with `safe-start` and a low monitor level.
+**Note:** the `default` and `riot` presets are intentionally strong and can exceed 0 dBFS. Start with `safe-start` and a low monitor level.
 
 ### `--controls`
 
