@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     let report_xruns_on_exit = cli.report_xruns_on_exit;
     #[cfg(feature = "pi-controls")]
     let controls_requested = cli.controls;
-    let params = match OttParams::try_from(cli) {
+    let params = match OttParams::try_from(cli.params) {
         Ok(params) => params,
         Err(e) => {
             eprintln!("oxtt: {e}");

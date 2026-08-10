@@ -46,6 +46,29 @@ Run `cargo run --release -- --help` for the full list of CLI options (gain, dept
 
 **Note:** the `default` and `riot` presets are intentionally strong and can exceed 0 dBFS. Start with `safe-start` and a low monitor level.
 
+## Offline preset comparison
+
+`oxtt-render` is a separate binary in the `oxtt` crate. It runs the same DSP
+without starting JACK, measures EBU R128 integrated loudness, and writes a
+loudness-matched render for preset comparison:
+
+```sh
+cargo run --release --bin oxtt-render -- \
+  --input drums.wav --output renders/riot.wav --raw-output renders/riot-raw.wav \
+  --preset riot
+```
+
+The default target is the input file's integrated loudness; use
+`--target-lufs -16` to select a fixed target instead. Its preset and global
+parameter flags (`--input-gain`, `--output-gain`, `--depth`, `--time`,
+`--upward`, `--downward`, and crossover flags) have exactly the same ranges and
+meaning as the JACK client.
+
+The renderer accepts **only stereo 32-bit IEEE-float WAV** input and always
+writes that format. It rejects integer WAV and other channel/sample formats
+instead of converting, quantizing, or clipping them. It never inserts a
+limiter; inspect the reported sample and true peaks before playback.
+
 ### `--controls`
 
 On a `pi-controls` build (see Build above) running on a Raspberry Pi 5, pass `--controls` to drive parameters from the physical control surface instead of the CLI flags:

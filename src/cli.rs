@@ -1,6 +1,6 @@
 //! Command-line argument definitions for the `oxtt` binary (docs/contracts.md §1).
 
-use clap::Parser;
+use clap::{Args, Parser};
 
 use crate::params::{
     ConfigError, CrossoverFreqHigh, CrossoverFreqLow, CrossoverSplit, IoGain, NormalizedF32,
@@ -9,15 +9,8 @@ use crate::params::{
 
 /// Command-line arguments for `oxtt`, a 3-band upward/downward multiband
 /// compressor for JACK (see `Cargo.toml` description).
-#[derive(Parser, Debug, Clone)]
-#[command(
-    version,
-    about,
-    long_about = None,
-    after_help = "NOTE: `default` and `riot` presets are intentionally strong and can exceed 0 dBFS.\nStart with `safe-start` and a low monitor level.",
-    allow_negative_numbers = true
-)]
-pub struct Cli {
+#[derive(Args, Debug, Clone)]
+pub struct ParamsArgs {
     /// startup preset
     #[arg(long, value_enum, default_value_t = Preset::default())]
     pub preset: Preset,
@@ -53,6 +46,21 @@ pub struct Cli {
     /// mid/high split, range 400..16000
     #[arg(long, value_name = "Hz")]
     pub high_crossover: Option<CrossoverFreqHigh>,
+}
+
+/// Command-line arguments for the JACK host.
+#[derive(Parser, Debug, Clone)]
+#[command(
+    version,
+    about,
+    long_about = None,
+    after_help = "NOTE: `default` and `riot` presets are intentionally strong and can exceed 0 dBFS.\nStart with `safe-start` and a low monitor level.",
+    allow_negative_numbers = true
+)]
+pub struct Cli {
+    /// Startup preset and global parameter overrides.
+    #[command(flatten)]
+    pub params: ParamsArgs,
 
     /// print the JACK xrun count to stderr after a normal exit
     #[arg(long)]
@@ -78,28 +86,36 @@ pub struct Cli {
 /// it additionally needs the sample rate, which isn't known until JACK
 /// reports it, so `OttParams::validate` is reached later, indirectly,
 /// through `OttProcessor::new` in `jack_host::run`.
-impl TryFrom<Cli> for OttParams {
+impl TryFrom<ParamsArgs> for OttParams {
     type Error = ConfigError;
 
-    fn try_from(cli: Cli) -> Result<Self, ConfigError> {
-        let mut params = cli.preset.params();
+    fn try_from(args: ParamsArgs) -> Result<Self, ConfigError> {
+        let mut params = args.preset.params();
 
-        params.global.input_gain_db = cli.input_gain.unwrap_or(params.global.input_gain_db);
-        params.global.output_gain_db = cli.output_gain.unwrap_or(params.global.output_gain_db);
-        params.global.depth = cli.depth.unwrap_or(params.global.depth);
-        params.global.time = cli.time.unwrap_or(params.global.time);
-        params.global.upward = cli.upward.unwrap_or(params.global.upward);
-        params.global.downward = cli.downward.unwrap_or(params.global.downward);
+        params.global.input_gain_db = args.input_gain.unwrap_or(params.global.input_gain_db);
+        params.global.output_gain_db = args.output_gain.unwrap_or(params.global.output_gain_db);
+        params.global.depth = args.depth.unwrap_or(params.global.depth);
+        params.global.time = args.time.unwrap_or(params.global.time);
+        params.global.upward = args.upward.unwrap_or(params.global.upward);
+        params.global.downward = args.downward.unwrap_or(params.global.downward);
 
-        let low_crossover_hz = cli
+        let low_crossover_hz = args
             .low_crossover
             .unwrap_or_else(|| params.global.crossover.low_hz());
-        let high_crossover_hz = cli
+        let high_crossover_hz = args
             .high_crossover
             .unwrap_or_else(|| params.global.crossover.high_hz());
         params.global.crossover = CrossoverSplit::try_new(low_crossover_hz, high_crossover_hz)?;
 
         Ok(params)
+    }
+}
+
+impl TryFrom<Cli> for OttParams {
+    type Error = ConfigError;
+
+    fn try_from(cli: Cli) -> Result<Self, ConfigError> {
+        cli.params.try_into()
     }
 }
 

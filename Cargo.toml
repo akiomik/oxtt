@@ -33,6 +33,8 @@ pi-controls = ["dep:rppal"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+ebur128 = "0.1.10"
+hound = "3.5.1"
 jack = { workspace = true }
 nutype = "0.7.0"
 rppal = { workspace = true, optional = true }
