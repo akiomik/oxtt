@@ -138,14 +138,12 @@ const BYPASS_DEBOUNCE_READS: u8 = 15;
 /// switch makes the two the same object, so a switch resting in the bypassed
 /// position at startup comes up bypassed.
 ///
-/// What an engaged bypass does is an *effect* bypass: `depth = 0` and both
-/// gains at unity, which keeps the signal on the split-and-reconstruct path
-/// and disables only the dynamics. It is not a raw dry signal, because the raw
-/// input and the reconstructed signal do not share a phase response and
-/// crossfading between them would comb-filter (ADR 0004, docs/contracts.md §4)
-/// — but with the gains pinned it is the closest approximation to the dry
-/// signal this architecture allows: flat within ±0.1 dB of the input across
-/// the audio band, at exactly the input's level (docs/contracts.md §4).
+/// What an engaged bypass does is an *effect* bypass: the DSP crossfades to
+/// the unity sum of the same raw-input crossover bands that feed the latent
+/// effect. It is not a raw dry signal, because the raw input and the
+/// reconstructed signal do not share a phase response and crossfading between
+/// them would comb-filter (ADR 0004, docs/contracts.md §4). The complete pot
+/// payload remains live in the latent effect branch, ready for disengage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BypassSwitch {
     /// The switch position currently believed: the last one to survive
@@ -235,7 +233,7 @@ struct Conditioned {
 ///
 /// The bypass switch is carried as an explicit, debounced level beside the
 /// complete pot snapshot. The DSP, rather than this conditioning layer,
-/// sequences depth and gains to the guaranteed-unity bypass state.
+/// crossfades its phase-coherent effect and guaranteed-unity bypass branches.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlMapping {
     base: OttParams,
@@ -270,7 +268,7 @@ impl ControlMapping {
     ///
     /// [`RawControls::bypass_engaged`] drives [`BypassSwitch`]: once debounced,
     /// the switch's position is the explicit effect-bypass request. The DSP
-    /// owns the resulting gain/depth sequencing (ADR 0004,
+    /// owns the resulting phase-coherent branch crossfade (ADR 0004,
     /// docs/contracts.md §4, §8).
     // Proves this function can never panic, the same way `OttProcessor::process`
     // does (docs/contracts.md §6), checked by `cargo test --release`. It matters

@@ -131,7 +131,7 @@ impl ThresholdRange {
 /// Global parameters shared across all bands (docs/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalParams {
-    /// Pre-split gain in dB.
+    /// Input gain applied to each raw crossover band in the effect branch, in dB.
     pub input_gain_db: IoGain,
     /// Post-sum gain in dB.
     pub output_gain_db: IoGain,
@@ -179,7 +179,8 @@ pub struct OttParams {
 /// depth and both gains. `bypass_engaged` is deliberately separate: a control
 /// client must never infer an effect-bypass request from a coincidental
 /// `depth = 0`, `input_gain_db = 0`, `output_gain_db = 0` parameter triple.
-/// The DSP uses the explicit level to sequence those values safely.
+/// The DSP uses the explicit level to crossfade its phase-coherent bypass and
+/// effect branches safely.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlSnapshot {
     /// Complete, validated parameter snapshot from the controls.

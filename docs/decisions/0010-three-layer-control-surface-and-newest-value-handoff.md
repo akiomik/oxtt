@@ -8,9 +8,9 @@ The layering, the seam, the newest-value handoff and the failure policy stand as
 originally accepted. What changed is the panel and bypass path: the surface
 gained two more potentiometers (input and output gain, on MCP3008 CH4 and CH5),
 the momentary bypass switch was replaced by a mechanically latching one, and an
-explicit bypass level now reaches a DSP transition that sequences `depth` and
-both gains. This ADR is not superseded — a superseding ADR would have to
-re-argue the three layers, which nothing here disturbs — so the affected points
+explicit bypass level now reaches a phase-coherent DSP crossfade. This ADR is
+not superseded — a superseding ADR would have to re-argue the three layers,
+which nothing here disturbs — so the affected points
 are rewritten in place and marked, each one keeping the reasoning it replaces.
 In most of them what was deleted is the part worth remembering. The Context
 below is left as it was written, describing the surface the decision was
@@ -118,16 +118,20 @@ with the re-check rule kept next to the constants themselves in
   came from nowhere, and an arbitrary constant that changes the knob's
   dB-per-degree cannot be justified.
 
-- **Revised. Make the bypass switch an effect bypass — `depth = 0` and both
-  gains at unity —** not a crossfade to the raw input. ADR 0004 carries the
-  phase argument; nothing about a panel switch changes it. The switch is a
-  mechanically latching (alternate-action) part, so its debounced *position* is
-  the bypass state: there is no press to detect and no software latch to keep.
-  Layer B transports that level separately from the current pot values; the DSP
-  never infers it from a parameter triple. On engage the DSP moves depth to zero
-  before moving both gains to unity; on disengage it restores the gains before
-  moving depth. Time, Upward and Downward keep working while bypass is engaged,
-  and the latest Depth and gain positions are retained for disengage.
+- **Revised. Make the bypass switch a phase-coherent effect bypass —** not a
+  crossfade to raw input. ADR 0004 carries the phase argument; nothing about a
+  panel switch changes it. The DSP splits sanitized raw input once per frame.
+  The bypass branch is the unity sum of those raw crossover bands, and the
+  effect branch uses the same bands after applying the smoothed input gain,
+  dynamics, and output gain. One 20 ms bypass-mix smoother crossfades those
+  branches. This leaves both endpoints on the same crossover phase history and
+  avoids the severe level dip caused by the previous intermediate `depth = 0`
+  effect path. The switch is mechanically latching (alternate-action), so its
+  debounced *position* is the bypass state: there is no press to detect and no
+  software latch to keep. Layer B transports that level separately from the
+  complete current pot values; the DSP never infers it from a parameter triple.
+  Time, Upward, Downward, Depth, both gains, crossover, and all band targets
+  keep updating the latent effect branch while bypass is engaged.
 
   Two things were revised here, and both were revised because the original was
   wrong in a way only the panel could show.
@@ -144,25 +148,14 @@ with the re-check rule kept next to the constants themselves in
   a switch thrown by a hand makes and breaks for as long as the movement lasts
   rather than for the single digits a snap-action contact bounces for.
 
-  And the bypass pinned only `depth`, leaving the gains live. Pinning them too
-  matches how a pedal's bypass works — true and buffered bypass both route
-  around the effect circuit, and the level control is a component inside it, so
-  the bypassed signal is the fixed reference a player sets the engaged level
-  against. It also makes the surface consistent: at `depth = 0` the per-band
-  lerp weight is already zero (ADR 0004), so Time, Upward and Downward are
-  *already* inaudible, and leaving the gains live would mean four knobs inert
-  and two live. Most of all it is safer — with the gains pinned the bypassed
-  output cannot exceed the input, so bypass is a guaranteed-unity escape rather
-  than something that could put up to 48 dB on the signal at the moment it is
-  most likely to be reached for. It remains an *effect* bypass, since the signal
-  still travels the crossover split-and-reconstruct path, but it is now the
-  closest approximation to the dry signal this architecture allows.
-
-  The first gain-enabled implementation published all three bypass targets at
-  once. Their independent 20 ms smoothers could traverse a level above both
-  steady endpoints. Carrying the bypass level explicitly and sequencing the
-  coupled targets in the DSP preserves the same steady-state decision without
-  that transient or a raw-signal crossfade.
+  The earlier gain-pinning design treated bypass as a sequence through a
+  zero-depth effect endpoint. Pi hardware showed that endpoint can be far below
+  both intended levels when the effect's gains are non-unity, in either throw
+  direction. The replacement is a genuine two-branch crossfade: the bypass
+  branch has no gain stage, so it is the guaranteed-unity crossover
+  reconstruction, and the effect branch keeps its complete current state. The
+  crossfade's finite `0.001` remaining-weight threshold makes its steady state
+  deterministic, and a reversal simply follows the latest requested level.
 
 - **Treat a hardware read failure as survivable and an acquisition failure at
   startup as fatal.** A failed read publishes nothing, is counted, and leaves
@@ -182,8 +175,8 @@ with the re-check rule kept next to the constants themselves in
   layer B's base parameters (ADR 0009, finding 4), so the base parameter set
   becomes compiled-in preset data there. In every case the conditioning, the
   parameter mapping, the deadband, the debounce and the explicit bypass level
-  move unchanged. The DSP consumes that level with the same coordinated
-  transition on every platform.
+  move unchanged. The DSP consumes that level with the same phase-coherent
+  crossfade on every platform.
 
 - The callback never sees intermediate knob positions. At the 2 ms poll
   interval a fast sweep is sampled at 500 Hz — just above the callback rate at
@@ -244,9 +237,9 @@ with the re-check rule kept next to the constants themselves in
 
 ## References
 
-- [ADR 0004](0004-no-raw-dry-mix.md) — why `depth` never blends against the raw
-  input, and therefore why the panel bypass is `depth = 0` with both gains at
-  unity rather than a raw bypass.
+- [ADR 0004](0004-no-raw-dry-mix.md) — why neither `depth` nor the panel
+  bypass crossfades against raw input; the panel bypass instead uses the same
+  crossover reconstruction as the effect branch.
 - [ADR 0006](0006-preset-band-values-are-a-compatibility-contract.md) — the
   compatibility contract that requires a distinct preset such as `Riot` for a
   new band tuning.

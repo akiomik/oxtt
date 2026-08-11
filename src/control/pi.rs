@@ -73,7 +73,7 @@ const CHANNEL_TIME: u8 = 1;
 const CHANNEL_UPWARD: u8 = 2;
 /// MCP3008 channel wired to the Downward pot (downward-compression multiplier).
 const CHANNEL_DOWNWARD: u8 = 3;
-/// MCP3008 channel wired to the Input Gain pot (pre-split gain in dB).
+/// MCP3008 channel wired to the Input Gain pot (per-effect-band input gain in dB).
 const CHANNEL_INPUT_GAIN: u8 = 4;
 /// MCP3008 channel wired to the Output Gain pot (post-sum gain in dB).
 const CHANNEL_OUTPUT_GAIN: u8 = 5;

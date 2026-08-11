@@ -63,7 +63,7 @@ pub struct Pots<T> {
     pub upward: T,
     /// The Downward pot (CH3), the downward-compression multiplier.
     pub downward: T,
-    /// The Input Gain pot (CH4), the pre-split gain in dB.
+    /// The Input Gain pot (CH4), the per-effect-band input gain in dB.
     pub input_gain: T,
     /// The Output Gain pot (CH5), the post-sum gain in dB.
     pub output_gain: T,

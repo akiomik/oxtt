@@ -33,7 +33,8 @@ use nutype::nutype;
 
 /// A gain value in dB, range `-24.0..=24.0` (docs/contracts.md §1).
 ///
-/// Used for the pre-split and post-sum gains, which are CLI-configurable.
+/// Used for the per-effect-band input and post-sum output gains, which are
+/// CLI-configurable.
 #[nutype(
     const_fn,
     validate(finite, greater_or_equal = -24.0, less_or_equal = 24.0),

@@ -32,16 +32,17 @@ Per stereo frame, `OttProcessor::process_frame` performs:
 
 ```
 input_l, input_r
-  -> input gain
-  -> Crossover::process_frame            3-band split, per channel
+  -> Crossover::process_frame            raw 3-band split, per channel
        low  = phase_comp(LP4_low(x))       phase-compensated (decisions/0001)
        mid  = LP4_high(HP4_low(x))
        high = HP4_high(HP4_low(x))
+  -> bypass branch: sum(raw low, mid, high)             unity reconstruction
+  -> effect branch: input gain per band
   -> per band: DualThresholdCompressor.process(detector_power(l, r))  (decisions/0002)
        wet_band    = band_input * dynamic_gain * makeup_gain
        band_output = lerp(band_input, wet_band, depth)                (decisions/0004)
-  -> sum(low, mid, high)
-  -> output gain
+  -> sum(effect low, mid, high) -> output gain
+  -> linear crossfade(effect, bypass reconstruction, bypass mix)
   -> finite-value guard (non-finite -> 0.0)
   -> output_l, output_r
 ```
@@ -87,6 +88,6 @@ The control surface crosses this boundary the same way. An MCP3008 conversion is
 
 ## Parameter Update Path
 
-`OttProcessor::set_params` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. `set_control_snapshot` is the explicit exception for the coordinated effect-bypass state machine: it stages depth and gain target changes rather than letting their independent smoothers move concurrently. A reversal while depth is moving first reaches the zero-depth waypoint, while a reversal at that waypoint immediately retargets gains in the latest direction. Gain updates received during the final depth-only stage are deferred until depth settles. A reset preserves the latest explicit bypass level and reconstructs the corresponding steady state immediately. See `contracts.md` (section 2) for the exact pre/postconditions.
+`OttProcessor::set_params` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. `set_control_snapshot` applies every parameter target to the latent effect branch and independently retargets one 20 ms bypass-mix smoother. The effect and bypass branches are built from one raw-input crossover split: the bypass branch is the unscaled three-band sum, while the effect branch applies input gain after that split and output gain after dynamics. Thus both crossfade endpoints share crossover phase history; the DSP never crossfades the reconstruction against raw input. A reversal simply follows the newest mix target. Reset preserves the latest explicit bypass level and snaps the mix to its corresponding endpoint. See `contracts.md` (section 2) for the exact pre/postconditions.
 
 A control snapshot enters through `set_control_snapshot`: the callback applies its complete parameter payload and explicit bypass level strictly after any pending sample-rate reset in the same cycle. `ControlMapping` seeds itself from its first reading rather than fading in from zero, for the same reason `OttProcessor::new` snaps its smoothers to their targets: there is no earlier state to have moved away from.

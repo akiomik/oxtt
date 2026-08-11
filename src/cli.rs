@@ -15,7 +15,7 @@ pub struct ParamsArgs {
     #[arg(long, value_enum, default_value_t = Preset::default())]
     pub preset: Preset,
 
-    /// pre-split gain, range -24..24
+    /// per-effect-band input gain, range -24..24
     #[arg(long, value_name = "dB")]
     pub input_gain: Option<IoGain>,
 

@@ -203,7 +203,9 @@ programme material.
 
 ### Results
 
-All checks passed.
+The original control-surface checks passed. The bypass-level observations below
+describe the superseded gain/depth-transition implementation; do not treat
+them as verification of the current phase-coherent crossfade.
 
 - **Both gain pots sweep independently.** CH4 and CH5 each moved only their
   own parameter — confirmed both via `oxtt-pi-tools` (independent channel
@@ -211,11 +213,10 @@ All checks passed.
 - **Unity is at the centre of each gain pot's rotation.** With both gain pots
   centred, the output level matched the input level on the audio interface's
   level meter.
-- **Bypass pins all three fields.** With Depth, Input Gain, and Output Gain
-  set to extremes, engaging bypass produced no visible change in output
-  level.
-- **The bypassed output does not exceed the input.** Confirmed on the level
-  meter with both gain pots at full travel, bypass engaged.
+- **Superseded: bypass pinned all three fields.** The former gain/depth
+  implementation forced Depth, Input Gain, and Output Gain to its bypass
+  endpoint. This is no longer its design; the current bypass is the unity
+  crossover reconstruction and leaves the latent effect targets current.
 - **A switch resting bypassed at startup comes up bypassed.** Confirmed.
 - **One throw of the switch produces exactly one state change.** Confirmed;
   `BYPASS_DEBOUNCE_READS = 15` needed no adjustment.
@@ -231,7 +232,12 @@ All checks passed.
 
 ### Required bypass-transition follow-up
 
-Not yet performed for the coordinated transition implementation: feed a sustained signal, set non-unity input and output gain positions, and observe the audio-interface level meter through both effect-to-bypass and bypass-to-effect throws. Record the measured endpoint and transition levels before marking this follow-up passed.
+The Pi check of the superseded gain/depth transition found a severe level dip,
+up to near-silence, in both effect-to-bypass and bypass-to-effect throws. The
+new phase-coherent crossfade has not yet been rechecked on hardware: feed a
+sustained signal, set non-unity input and output gain positions, and observe
+the audio-interface level meter through both directions. Record the measured
+endpoint, peak, and trough levels before marking this follow-up passed.
 
 ### Regression check
 
@@ -295,9 +301,13 @@ Met:
   `DEADBAND_COUNTS`.
 - A sustained live JACK session at 48 kHz `128×3` exercising every pot and the
   bypass switch, ending in `oxtt: xrun_count=0` and
-  `oxtt: control_read_failures=0`, with every pass criterion met.
+  `oxtt: control_read_failures=0`. Its bypass observations apply only to the
+  superseded gain/depth-transition implementation described in section 5.
 - `scripts/pi-jack-usb-soak-test.sh` passing against the current binary.
 
 Outstanding:
 
+- The phase-coherent crossfade's bilateral meter recheck: sustained signal,
+  non-unity input and output gains, and recorded endpoint, peak, and trough
+  levels for both effect-to-bypass and bypass-to-effect throws (section 5).
 - The ADC-removal check, with its reason and its limited scope recorded above.
