@@ -11,7 +11,7 @@
 //! per millisecond, so this layer needs to know neither the poll interval nor
 //! the sample rate. The caller's poll rate sets the effective time constant.
 
-use crate::params::{IoGain, NormalizedF32, OttParams};
+use crate::params::{ControlSnapshot, IoGain, NormalizedF32, OttParams};
 
 use super::raw::{ADC_MAX_COUNT, Pots, RawControls};
 
@@ -82,19 +82,6 @@ const GAIN_MIN_DB: f32 = -24.0;
 /// player can find without looking, and the one a gain knob should mean
 /// "unchanged" at.
 const GAIN_SPAN_DB: f32 = 48.0;
-
-/// The `depth` published while the bypass is engaged.
-///
-/// A `const` item rather than a call in [`BypassSwitch::applied_to`]: it makes
-/// the literal's validation a compile-time event, which is what keeps
-/// [`ControlMapping::update`]'s no-panic proof free of `new_const`'s panic
-/// branch.
-const BYPASSED_DEPTH: NormalizedF32 = NormalizedF32::new_const(0.0);
-
-/// The input and output gain published while the bypass is engaged, in dB.
-///
-/// Unity, for the same compile-time reason as [`BYPASSED_DEPTH`].
-const BYPASSED_GAIN_DB: IoGain = IoGain::new_const(0.0);
 
 /// How many consecutive identical readings the bypass switch's position must
 /// survive before it is believed.
@@ -205,47 +192,6 @@ impl BypassSwitch {
         self.engaged = engaged;
         self.disagreements = 0;
     }
-
-    /// Applies the bypass to an already-converted parameter snapshot.
-    ///
-    /// Three fields are overridden: `depth` to 0 and both gains to unity. The
-    /// Time, Upward and Downward pots keep working while bypassed, so
-    /// disengaging brings back an effect set up meanwhile rather than a stale
-    /// one — but the three fields below are *not* left live, for three reasons:
-    ///
-    /// - It is how a pedal's bypass works. True bypass and buffered bypass
-    ///   both route around the effect circuit, and the level control is a
-    ///   component inside that circuit, so on real hardware the level knob is
-    ///   dead while bypassed and the bypassed signal is the fixed reference a
-    ///   player sets the engaged level against.
-    /// - It makes the existing behaviour consistent. At `depth = 0` the
-    ///   per-band lerp weight is zero (ADR 0004), so Time, Upward and Downward
-    ///   are *already* inaudible. Leaving the gains live would mean four knobs
-    ///   inert and two live; zeroing them makes all six inert, which is exactly
-    ///   the "the box is out of the circuit" model the switch is meant to
-    ///   express.
-    /// - It is safer. With the gains pinned to unity the bypassed output cannot
-    ///   exceed the input, so bypass is a guaranteed-unity escape. Left live
-    ///   they could put the bypassed signal up to 48 dB above the input — the
-    ///   two gains are in series — which would make reaching for bypass
-    ///   *increase* risk at the moment it is most likely to be reached for.
-    ///
-    /// Applied here, after the counts have become domain values, rather than to
-    /// the counts themselves: unity gain is not count 0 but count 511.5, and
-    /// writing that constant into the bypass would put a number derived from
-    /// [`GAIN_MIN_DB`]/[`GAIN_SPAN_DB`] somewhere other than where that mapping
-    /// lives.
-    const fn applied_to(self, params: OttParams) -> OttParams {
-        if !self.engaged {
-            return params;
-        }
-
-        let mut bypassed = params;
-        bypassed.global.depth = BYPASSED_DEPTH;
-        bypassed.global.input_gain_db = BYPASSED_GAIN_DB;
-        bypassed.global.output_gain_db = BYPASSED_GAIN_DB;
-        bypassed
-    }
 }
 
 /// The conditioning and switch state, absent until the first
@@ -255,17 +201,15 @@ impl BypassSwitch {
 /// domains, rather than one. The deadband is hysteresis in the ADC's own
 /// units against where the *pots* were last taken seriously, so `reference`
 /// has to stay in counts and has to keep tracking the real pots even while
-/// bypassed — otherwise the band would be compared against a forced value and
-/// disengaging the bypass would jump. The publish decision, in contrast, has
-/// to be made against what the caller was actually last handed, which is a
-/// finished [`OttParams`]: turning a pot the bypass overrides moves the
-/// reference but must not publish, because the snapshot is unchanged.
+/// bypassed, so disengaging cannot restore stale positions. The publish
+/// decision, in contrast, has to be made against what the caller was actually
+/// last handed, which is a finished [`ControlSnapshot`]. Pot movements publish
+/// their current values even while bypass is engaged.
 ///
-/// Comparing whole snapshots rather than counts is what the bypass being
-/// applied *after* conversion forces, and it is the honest comparison anyway:
-/// the gate's job is "is this different from what I last handed out", and
-/// [`OttParams`] is `Copy` and `PartialEq`, so asking it directly costs a
-/// struct compare and needs no third representation of the same state.
+/// Comparing whole snapshots rather than counts also includes switch-only
+/// changes. The gate's job is "is this different from what I last handed out",
+/// and [`ControlSnapshot`] is `Copy` and `PartialEq`, so asking it directly
+/// costs a struct compare and needs no third representation of the same state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Conditioned {
     /// Low-pass filter state, in ADC counts.
@@ -274,8 +218,8 @@ struct Conditioned {
     /// cleared [`DEADBAND_COUNTS`], in ADC counts, and always the real pot
     /// positions — never the bypassed ones.
     reference: Pots<f32>,
-    /// The most recent published snapshot, after [`BypassSwitch::applied_to`].
-    published: OttParams,
+    /// The most recent published snapshot.
+    published: ControlSnapshot,
     /// The debounced bypass switch.
     bypass: BypassSwitch,
 }
@@ -289,9 +233,9 @@ struct Conditioned {
 /// of the base parameters — the crossover pair, all per-band values — is
 /// passed through unchanged, since no pot is wired to it.
 ///
-/// The bypass switch overrides three of those six: while [`BypassSwitch`] is
-/// engaged the published `global.depth` is 0 and both published gains are
-/// unity, regardless of where those three pots are.
+/// The bypass switch is carried as an explicit, debounced level beside the
+/// complete pot snapshot. The DSP, rather than this conditioning layer,
+/// sequences depth and gains to the guaranteed-unity bypass state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlMapping {
     base: OttParams,
@@ -311,10 +255,10 @@ impl ControlMapping {
     /// the one it published last: `FILTER_COEFFICIENT` first low-passes the
     /// raw counts, then `DEADBAND_COUNTS` compares the result against the
     /// deadband reference, then the reference is converted into an
-    /// [`OttParams`] and the bypass is applied to that. A motionless pot and an
-    /// untouched switch therefore yield `None` forever, which is what keeps the
-    /// transport layer from being handed a fresh snapshot on every poll for no
-    /// reason.
+    /// [`OttParams`] and paired with the debounced bypass level. A motionless
+    /// pot and an untouched switch therefore yield `None` forever, which is
+    /// what keeps the transport layer from being handed a fresh snapshot on
+    /// every poll for no reason.
     ///
     /// The very first call seeds the filter from the reading itself and
     /// publishes immediately, rather than starting from zero and fading in —
@@ -325,18 +269,15 @@ impl ControlMapping {
     /// bypassed.
     ///
     /// [`RawControls::bypass_engaged`] drives [`BypassSwitch`]: once debounced,
-    /// the switch's position *is* an *effect* bypass, which publishes
-    /// `depth = 0` and both gains at unity and leaves the other three pots
-    /// alone (ADR 0004, docs/contracts.md §4). Because the deadband keeps
-    /// tracking the real pots underneath, disengaging republishes their
-    /// positions *now*, not the positions they held when the bypass was
-    /// engaged.
+    /// the switch's position is the explicit effect-bypass request. The DSP
+    /// owns the resulting gain/depth sequencing (ADR 0004,
+    /// docs/contracts.md §4, §8).
     // Proves this function can never panic, the same way `OttProcessor::process`
     // does (docs/contracts.md §6), checked by `cargo test --release`. It matters
     // here for the same reason: on Bela this runs inside the real-time callback.
     // The tests below already call it, so no proof-only test is needed.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-    pub fn update(&mut self, raw: RawControls) -> Option<OttParams> {
+    pub fn update(&mut self, raw: RawControls) -> Option<ControlSnapshot> {
         let counts = raw.pots.map(|count| f32::from(count.get()));
         // Copied out before `self.state` is borrowed mutably below: `base` is
         // `Copy` and never changes, so the conversion takes it by value rather
@@ -349,7 +290,10 @@ impl ControlMapping {
                 // Unlike the old momentary latch, this is *not* a no-op on a
                 // freshly seeded switch: a switch resting in the bypassed
                 // position bypasses from the very first snapshot.
-                let published = bypass.applied_to(params_with_pots(base, counts));
+                let published = ControlSnapshot {
+                    params: params_with_pots(base, counts),
+                    bypass_engaged: bypass.engaged,
+                };
                 self.state = Some(Conditioned {
                     filtered: counts,
                     reference: counts,
@@ -369,10 +313,8 @@ impl ControlMapping {
 
                 // The deadband tracks the pots in their own units, so it is
                 // compared against `reference` and never against what was
-                // published: while bypassed the published depth is a forced
-                // zero and the published gains a forced unity, and comparing
-                // the band against those would make every position of the
-                // overridden pots look like a large move.
+                // published: while bypassed the true pot positions still
+                // travel in the snapshot, and the DSP performs the transition.
                 state.reference =
                     state
                         .filtered
@@ -386,16 +328,10 @@ impl ControlMapping {
 
                 state.bypass.update(raw.bypass_engaged);
 
-                // Against `published`, never against `reference`: a turn of an
-                // overridden pot made while bypassed moves the reference but
-                // not the snapshot, and re-publishing an identical snapshot on
-                // every poll is the exact thing the deadband exists to prevent.
-                // The comparison is of whole snapshots because the bypass is
-                // applied after conversion, so counts are no longer what the
-                // caller was handed (see [`Conditioned`]).
-                let next = state
-                    .bypass
-                    .applied_to(params_with_pots(base, state.reference));
+                let next = ControlSnapshot {
+                    params: params_with_pots(base, state.reference),
+                    bypass_engaged: state.bypass.engaged,
+                };
                 if next == state.published {
                     return None;
                 }
@@ -550,7 +486,11 @@ mod tests {
     }
 
     /// Feeds one reading in `reads` times, returning the last snapshot published.
-    fn feed(mapping: &mut ControlMapping, raw: RawControls, reads: usize) -> Option<OttParams> {
+    fn feed(
+        mapping: &mut ControlMapping,
+        raw: RawControls,
+        reads: usize,
+    ) -> Option<ControlSnapshot> {
         let mut last = None;
         for _ in 0..reads {
             if let Some(params) = mapping.update(raw) {
@@ -562,7 +502,7 @@ mod tests {
 
     /// Feeds a switch position in exactly [`BYPASS_DEBOUNCE_READS`] times,
     /// which is the shortest run the debounce believes.
-    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<OttParams> {
+    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<ControlSnapshot> {
         feed(mapping, raw, usize::from(BYPASS_DEBOUNCE_READS))
     }
 
@@ -573,10 +513,10 @@ mod tests {
             .update(reading(0, 512, 1023, 250))
             .expect("the first reading must publish");
 
-        assert_eq!(params.global.depth.get(), normalized(0));
-        assert_eq!(params.global.time.get(), normalized(512));
-        assert_eq!(params.global.upward.get(), normalized(1023));
-        assert_eq!(params.global.downward.get(), normalized(250));
+        assert_eq!(params.params.global.depth.get(), normalized(0));
+        assert_eq!(params.params.global.time.get(), normalized(512));
+        assert_eq!(params.params.global.upward.get(), normalized(1023));
+        assert_eq!(params.params.global.downward.get(), normalized(250));
     }
 
     #[test]
@@ -626,11 +566,11 @@ mod tests {
 
         // Hold the pot at its new position and poll; the filter needs a few
         // reads to clear the deadband, and must then approach 800 monotonically.
-        let mut last = start.global.depth.get();
+        let mut last = start.params.global.depth.get();
         let mut publishes = 0;
         for _ in 0..100 {
             if let Some(params) = mapping.update(uniform(800)) {
-                let depth = params.global.depth.get();
+                let depth = params.params.global.depth.get();
                 assert!(
                     depth > last,
                     "depth {depth} must increase toward the new position from {last}"
@@ -661,7 +601,7 @@ mod tests {
         let mut published = None;
         for _ in 0..100 {
             if let Some(params) = mapping.update(uniform(200)) {
-                published = Some(params.global.depth.get());
+                published = Some(params.params.global.depth.get());
             }
         }
 
@@ -680,15 +620,21 @@ mod tests {
             .update(with_gains(reading(10, 20, 30, 40), 50, 60))
             .expect("the first reading must publish");
 
-        assert_eq!(params.global.crossover, base.global.crossover);
-        assert_eq!(params.bands, base.bands);
+        assert_eq!(params.params.global.crossover, base.global.crossover);
+        assert_eq!(params.params.bands, base.bands);
 
-        assert_ne!(params.global.depth, base.global.depth);
-        assert_ne!(params.global.time, base.global.time);
-        assert_ne!(params.global.upward, base.global.upward);
-        assert_ne!(params.global.downward, base.global.downward);
-        assert_ne!(params.global.input_gain_db, base.global.input_gain_db);
-        assert_ne!(params.global.output_gain_db, base.global.output_gain_db);
+        assert_ne!(params.params.global.depth, base.global.depth);
+        assert_ne!(params.params.global.time, base.global.time);
+        assert_ne!(params.params.global.upward, base.global.upward);
+        assert_ne!(params.params.global.downward, base.global.downward);
+        assert_ne!(
+            params.params.global.input_gain_db,
+            base.global.input_gain_db
+        );
+        assert_ne!(
+            params.params.global.output_gain_db,
+            base.global.output_gain_db
+        );
     }
 
     /// The dB pair a fresh mapping publishes for gain pots resting at
@@ -707,8 +653,8 @@ mod tests {
             ))
             .expect("the first reading must publish");
         (
-            params.global.input_gain_db.get(),
-            params.global.output_gain_db.get(),
+            params.params.global.input_gain_db.get(),
+            params.params.global.output_gain_db.get(),
         )
     }
 
@@ -781,49 +727,38 @@ mod tests {
         let turned_input = feed(&mut mapping, with_gains(idle, 900, 100), HELD_READS)
             .expect("an Input Gain turn must publish");
         assert!(
-            (turned_input.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
+            (turned_input.params.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
             "the Input Gain pot must reach {} dB, got {}",
             gain_db(900),
-            turned_input.global.input_gain_db.get()
+            turned_input.params.global.input_gain_db.get()
         );
         assert!(
-            (turned_input.global.output_gain_db.get() - gain_db(100)).abs() < 0.4,
+            (turned_input.params.global.output_gain_db.get() - gain_db(100)).abs() < 0.4,
             "turning Input Gain must leave Output Gain where it was, got {}",
-            turned_input.global.output_gain_db.get()
+            turned_input.params.global.output_gain_db.get()
         );
 
         let turned_output = feed(&mut mapping, with_gains(idle, 900, 900), HELD_READS)
             .expect("an Output Gain turn must publish");
         assert!(
-            (turned_output.global.output_gain_db.get() - gain_db(900)).abs() < 0.4,
+            (turned_output.params.global.output_gain_db.get() - gain_db(900)).abs() < 0.4,
             "the Output Gain pot must reach {} dB, got {}",
             gain_db(900),
-            turned_output.global.output_gain_db.get()
+            turned_output.params.global.output_gain_db.get()
         );
         assert!(
-            (turned_output.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
+            (turned_output.params.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
             "turning Output Gain must leave Input Gain where it was, got {}",
-            turned_output.global.input_gain_db.get()
+            turned_output.params.global.input_gain_db.get()
         );
     }
 
-    /// Asserts the three fields an engaged bypass overrides are all at their
-    /// bypassed values.
-    fn assert_bypassed(params: &OttParams, what: &str) {
-        assert_eq!(
-            params.global.depth.get(),
-            0.0,
-            "{what}: an engaged bypass must publish depth 0"
-        );
-        assert_eq!(
-            params.global.input_gain_db.get(),
-            0.0,
-            "{what}: an engaged bypass must publish unity input gain"
-        );
-        assert_eq!(
-            params.global.output_gain_db.get(),
-            0.0,
-            "{what}: an engaged bypass must publish unity output gain"
+    /// Asserts that bypass is transported as an explicit level rather than
+    /// encoded by a parameter triple.
+    fn assert_bypassed(snapshot: &ControlSnapshot, what: &str) {
+        assert!(
+            snapshot.bypass_engaged,
+            "{what}: bypass level must be engaged"
         );
     }
 
@@ -846,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn a_debounced_move_to_the_bypassed_position_zeroes_depth_and_both_gains() {
+    fn a_debounced_move_to_the_bypassed_position_publishes_an_explicit_level() {
         let mut mapping = ControlMapping::new(Preset::SafeStart.params());
         let idle = with_gains(reading(600, 700, 800, 900), 200, 300);
         let before = mapping
@@ -866,24 +801,24 @@ mod tests {
 
         assert_bypassed(&params, "a debounced move to the bypassed position");
         assert_eq!(
-            params.global.time.get(),
-            before.global.time.get(),
+            params.params.global.time.get(),
+            before.params.global.time.get(),
             "the bypass must not disturb the Time pot"
         );
         assert_eq!(
-            params.global.upward.get(),
-            before.global.upward.get(),
+            params.params.global.upward.get(),
+            before.params.global.upward.get(),
             "the bypass must not disturb the Upward pot"
         );
         assert_eq!(
-            params.global.downward.get(),
-            before.global.downward.get(),
+            params.params.global.downward.get(),
+            before.params.global.downward.get(),
             "the bypass must not disturb the Downward pot"
         );
     }
 
     #[test]
-    fn disengaging_restores_all_three_overridden_pots_current_positions() {
+    fn disengaging_restores_all_three_bypass_controlled_pots_current_positions() {
         let mut mapping = ControlMapping::new(Preset::SafeStart.params());
         let start = with_gains(reading(600, 500, 500, 500), 600, 600);
         mapping
@@ -892,13 +827,13 @@ mod tests {
         settle(&mut mapping, switched(start, true))
             .expect("a debounced move must publish the bypass");
 
-        // Turn all three overridden pots while the effect is bypassed. Nothing
-        // is published — the snapshot is unchanged — but the deadband
-        // reference underneath must follow them.
+        // Turn all three bypass-controlled pots while bypassed. Their current
+        // positions must still reach the DSP so a later disengage uses the
+        // newest targets rather than stale latched values.
         let moved = with_gains(reading(200, 500, 500, 500), 100, 900);
         assert!(
-            feed(&mut mapping, switched(moved, true), HELD_READS).is_none(),
-            "turning the overridden pots while bypassed must not publish"
+            feed(&mut mapping, switched(moved, true), HELD_READS).is_some(),
+            "turning bypass-controlled pots must publish their latest targets"
         );
 
         // A latching switch is simply moved back; there is no release to wait
@@ -906,17 +841,17 @@ mod tests {
         let params = settle(&mut mapping, switched(moved, false))
             .expect("moving the switch back must disengage and republish");
 
-        let depth = params.global.depth.get();
+        let depth = params.params.global.depth.get();
         assert!(
             depth > normalized(190) && depth < normalized(210),
             "disengaging must restore the Depth pot's current position, got {depth}"
         );
-        let input_db = params.global.input_gain_db.get();
+        let input_db = params.params.global.input_gain_db.get();
         assert!(
             (input_db - gain_db(100)).abs() < 0.4,
             "disengaging must restore the Input Gain pot's current position, got {input_db}"
         );
-        let output_db = params.global.output_gain_db.get();
+        let output_db = params.params.global.output_gain_db.get();
         assert!(
             (output_db - gain_db(900)).abs() < 0.4,
             "disengaging must restore the Output Gain pot's current position, got {output_db}"
@@ -987,19 +922,19 @@ mod tests {
         let params = settle(&mut mapping, switched(idle, false))
             .expect("moving the switch out of bypass must publish");
         assert_eq!(
-            params.global.depth.get(),
+            params.params.global.depth.get(),
             normalized(600),
             "disengaging must hand back the Depth pot's position"
         );
         assert!(
-            (params.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
+            (params.params.global.input_gain_db.get() - gain_db(900)).abs() < 0.4,
             "disengaging must hand back the Input Gain pot's position, got {}",
-            params.global.input_gain_db.get()
+            params.params.global.input_gain_db.get()
         );
     }
 
     #[test]
-    fn turning_the_overridden_pots_while_bypassed_publishes_nothing() {
+    fn turning_bypass_controlled_pots_still_publishes_latest_targets() {
         let mut mapping = ControlMapping::new(Preset::SafeStart.params());
         let start = with_gains(reading(600, 500, 500, 500), 500, 500);
         mapping
@@ -1008,10 +943,7 @@ mod tests {
         settle(&mut mapping, switched(start, true))
             .expect("a debounced move must publish the bypass");
 
-        // Each of the three overridden pots taken to the far end of its travel:
-        // far past the deadband, and past the filter's settling time. The
-        // snapshot would be identical to the last one every time, so the
-        // transport layer must not see any of it.
+        // Each bypass-controlled pot is carried despite the engaged level.
         for (what, moved) in [
             ("Depth", with_gains(reading(0, 500, 500, 500), 500, 500)),
             (
@@ -1024,14 +956,14 @@ mod tests {
             ),
         ] {
             assert!(
-                feed(&mut mapping, switched(moved, true), HELD_READS).is_none(),
-                "a {what} turn made while bypassed must not publish"
+                feed(&mut mapping, switched(moved, true), HELD_READS).is_some(),
+                "a {what} turn made while bypassed must publish its latest target"
             );
         }
     }
 
     #[test]
-    fn turning_time_while_bypassed_still_publishes_with_the_overrides_held() {
+    fn turning_non_bypass_controls_while_bypassed_keeps_the_explicit_level() {
         let mut mapping = ControlMapping::new(Preset::SafeStart.params());
         let start = with_gains(reading(600, 200, 500, 500), 900, 100);
         mapping
@@ -1065,19 +997,19 @@ mod tests {
         )
         .expect("moving the switch back must disengage and republish");
         assert!(
-            final_state.global.time.get() > normalized(890),
+            final_state.params.global.time.get() > normalized(890),
             "the Time pot must keep working while bypassed, got {}",
-            final_state.global.time.get()
+            final_state.params.global.time.get()
         );
         assert!(
-            final_state.global.upward.get() < normalized(60),
+            final_state.params.global.upward.get() < normalized(60),
             "the Upward pot must keep working while bypassed, got {}",
-            final_state.global.upward.get()
+            final_state.params.global.upward.get()
         );
         assert!(
-            final_state.global.downward.get() > normalized(990),
+            final_state.params.global.downward.get() > normalized(990),
             "the Downward pot must keep working while bypassed, got {}",
-            final_state.global.downward.get()
+            final_state.params.global.downward.get()
         );
     }
 
@@ -1122,20 +1054,15 @@ mod tests {
             let mut mapping = ControlMapping::new(Preset::SafeStart.params());
             for raw in readings {
                 if let Some(params) = mapping.update(raw) {
-                    prop_assert!(params.validate(SAMPLE_RATE).is_ok());
+                    prop_assert!(params.params.validate(SAMPLE_RATE).is_ok());
                 }
             }
         }
 
-        /// Stated as a property because the interesting part is that it holds
-        /// for *every* way the pots can move, not for one chosen sweep: while
-        /// the switch rests in the bypassed position, no pot position and no
-        /// amount of jitter can put a nonzero depth or a non-unity gain back on
-        /// the output. The gains are the reason this matters more than it used
-        /// to — a leak there is not a subtle change of character but up to
-        /// 48 dB of it.
+        /// Every update while the switch rests bypassed must retain the
+        /// explicit level even as its complete parameter payload changes.
         #[test]
-        fn nothing_leaks_through_an_engaged_bypass(
+        fn engaged_bypass_is_never_inferred_from_or_lost_by_parameter_values(
             start in arbitrary_reading(),
             moves in prop::collection::vec(arbitrary_reading(), 1..64),
         ) {
@@ -1148,9 +1075,7 @@ mod tests {
 
             for raw in moves {
                 if let Some(params) = mapping.update(switched(raw, true)) {
-                    prop_assert_eq!(params.global.depth.get(), 0.0);
-                    prop_assert_eq!(params.global.input_gain_db.get(), 0.0);
-                    prop_assert_eq!(params.global.output_gain_db.get(), 0.0);
+                    prop_assert!(params.bypass_engaged);
                 }
             }
         }
@@ -1178,8 +1103,8 @@ mod tests {
             // Not exact equality: `gain_db` rounds twice where `gain_db_or`
             // fuses into one `mul_add`, so the two agree to a few ulps rather
             // than bit for bit.
-            prop_assert!((params.global.input_gain_db.get() - gain_db(input_raw)).abs() < 1e-5);
-            prop_assert!((params.global.output_gain_db.get() - gain_db(output_raw)).abs() < 1e-5);
+            prop_assert!((params.params.global.input_gain_db.get() - gain_db(input_raw)).abs() < 1e-5);
+            prop_assert!((params.params.global.output_gain_db.get() - gain_db(output_raw)).abs() < 1e-5);
         }
     }
 }

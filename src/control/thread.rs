@@ -4,19 +4,19 @@
 //! An MCP3008 read is SPI traffic — a blocking `ioctl` — so it cannot happen
 //! inside `AudioProcessHandler::process` (docs/contracts.md §6). This layer is
 //! the seam that keeps it out: a plain OS thread polls the [`ControlSource`],
-//! drives [`ControlMapping`], and hands finished [`OttParams`] snapshots to
+//! drives [`ControlMapping`], and hands finished [`ControlSnapshot`] values to
 //! the callback through a `triple_buffer`.
 //!
 //! The triple buffer is what makes the *reading* side legal, which is the side
 //! that matters. `Output::update` is a single `AcqRel` swap plus an index
 //! assignment: wait-free, allocation-free, lock-free, and constant-time, so
 //! the callback pays the same cost whether or not a knob moved. Its three
-//! buffers are allocated once when the buffer is built, and [`OttParams`] is
-//! `Copy` with no `Drop`, so publishing a snapshot neither allocates nor frees
-//! anything on either side. This is the "bounded non-blocking queue instead of
-//! a new lock" that docs/architecture.md anticipates, with the queue bound at
-//! one: the callback wants the knob's newest position, never a backlog of the
-//! positions it passed through.
+//! buffers are allocated once when the buffer is built, and
+//! [`ControlSnapshot`] is `Copy` with no `Drop`, so publishing a snapshot
+//! neither allocates nor frees anything on either side. This is the "bounded
+//! non-blocking queue instead of a new lock" that docs/architecture.md
+//! anticipates, with the queue bound at one: the callback wants the knob's
+//! newest position, never a backlog of the positions it passed through.
 //!
 //! Nothing here is on the real-time path — the thread is free to block, sleep,
 //! and write to stderr — which is why the crate-wide lints that encode
@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use triple_buffer::{Input, Output, TripleBuffer};
 
-use crate::params::OttParams;
+use crate::params::{ControlSnapshot, OttParams};
 
 use super::mapping::ControlMapping;
 use super::raw::ControlSource;
@@ -75,7 +75,7 @@ const FAILURE_REPORT_INTERVAL: u64 = 5_000;
 /// already returning an error, where the process is about to exit anyway.
 #[derive(Debug)]
 pub struct ControlHandle {
-    output: Option<Output<OttParams>>,
+    output: Option<Output<ControlSnapshot>>,
     stop: Arc<AtomicBool>,
     read_failures: Arc<AtomicU64>,
     worker: JoinHandle<()>,
@@ -84,11 +84,11 @@ pub struct ControlHandle {
 impl ControlHandle {
     /// Starts a control thread polling `source` every `poll_interval`.
     ///
-    /// `base` is the CLI parameter set. It seeds both ends: the triple buffer
-    /// starts out holding it, so a callback that reads before the first
+    /// `base` is the CLI parameter set. It seeds both ends with an explicitly
+    /// disengaged bypass level, so a callback that reads before the first
     /// successful poll sees exactly the parameters the processor was built
-    /// with, and [`ControlMapping`] overlays the six pot-driven fields onto
-    /// it from the first reading onward.
+    /// with. [`ControlMapping`] overlays the six pot-driven fields from the
+    /// first reading onward.
     ///
     /// [`DEFAULT_POLL_INTERVAL`] is the interval to pass unless a caller has
     /// a specific reason not to.
@@ -103,7 +103,11 @@ impl ControlHandle {
         base: OttParams,
         poll_interval: Duration,
     ) -> Self {
-        let (publisher, output) = TripleBuffer::new(&base).split();
+        let initial = ControlSnapshot {
+            params: base,
+            bypass_engaged: false,
+        };
+        let (publisher, output) = TripleBuffer::new(&initial).split();
         let stop = Arc::new(AtomicBool::new(false));
         let read_failures = Arc::new(AtomicU64::new(0));
 
@@ -137,7 +141,7 @@ impl ControlHandle {
     /// single-consumer — `update` takes `&mut self` and owns the consumer's
     /// buffer index — so exactly one holder can ever exist, and moving it out
     /// is how that is enforced rather than promised.
-    pub const fn take_output(&mut self) -> Option<Output<OttParams>> {
+    pub const fn take_output(&mut self) -> Option<Output<ControlSnapshot>> {
         self.output.take()
     }
 
@@ -186,7 +190,7 @@ impl ControlHandle {
 fn poll_until_stopped<S: ControlSource>(
     mut source: S,
     mut mapping: ControlMapping,
-    mut publisher: Input<OttParams>,
+    mut publisher: Input<ControlSnapshot>,
     stop: &AtomicBool,
     read_failures: &AtomicU64,
     poll_interval: Duration,
@@ -356,7 +360,7 @@ mod tests {
     /// the thread and returns its read-failure count.
     fn with_control<S: ControlSource + Send + 'static>(
         source: S,
-        f: impl FnOnce(&mut Output<OttParams>, &ControlHandle),
+        f: impl FnOnce(&mut Output<ControlSnapshot>, &ControlHandle),
     ) -> u64 {
         let mut handle =
             ControlHandle::spawn(source, Preset::SafeStart.params(), TEST_POLL_INTERVAL);
@@ -379,7 +383,7 @@ mod tests {
         // Before `update`, the callback sees exactly what the processor was
         // built with rather than an uninitialized or defaulted snapshot.
         assert_eq!(
-            *output.output_buffer(),
+            output.output_buffer().params,
             base,
             "the buffer must start seeded with the CLI parameters"
         );
@@ -391,26 +395,26 @@ mod tests {
         let (source, position, _reads) = TurnablePot::at(100);
         with_control(source, |output, _handle| {
             wait_until("the initial position to be published", || {
-                output.update() && output.output_buffer().global.depth.get() > 0.0
+                output.update() && output.output_buffer().params.global.depth.get() > 0.0
             });
 
             position.store(900, Ordering::Release);
             wait_until("the turned position to reach the output", || {
                 output.update();
-                output.output_buffer().global.depth.get() > normalized(880)
+                output.output_buffer().params.global.depth.get() > normalized(880)
             });
 
             // The turn drives all six pots, not just the one asserted above.
             let params = *output.output_buffer();
             assert!(
-                params.global.time.get() > normalized(880)
-                    && params.global.upward.get() > normalized(880)
-                    && params.global.downward.get() > normalized(880),
+                params.params.global.time.get() > normalized(880)
+                    && params.params.global.upward.get() > normalized(880)
+                    && params.params.global.downward.get() > normalized(880),
                 "every effect pot must track the turn, got {params:?}"
             );
             assert!(
-                params.global.input_gain_db.get() > 15.0
-                    && params.global.output_gain_db.get() > 15.0,
+                params.params.global.input_gain_db.get() > 15.0
+                    && params.params.global.output_gain_db.get() > 15.0,
                 "both gain pots must track the turn, got {params:?}"
             );
         });
@@ -422,7 +426,7 @@ mod tests {
         with_control(source, |output, _handle| {
             wait_until("the first reading to be published", || output.update());
             assert_eq!(
-                output.output_buffer().global.depth.get(),
+                output.output_buffer().params.global.depth.get(),
                 normalized(400),
                 "the first publish must carry the pot's position"
             );
@@ -458,7 +462,8 @@ mod tests {
             // publish, which is the whole point of not treating a read error
             // as fatal.
             wait_until("a publish after the failures", || {
-                output.update() && output.output_buffer().global.depth.get() == normalized(700)
+                output.update()
+                    && output.output_buffer().params.global.depth.get() == normalized(700)
             });
         });
 
@@ -539,7 +544,8 @@ mod tests {
 
     /// The chain the audio callback actually runs, minus JACK: `update` gates
     /// the work, `output_buffer` reads the snapshot without a second
-    /// swap, and `set_params` applies it (docs/contracts.md §2, §6). Proves
+    /// swap, and `set_control_snapshot` applies it (docs/contracts.md §2,
+    /// §6). Proves
     /// the whole control surface end to end on a development machine.
     #[test]
     fn the_callbacks_consume_pattern_drives_the_processor() {
@@ -557,11 +563,13 @@ mod tests {
         wait_until("the processor to be handed the turned position", || {
             // Byte-for-byte the callback's snapshot step.
             if output.update() {
-                let accepted = processor.set_params(*output.output_buffer()).is_ok();
+                let accepted = processor
+                    .set_control_snapshot(*output.output_buffer())
+                    .is_ok();
                 assert!(accepted, "a mapped snapshot must always validate");
                 applied = applied.saturating_add(1);
             }
-            output.output_buffer().global.depth.get() > normalized(1000)
+            output.output_buffer().params.global.depth.get() > normalized(1000)
         });
         assert!(applied > 0, "the callback pattern must apply at least once");
 

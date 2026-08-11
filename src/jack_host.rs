@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::control::ControlHandle;
 use crate::dsp::OttProcessor;
-use crate::params::{ConfigError, OttParams};
+use crate::params::{ConfigError, ControlSnapshot, OttParams};
 
 /// JACK client name and the port names it registers (docs/contracts.md §7).
 const CLIENT_NAME: &str = "oxtt";
@@ -107,7 +107,7 @@ struct AudioProcessHandler {
     /// The reading end of the control thread's handoff, absent for a build
     /// with no control surface attached. Reading it is wait-free and
     /// allocation-free, so it is legal here (docs/contracts.md §6).
-    control: Option<triple_buffer::Output<OttParams>>,
+    control: Option<triple_buffer::Output<ControlSnapshot>>,
 }
 
 impl jack::ProcessHandler for AudioProcessHandler {
@@ -127,9 +127,9 @@ impl jack::ProcessHandler for AudioProcessHandler {
         // applied before it would be thrown away on a sample-rate change.
         if let Some(control) = self.control.as_mut() {
             // `update` is the swap; it returns whether a new snapshot actually
-            // arrived, so `set_params` runs when a knob moved rather than on
-            // every cycle. `output_buffer` then reads what was just swapped
-            // in without swapping again.
+            // arrived, so `set_control_snapshot` runs when a control moved
+            // rather than on every cycle. `output_buffer` then reads what was
+            // just swapped in without swapping again.
             if control.update() {
                 // A rejected update leaves the processor unchanged
                 // (docs/contracts.md §2), and the callback has no way to
@@ -138,7 +138,9 @@ impl jack::ProcessHandler for AudioProcessHandler {
                 // snapshot the mapping layer produces is built from validated
                 // base parameters, so a rejection would mean the sample rate
                 // changed underneath it, and the next reading corrects that.
-                let _ = self.processor.set_params(*control.output_buffer());
+                let _ = self
+                    .processor
+                    .set_control_snapshot(*control.output_buffer());
             }
         }
 

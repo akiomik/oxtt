@@ -5,15 +5,16 @@
 Accepted, with the points marked **Revised** below changed since.
 
 The layering, the seam, the newest-value handoff and the failure policy stand as
-originally accepted. What changed is the panel: the surface gained two more
-potentiometers (input and output gain, on MCP3008 CH4 and CH5), the momentary
-bypass switch was replaced by a mechanically latching one, and the bypass now
-pins both gains to unity alongside `depth`. This ADR is not superseded — a
-superseding ADR would have to re-argue the three layers, which nothing here
-disturbs — so the four affected points are rewritten in place and marked, each
-one keeping the reasoning it replaces. In most of them what was deleted is the
-part worth remembering. The Context below is left as it was written, describing
-the surface the decision was originally taken against.
+originally accepted. What changed is the panel and bypass path: the surface
+gained two more potentiometers (input and output gain, on MCP3008 CH4 and CH5),
+the momentary bypass switch was replaced by a mechanically latching one, and an
+explicit bypass level now reaches a DSP transition that sequences `depth` and
+both gains. This ADR is not superseded — a superseding ADR would have to
+re-argue the three layers, which nothing here disturbs — so the affected points
+are rewritten in place and marked, each one keeping the reasoning it replaces.
+In most of them what was deleted is the part worth remembering. The Context
+below is left as it was written, describing the surface the decision was
+originally taken against.
 
 ## Context
 
@@ -61,7 +62,8 @@ with the re-check rule kept next to the constants themselves in
 
 - **Split the control surface into three layers** (`src/control.rs`): a
   platform-specific hardware read (A), a shared pure mapping from raw counts to
-  a complete `OttParams` (B), and a transport that moves finished snapshots
+  a complete `ControlSnapshot` containing the current `OttParams` and explicit
+  debounced bypass level (B), and a transport that moves finished snapshots
   across the real-time boundary (C). The split exists so that the only layer
   with behaviour worth testing — B — is the layer every platform shares.
 
@@ -94,9 +96,9 @@ with the re-check rule kept next to the constants themselves in
 
 - **Publish only when the conditioned value changes.** A motionless pot and an
   untouched switch produce no snapshot at all, so the callback's `update`
-  returns false and `set_params` is not called. Idle jitter is absorbed by the
-  filter and deadband in layer B rather than being handed across the boundary
-  for the DSP to smooth away.
+  returns false and `set_control_snapshot` is not called. Idle jitter is
+  absorbed by the filter and deadband in layer B rather than being handed
+  across the boundary for the DSP to smooth away.
 
 - **Revised. Let the control surface outrank the CLI for its six parameters,
   from the first successful read.** `--depth`, `--time`, `--upward`,
@@ -121,8 +123,11 @@ with the re-check rule kept next to the constants themselves in
   phase argument; nothing about a panel switch changes it. The switch is a
   mechanically latching (alternate-action) part, so its debounced *position* is
   the bypass state: there is no press to detect and no software latch to keep.
-  Time, Upward and Downward keep working while it is engaged, so disengaging
-  brings back an effect set up meanwhile rather than a stale one.
+  Layer B transports that level separately from the current pot values; the DSP
+  never infers it from a parameter triple. On engage the DSP moves depth to zero
+  before moving both gains to unity; on disengage it restores the gains before
+  moving depth. Time, Upward and Downward keep working while bypass is engaged,
+  and the latest Depth and gain positions are retained for disengage.
 
   Two things were revised here, and both were revised because the original was
   wrong in a way only the panel could show.
@@ -153,6 +158,12 @@ with the re-check rule kept next to the constants themselves in
   still travels the crossover split-and-reconstruct path, but it is now the
   closest approximation to the dry signal this architecture allows.
 
+  The first gain-enabled implementation published all three bypass targets at
+  once. Their independent 20 ms smoothers could traverse a level above both
+  steady endpoints. Carrying the bypass level explicitly and sequencing the
+  coupled targets in the DSP preserves the same steady-state decision without
+  that transient or a raw-signal crossfade.
+
 - **Treat a hardware read failure as survivable and an acquisition failure at
   startup as fatal.** A failed read publishes nothing, is counted, and leaves
   the callback on the last good snapshot; the total is reported at exit
@@ -170,8 +181,9 @@ with the re-check rule kept next to the constants themselves in
   against a vendor `no_std` HAL, but also loses the `clap` CLI that supplies
   layer B's base parameters (ADR 0009, finding 4), so the base parameter set
   becomes compiled-in preset data there. In every case the conditioning, the
-  parameter mapping, the deadband, the debounce and the bypass override move
-  unchanged.
+  parameter mapping, the deadband, the debounce and the explicit bypass level
+  move unchanged. The DSP consumes that level with the same coordinated
+  transition on every platform.
 
 - The callback never sees intermediate knob positions. At the 2 ms poll
   interval a fast sweep is sampled at 500 Hz — just above the callback rate at

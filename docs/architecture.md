@@ -9,11 +9,11 @@ main.rs
   -> cli::Cli::parse              CLI parsing (clap), presets, per-field validation
   -> control::ControlHandle::spawn  control thread (--controls, `pi-controls` builds only)
        -> control::PiControls        layer A: six MCP3008 pots on SPI0/CE0, latching bypass switch on GPIO17
-       -> control::ControlMapping    layer B: jitter filter, deadband, bypass override -> OttParams
+       -> control::ControlMapping    layer B: jitter filter, deadband -> ControlSnapshot
        -> triple_buffer::Input       layer C: publishes snapshots toward the audio callback
   -> jack_host::run               JACK client lifecycle, port registration
        -> AudioProcessHandler     audio callback (real-time thread)
-            -> triple_buffer::Output  newest control snapshot -> OttProcessor::set_params
+            -> triple_buffer::Output  newest control snapshot -> OttProcessor::set_control_snapshot
             -> dsp::OttProcessor::process
                  -> dsp::crossover::Crossover
                  -> dsp::compressor::DualThresholdCompressor  (one per band)
@@ -60,10 +60,10 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 
 With a control surface attached, two more owners exist, both outside the DSP:
 
-- `ControlMapping` (`src/control/mapping.rs`), owned by the control thread, holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in ADC counts — and, once per mapping rather than per pot, the last published `OttParams` snapshot and the debounced switch position. The switch latches mechanically, so that position *is* the bypass state rather than an input to a software latch, and while it is engaged the published `depth` is 0 and both published gains are unity. The last published value is a whole snapshot rather than counts because the bypass is applied after the counts have become domain values: unity gain is not count 0. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward`/`input_gain`/`output_gain` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the ADC channel order through to the mapped parameters.
-- `ControlHandle` (`src/control/thread.rs`) owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `OttParams` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side.
+- `ControlMapping` (`src/control/mapping.rs`), owned by the control thread, holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in ADC counts — and, once per mapping rather than per pot, the last published `ControlSnapshot` and the debounced switch position. The snapshot contains the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward`/`input_gain`/`output_gain` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the ADC channel order through to the mapped parameters.
+- `ControlHandle` (`src/control/thread.rs`) owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `ControlSnapshot` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side.
 
-Neither of those owns any DSP state, and `OttProcessor` is unaware that they exist: a control snapshot reaches it only through the same `set_params` the CLI path uses.
+Neither of those owns any DSP state. A control snapshot reaches `OttProcessor` through its explicit `set_control_snapshot` seam; the CLI remains on the ordinary `set_params` path.
 
 ## Real-Time / Non-Real-Time Boundary
 
@@ -87,6 +87,6 @@ The control surface crosses this boundary the same way. An MCP3008 conversion is
 
 ## Parameter Update Path
 
-`OttProcessor::set_params` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. See `contracts.md` (section 2) for the exact pre/postconditions of `new`, `reset`, and `set_params`.
+`OttProcessor::set_params` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. `set_control_snapshot` is the explicit exception for the coordinated effect-bypass state machine: it stages depth and gain target changes rather than letting their independent smoothers move concurrently. A reversal while depth is moving first reaches the zero-depth waypoint, while a reversal at that waypoint immediately retargets gains in the latest direction. Gain updates received during the final depth-only stage are deferred until depth settles. A reset preserves the latest explicit bypass level and reconstructs the corresponding steady state immediately. See `contracts.md` (section 2) for the exact pre/postconditions.
 
-A control snapshot enters by exactly that route: the callback hands it to the same `set_params`, so a knob turn is smoothed like any other parameter change. The one ordering constraint is that it is applied strictly *after* any pending sample-rate reset in the same cycle — `reset` rebuilds the processor from the targets it already holds, so a snapshot applied before it would be thrown away. `ControlMapping` seeds itself from its first reading rather than fading in from zero, for the same reason `OttProcessor::new` snaps its smoothers to their targets: there is no earlier state to have moved away from.
+A control snapshot enters through `set_control_snapshot`: the callback applies its complete parameter payload and explicit bypass level strictly after any pending sample-rate reset in the same cycle. `ControlMapping` seeds itself from its first reading rather than fading in from zero, for the same reason `OttProcessor::new` snaps its smoothers to their targets: there is no earlier state to have moved away from.

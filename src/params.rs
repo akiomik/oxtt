@@ -24,7 +24,8 @@ mod value;
 
 pub use error::ConfigError;
 pub use model::{
-    BandParams, CROSSOVER_NYQUIST_RATIO, CrossoverSplit, GlobalParams, OttParams, ThresholdRange,
+    BandParams, CROSSOVER_NYQUIST_RATIO, ControlSnapshot, CrossoverSplit, GlobalParams, OttParams,
+    ThresholdRange,
 };
 pub use preset::Preset;
 pub use value::{

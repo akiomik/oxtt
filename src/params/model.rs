@@ -173,6 +173,21 @@ pub struct OttParams {
     pub bands: Bands<BandParams>,
 }
 
+/// One complete control-surface update.
+///
+/// `params` always contains the current potentiometer positions, including
+/// depth and both gains. `bypass_engaged` is deliberately separate: a control
+/// client must never infer an effect-bypass request from a coincidental
+/// `depth = 0`, `input_gain_db = 0`, `output_gain_db = 0` parameter triple.
+/// The DSP uses the explicit level to sequence those values safely.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlSnapshot {
+    /// Complete, validated parameter snapshot from the controls.
+    pub params: OttParams,
+    /// Debounced level of the latching effect-bypass switch.
+    pub bypass_engaged: bool,
+}
+
 impl OttParams {
     /// Validates the one invariant that no value object can express on its own:
     /// the Nyquist-relative crossover limit, which needs `sample_rate` and so

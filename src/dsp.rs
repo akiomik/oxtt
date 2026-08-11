@@ -8,7 +8,7 @@ pub mod smooth;
 use thiserror::Error;
 
 use crate::bands::Bands;
-use crate::params::{BandParams, ConfigError, GlobalParams, OttParams};
+use crate::params::{BandParams, ConfigError, ControlSnapshot, GlobalParams, OttParams};
 use compressor::{BandDynamics, DualThresholdCompressor, effective_amount};
 use crossover::Crossover;
 use envelope::{attack_release_ms, detector_power};
@@ -163,6 +163,152 @@ struct GlobalRuntime {
     downward: Smoothed,
 }
 
+/// Maximum remaining value before a bypass stage snaps its smoother exactly to
+/// its target. The depth threshold is -60 dB in the wet/dry weight and the
+/// gain threshold is one hundredth dB, both below audibility but finite.
+const BYPASS_DEPTH_SETTLE: f32 = 0.001;
+const BYPASS_GAIN_SETTLE_DB: f32 = 0.01;
+
+/// Sample-driven state for the coordinated effect-bypass transition.
+///
+/// Each stage owns exactly one moving group: depth first when engaging, gains
+/// first when disengaging. A requested reversal is observed at every sample,
+/// but finishes the current safe stage to the zero-depth waypoint before
+/// taking the latest requested direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BypassStage {
+    Active,
+    EngagingDepth,
+    EngagingGains,
+    Bypassed,
+    DisengagingGains,
+    DisengagingDepth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BypassRuntime {
+    requested: bool,
+    stage: BypassStage,
+}
+
+impl BypassRuntime {
+    const fn active() -> Self {
+        Self {
+            requested: false,
+            stage: BypassStage::Active,
+        }
+    }
+
+    const fn reset(&mut self, global: &mut GlobalRuntime, params: &GlobalParams) {
+        if self.requested {
+            global.snap_bypass();
+            self.stage = BypassStage::Bypassed;
+        } else {
+            global.snap_effect(params);
+            self.stage = BypassStage::Active;
+        }
+    }
+
+    const fn set_requested(
+        &mut self,
+        requested: bool,
+        global: &mut GlobalRuntime,
+        params: &GlobalParams,
+    ) {
+        self.requested = requested;
+        match self.stage {
+            BypassStage::Active if requested => {
+                global.hold_gains();
+                global.force_depth_zero();
+                self.stage = BypassStage::EngagingDepth;
+            }
+            BypassStage::Bypassed if !requested => {
+                global.force_depth_zero();
+                global.set_gain_targets(params);
+                self.stage = BypassStage::DisengagingGains;
+            }
+            BypassStage::EngagingDepth => global.force_depth_zero(),
+            BypassStage::EngagingGains if !requested => {
+                global.set_gain_targets(params);
+                self.stage = BypassStage::DisengagingGains;
+            }
+            BypassStage::EngagingGains | BypassStage::Bypassed => global.force_bypass(),
+            BypassStage::DisengagingGains => {
+                if requested {
+                    global.force_unity_gains();
+                    self.stage = BypassStage::EngagingGains;
+                } else {
+                    global.force_depth_zero();
+                    global.set_gain_targets(params);
+                }
+            }
+            BypassStage::DisengagingDepth => {
+                if requested {
+                    global.hold_gains();
+                    global.force_depth_zero();
+                    self.stage = BypassStage::EngagingDepth;
+                } else {
+                    global.set_depth_target(params);
+                }
+            }
+            BypassStage::Active => global.set_effect_targets(params),
+        }
+    }
+
+    fn advance(&mut self, global: &mut GlobalRuntime, params: &GlobalParams) {
+        match self.stage {
+            BypassStage::EngagingDepth if global.depth_near_zero() => {
+                global.snap_depth_zero();
+                self.stage = if self.requested {
+                    global.force_unity_gains();
+                    BypassStage::EngagingGains
+                } else {
+                    global.set_gain_targets(params);
+                    BypassStage::DisengagingGains
+                };
+            }
+            BypassStage::EngagingGains if global.gains_near_unity() => {
+                global.snap_unity_gains();
+                self.stage = if self.requested {
+                    BypassStage::Bypassed
+                } else {
+                    global.set_gain_targets(params);
+                    BypassStage::DisengagingGains
+                };
+            }
+            BypassStage::Bypassed if !self.requested => {
+                global.set_gain_targets(params);
+                self.stage = BypassStage::DisengagingGains;
+            }
+            BypassStage::DisengagingGains if global.gains_near_targets() => {
+                global.snap_gains_to_targets();
+                self.stage = if self.requested {
+                    global.force_depth_zero();
+                    BypassStage::EngagingDepth
+                } else {
+                    global.set_depth_target(params);
+                    BypassStage::DisengagingDepth
+                };
+            }
+            BypassStage::DisengagingDepth if global.depth_near_target() => {
+                global.snap_depth_to_target();
+                self.stage = if self.requested {
+                    global.hold_gains();
+                    global.force_depth_zero();
+                    BypassStage::EngagingDepth
+                } else {
+                    // A gain-pot update received during this depth-only stage
+                    // is intentionally deferred. Depth is now stationary, so
+                    // the active state can begin its ordinary gain smoothing.
+                    global.set_gain_targets(params);
+                    BypassStage::Active
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
 impl GlobalRuntime {
     fn new(params: &GlobalParams, sample_rate: f32) -> Self {
         Self {
@@ -183,6 +329,99 @@ impl GlobalRuntime {
         self.upward.set_target(params.upward.get());
         self.downward.set_target(params.downward.get());
     }
+
+    const fn set_non_bypass_targets(&mut self, params: &GlobalParams) {
+        self.time.set_target(params.time.get());
+        self.upward.set_target(params.upward.get());
+        self.downward.set_target(params.downward.get());
+    }
+
+    const fn set_effect_targets(&mut self, params: &GlobalParams) {
+        self.input_gain_db.set_target(params.input_gain_db.get());
+        self.output_gain_db.set_target(params.output_gain_db.get());
+        self.depth.set_target(params.depth.get());
+    }
+
+    const fn set_gain_targets(&mut self, params: &GlobalParams) {
+        self.input_gain_db.set_target(params.input_gain_db.get());
+        self.output_gain_db.set_target(params.output_gain_db.get());
+    }
+
+    const fn set_depth_target(&mut self, params: &GlobalParams) {
+        self.depth.set_target(params.depth.get());
+    }
+
+    const fn hold_gains(&mut self) {
+        self.input_gain_db.set_target(self.input_gain_db.current());
+        self.output_gain_db
+            .set_target(self.output_gain_db.current());
+    }
+
+    const fn force_depth_zero(&mut self) {
+        self.depth.set_target(0.0);
+    }
+
+    const fn force_unity_gains(&mut self) {
+        self.input_gain_db.set_target(0.0);
+        self.output_gain_db.set_target(0.0);
+    }
+
+    const fn force_bypass(&mut self) {
+        self.force_depth_zero();
+        self.force_unity_gains();
+    }
+
+    const fn snap_depth_zero(&mut self) {
+        self.depth.snap(0.0);
+    }
+
+    const fn snap_unity_gains(&mut self) {
+        self.input_gain_db.snap(0.0);
+        self.output_gain_db.snap(0.0);
+    }
+
+    const fn snap_gains_to_targets(&mut self) {
+        self.input_gain_db.snap(self.input_gain_db.target());
+        self.output_gain_db.snap(self.output_gain_db.target());
+    }
+
+    const fn snap_depth_to_target(&mut self) {
+        self.depth.snap(self.depth.target());
+    }
+
+    const fn snap_bypass(&mut self) {
+        self.depth.snap(0.0);
+        self.input_gain_db.snap(0.0);
+        self.output_gain_db.snap(0.0);
+    }
+
+    const fn snap_effect(&mut self, params: &GlobalParams) {
+        self.input_gain_db.snap(params.input_gain_db.get());
+        self.output_gain_db.snap(params.output_gain_db.get());
+        self.depth.snap(params.depth.get());
+        self.time.snap(params.time.get());
+        self.upward.snap(params.upward.get());
+        self.downward.snap(params.downward.get());
+    }
+
+    fn depth_near_zero(&self) -> bool {
+        self.depth.current().abs() <= BYPASS_DEPTH_SETTLE
+    }
+
+    fn depth_near_target(&self) -> bool {
+        (self.depth.current() - self.depth.target()).abs() <= BYPASS_DEPTH_SETTLE
+    }
+
+    fn gains_near_unity(&self) -> bool {
+        self.input_gain_db.current().abs() <= BYPASS_GAIN_SETTLE_DB
+            && self.output_gain_db.current().abs() <= BYPASS_GAIN_SETTLE_DB
+    }
+
+    fn gains_near_targets(&self) -> bool {
+        (self.input_gain_db.current() - self.input_gain_db.target()).abs() <= BYPASS_GAIN_SETTLE_DB
+            && (self.output_gain_db.current() - self.output_gain_db.target()).abs()
+                <= BYPASS_GAIN_SETTLE_DB
+    }
 }
 
 /// DSP core for the 3-band, upward/downward multiband compressor (docs/architecture.md).
@@ -197,6 +436,7 @@ pub struct OttProcessor {
     global: GlobalRuntime,
     crossover: Crossover,
     bands: Bands<BandProcessor>,
+    bypass: BypassRuntime,
 }
 
 impl OttProcessor {
@@ -228,6 +468,7 @@ impl OttProcessor {
             global,
             crossover,
             bands,
+            bypass: BypassRuntime::active(),
         }
     }
 
@@ -246,7 +487,11 @@ impl OttProcessor {
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn reset(&mut self, sample_rate: f32) -> Result<(), ConfigError> {
         self.target_params.validate(sample_rate)?;
+        let bypass_requested = self.bypass.requested;
         *self = Self::new_unchecked(sample_rate, self.target_params);
+        self.bypass.requested = bypass_requested;
+        self.bypass
+            .reset(&mut self.global, &self.target_params.global);
         Ok(())
     }
 
@@ -272,6 +517,38 @@ impl OttProcessor {
             band.set_targets(band_params);
         }
         self.target_params = params;
+        self.bypass.requested = false;
+        self.bypass.stage = BypassStage::Active;
+        Ok(())
+    }
+
+    /// Applies a control-surface snapshot with an explicit bypass level.
+    ///
+    /// Unlike [`Self::set_params`], this coordinates depth and the two gains
+    /// through the allocation-free, sample-driven bypass state machine. All
+    /// other parameters retain ordinary target-only update semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError` if the snapshot parameters are invalid for this
+    /// processor's sample rate; on error no state changes.
+    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+    pub fn set_control_snapshot(&mut self, snapshot: ControlSnapshot) -> Result<(), ConfigError> {
+        snapshot.params.validate(self.sample_rate)?;
+        self.global.set_non_bypass_targets(&snapshot.params.global);
+        self.crossover.set_targets(
+            snapshot.params.global.crossover.low_hz().get(),
+            snapshot.params.global.crossover.high_hz().get(),
+        );
+        for (band, band_params) in self.bands.iter_mut().zip(snapshot.params.bands.iter()) {
+            band.set_targets(band_params);
+        }
+        self.target_params = snapshot.params;
+        self.bypass.set_requested(
+            snapshot.bypass_engaged,
+            &mut self.global,
+            &snapshot.params.global,
+        );
         Ok(())
     }
 
@@ -326,6 +603,9 @@ impl OttProcessor {
             downward: self.global.downward.tick(),
             depth: self.global.depth.tick(),
         };
+
+        self.bypass
+            .advance(&mut self.global, &self.target_params.global);
 
         let left = left_in * input_gain;
         let right = right_in * input_gain;
@@ -404,7 +684,8 @@ mod unit_tests {
     clippy::similar_names,
     clippy::disallowed_macros,
     clippy::indexing_slicing,
-    clippy::arithmetic_side_effects
+    clippy::arithmetic_side_effects,
+    clippy::float_cmp
 )]
 mod processor_tests {
     use super::*;
@@ -416,6 +697,13 @@ mod processor_tests {
     use std::f32::consts::PI;
 
     const PROPERTY_CASES: u32 = 128;
+    const BYPASS_RMS_WINDOW: usize = 480; // 10 ms at the required 48 kHz.
+    /// A 1 ms hop prevents a transient from hiding between disjoint 10 ms windows.
+    const BYPASS_RMS_HOP: usize = 48;
+    /// The test permits at most 0.1 dB above the louder warmed endpoint.
+    /// This is below a meaningful level-meter excursion while leaving room for
+    /// the crossover's normal reconstruction ripple.
+    const BYPASS_TRANSITION_TOLERANCE_DB: f32 = 0.1;
 
     fn arbitrary_samples() -> impl Strategy<Value = Vec<f32>> {
         prop::collection::vec(any::<u32>().prop_map(f32::from_bits), 0..=256)
@@ -444,6 +732,302 @@ mod processor_tests {
         (0..n)
             .map(|i| amp * (2.0 * PI * freq_hz * i as f32 / sample_rate).sin())
             .collect()
+    }
+
+    fn render_sine(
+        processor: &mut OttProcessor,
+        start: usize,
+        frames: usize,
+        sample_rate: f32,
+    ) -> Vec<f32> {
+        let input: Vec<f32> = (start..start + frames)
+            .map(|i| 0.05 * (2.0 * PI * 1_000.0 * i as f32 / sample_rate).sin())
+            .collect();
+        let mut output = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        processor
+            .process(&input, &input, &mut output, &mut right)
+            .unwrap();
+        output
+    }
+
+    fn bypass_probe_params() -> OttParams {
+        let mut params = Preset::Default.params();
+        params.global.depth = NormalizedF32::new_const(1.0);
+        params.global.input_gain_db = IoGain::new_const(0.0);
+        params.global.output_gain_db = IoGain::new_const(-12.0);
+        params
+    }
+
+    fn rms_peak_windows(samples: &[f32]) -> f32 {
+        samples
+            .windows(BYPASS_RMS_WINDOW)
+            .step_by(BYPASS_RMS_HOP)
+            .map(rms)
+            .fold(0.0, f32::max)
+    }
+
+    fn warmed_rms(params: OttParams, snapshot: ControlSnapshot) -> f32 {
+        let sample_rate = 48_000.0;
+        let mut processor = OttProcessor::new(sample_rate, params).unwrap();
+        processor.set_control_snapshot(snapshot).unwrap();
+        let warm_frames = (sample_rate as usize) * 2;
+        let _ = render_sine(&mut processor, 0, warm_frames, sample_rate);
+        rms(&render_sine(
+            &mut processor,
+            warm_frames,
+            BYPASS_RMS_WINDOW,
+            sample_rate,
+        ))
+    }
+
+    #[test]
+    fn coordinated_bypass_transitions_stay_within_warmed_endpoint_levels() {
+        let sample_rate = 48_000.0;
+        let effect = bypass_probe_params();
+        let bypass = ControlSnapshot {
+            params: effect,
+            bypass_engaged: true,
+        };
+        let active = ControlSnapshot {
+            params: effect,
+            bypass_engaged: false,
+        };
+        let endpoint_limit = warmed_rms(effect, bypass).max(warmed_rms(effect, active))
+            * db_to_amp(BYPASS_TRANSITION_TOLERANCE_DB);
+
+        for (name, initial, next) in [
+            ("effect to bypass", active, bypass),
+            ("bypass to effect", bypass, active),
+        ] {
+            let mut processor = OttProcessor::new(sample_rate, effect).unwrap();
+            processor.set_control_snapshot(initial).unwrap();
+            let warm_frames = (sample_rate as usize) * 2;
+            let _ = render_sine(&mut processor, 0, warm_frames, sample_rate);
+            processor.set_control_snapshot(next).unwrap();
+            let transition = render_sine(
+                &mut processor,
+                warm_frames,
+                sample_rate as usize,
+                sample_rate,
+            );
+            let peak = rms_peak_windows(&transition);
+            assert!(
+                peak <= endpoint_limit,
+                "{name}: 10 ms RMS peak {peak} exceeds endpoint limit {endpoint_limit}"
+            );
+        }
+    }
+
+    #[test]
+    fn bypass_transition_with_non_unity_input_gain_stays_within_endpoint_levels() {
+        let sample_rate = 48_000.0;
+        let mut effect = bypass_probe_params();
+        effect.global.input_gain_db = IoGain::new_const(6.0);
+        effect.global.output_gain_db = IoGain::new_const(-18.0);
+        let active = ControlSnapshot {
+            params: effect,
+            bypass_engaged: false,
+        };
+        let bypass = ControlSnapshot {
+            params: effect,
+            bypass_engaged: true,
+        };
+        let endpoint_limit = warmed_rms(effect, bypass).max(warmed_rms(effect, active))
+            * db_to_amp(BYPASS_TRANSITION_TOLERANCE_DB);
+        let mut processor = OttProcessor::new(sample_rate, effect).unwrap();
+        processor.set_control_snapshot(active).unwrap();
+        let warm_frames = (sample_rate as usize) * 2;
+        let _ = render_sine(&mut processor, 0, warm_frames, sample_rate);
+        processor.set_control_snapshot(bypass).unwrap();
+        let peak = rms_peak_windows(&render_sine(
+            &mut processor,
+            warm_frames,
+            sample_rate as usize,
+            sample_rate,
+        ));
+        assert!(
+            peak <= endpoint_limit,
+            "non-unity input: 10 ms RMS peak {peak} exceeds endpoint limit {endpoint_limit}"
+        );
+    }
+
+    #[test]
+    fn bypass_reversal_uses_the_latest_snapshot_after_the_safe_waypoint() {
+        let sample_rate = 48_000.0;
+        let initial = bypass_probe_params();
+        let mut latest = initial;
+        latest.global.depth = NormalizedF32::new_const(0.25);
+        latest.global.output_gain_db = IoGain::new_const(-18.0);
+        let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: initial,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        let _ = render_sine(&mut processor, 0, 240, sample_rate);
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: latest,
+                bypass_engaged: false,
+            })
+            .unwrap();
+        let output = render_sine(&mut processor, 240, sample_rate as usize * 2, sample_rate);
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        assert_eq!(processor.bypass.stage, BypassStage::Active);
+        assert_eq!(processor.target_params, latest);
+        assert_eq!(processor.global.depth.target(), latest.global.depth.get());
+        assert_eq!(
+            processor.global.output_gain_db.target(),
+            latest.global.output_gain_db.get()
+        );
+    }
+
+    #[test]
+    fn engaging_depth_reversal_routes_directly_to_latest_active_gains() {
+        let sample_rate = 48_000.0;
+        let initial = bypass_probe_params();
+        let mut latest = initial;
+        latest.global.output_gain_db = IoGain::new_const(-18.0);
+        let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: initial,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        let _ = render_sine(&mut processor, 0, 240, sample_rate);
+        assert_eq!(processor.bypass.stage, BypassStage::EngagingDepth);
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: latest,
+                bypass_engaged: false,
+            })
+            .unwrap();
+        let _ = render_sine(&mut processor, 240, 8_000, sample_rate);
+        assert_eq!(processor.bypass.stage, BypassStage::DisengagingGains);
+        assert_eq!(
+            processor.global.output_gain_db.target(),
+            latest.global.output_gain_db.get()
+        );
+    }
+
+    #[test]
+    fn zero_depth_gain_stages_reverse_without_visiting_the_opposite_endpoint() {
+        let sample_rate = 48_000.0;
+        let mut active = bypass_probe_params();
+        active.global.input_gain_db = IoGain::new_const(6.0);
+        let mut latest = active;
+        latest.global.input_gain_db = IoGain::new_const(-6.0);
+        latest.global.output_gain_db = IoGain::new_const(-18.0);
+        let mut processor = OttProcessor::new(sample_rate, active).unwrap();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: active,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        let _ = render_sine(&mut processor, 0, 8_000, sample_rate);
+        assert_eq!(processor.bypass.stage, BypassStage::EngagingGains);
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: latest,
+                bypass_engaged: false,
+            })
+            .unwrap();
+        assert_eq!(processor.bypass.stage, BypassStage::DisengagingGains);
+        assert_eq!(
+            processor.global.input_gain_db.target(),
+            latest.global.input_gain_db.get()
+        );
+        assert_eq!(
+            processor.global.output_gain_db.target(),
+            latest.global.output_gain_db.get()
+        );
+
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: latest,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        assert_eq!(processor.bypass.stage, BypassStage::EngagingGains);
+        assert_eq!(processor.global.input_gain_db.target(), 0.0);
+        assert_eq!(processor.global.output_gain_db.target(), 0.0);
+    }
+
+    #[test]
+    fn latest_pot_target_updates_the_depth_stage_without_restarting_it() {
+        let sample_rate = 48_000.0;
+        let initial = bypass_probe_params();
+        let mut latest = initial;
+        latest.global.depth = NormalizedF32::new_const(0.25);
+        latest.global.input_gain_db = IoGain::new_const(6.0);
+        latest.global.output_gain_db = IoGain::new_const(-18.0);
+        let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: initial,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        let _ = render_sine(&mut processor, 0, sample_rate as usize, sample_rate);
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: initial,
+                bypass_engaged: false,
+            })
+            .unwrap();
+        // Gain restoration takes about 140 ms; at this point depth is already
+        // moving, so this specifically exercises a latest target mid-stage.
+        let _ = render_sine(&mut processor, sample_rate as usize, 8_000, sample_rate);
+        assert_eq!(processor.bypass.stage, BypassStage::DisengagingDepth);
+        let held_input_target = processor.global.input_gain_db.target();
+        let held_output_target = processor.global.output_gain_db.target();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params: latest,
+                bypass_engaged: false,
+            })
+            .unwrap();
+        assert_eq!(processor.global.input_gain_db.target(), held_input_target);
+        assert_eq!(processor.global.output_gain_db.target(), held_output_target);
+        assert_eq!(processor.global.depth.target(), latest.global.depth.get());
+        let output = render_sine(
+            &mut processor,
+            sample_rate as usize + 8_000,
+            sample_rate as usize,
+            sample_rate,
+        );
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        assert_eq!(processor.bypass.stage, BypassStage::Active);
+        assert_eq!(processor.global.depth.target(), latest.global.depth.get());
+        assert_eq!(
+            processor.global.input_gain_db.target(),
+            latest.global.input_gain_db.get()
+        );
+        assert_eq!(
+            processor.global.output_gain_db.target(),
+            latest.global.output_gain_db.get()
+        );
+    }
+
+    #[test]
+    fn reset_preserves_the_explicit_bypassed_steady_state() {
+        let params = bypass_probe_params();
+        let mut processor = OttProcessor::new(48_000.0, params).unwrap();
+        processor
+            .set_control_snapshot(ControlSnapshot {
+                params,
+                bypass_engaged: true,
+            })
+            .unwrap();
+        processor.reset(96_000.0).unwrap();
+        assert_eq!(processor.bypass.stage, BypassStage::Bypassed);
+        assert_eq!(processor.global.depth.current(), 0.0);
+        assert_eq!(processor.global.input_gain_db.current(), 0.0);
+        assert_eq!(processor.global.output_gain_db.current(), 0.0);
     }
 
     #[test]

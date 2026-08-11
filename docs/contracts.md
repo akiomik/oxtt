@@ -25,6 +25,7 @@ The crossover-pair and threshold-order invariants hold for every constructed `Cr
 
 - `OttProcessor::new(sample_rate, params)` validates its inputs. On success, parameters start at their targets and the detector starts at 0 dB gain; there is no startup parameter fade.
 - `OttProcessor::set_params(params)` validates against the current sample rate. A rejected update leaves the processor unchanged. An accepted update changes only targets: linear parameters use a 20 ms one-pole transition, crossover frequencies use the same transition in log-frequency space, and neither filter nor envelope state is reset.
+- `OttProcessor::set_control_snapshot(snapshot)` is the control-surface-only update path. It keeps the same validation and target-only behaviour for time, upward, downward, crossover, and per-band fields, but treats the explicit debounced `bypass_engaged` level as a coordinated transition request. It must not infer bypass from any parameter values.
 - `OttProcessor::reset(sample_rate)` validates the most recently accepted targets against the new rate. On success, it rebuilds the processor as if newly constructed with those targets; on failure, it leaves the existing processor unchanged. The host must call it after a sample-rate change.
 
 ## 3. Buffer processing
@@ -69,11 +70,11 @@ This section applies to a run with a physical control surface attached: six pote
 
 Separation from the audio callback:
 
-- Hardware is never read from the audio callback. Potentiometer and switch reads happen on a separate control thread; the callback only ever consumes finished `OttParams` snapshots.
+- Hardware is never read from the audio callback. Potentiometer and switch reads happen on a separate control thread; the callback only ever consumes finished `ControlSnapshot` values: a complete `OttParams` payload plus an explicit debounced bypass level.
 - The handoff into the callback is non-blocking, allocation-free, and lock-free in the callback's direction, and takes constant time whether or not a control moved. It satisfies section 6 in full.
 - Per cycle the callback takes at most the newest published snapshot. It never drains a backlog; intermediate positions a control passed through are not queued.
 - A snapshot is applied strictly after any pending sample-rate reset in the same cycle, so a reset never discards it.
-- A snapshot rejected by `set_params` leaves the processor unchanged (section 2). The callback neither reports nor retries it; the next accepted snapshot supersedes it.
+- A snapshot rejected by `set_control_snapshot` leaves the processor unchanged (section 2). The callback neither reports nor retries it; the next accepted snapshot supersedes it.
 
 Failure behaviour:
 
@@ -86,12 +87,17 @@ Parameter ownership:
 - Every other parameter — the crossover pair, all per-band values — is passed through from the CLI unchanged; no control is wired to it.
 - `--preset` therefore selects only the per-band values and the crossover pair. `SafeStart` and `Default` differ only in global `depth` and `output_gain_db` (`docs/decisions/0006-preset-band-values-are-a-compatibility-contract.md`), both of which the control surface owns, so they select identical behaviour under `--controls`. `Riot` differs in its per-band values and crossover pair, so it remains meaningful with controls enabled.
 - The two gain controls sweep the whole `[-24, 24]` dB range of section 1, linearly across their travel, so unity gain is at the centre of the rotation.
-- Every snapshot the control surface publishes is a complete `OttParams` that satisfies section 1.
+- Every snapshot the control surface publishes carries a complete `OttParams` that satisfies section 1. The payload always reflects the current pot positions, even while bypassed.
 
 Bypass:
 
-- The bypass is an effect bypass: while engaged the published `depth` is 0 and both published gains are unity, regardless of where the Depth, Input Gain and Output Gain controls sit, and the signal stays on the input-gain/crossover-reconstruction/output-gain path (section 4). It is never a raw-signal bypass.
+- The bypass is an effect bypass. Its debounced level is transported separately from the complete pot snapshot; a coincidental `depth = 0`, input gain `0 dB`, output gain `0 dB` payload is never a bypass request. The signal stays on the input-gain/crossover-reconstruction/output-gain path (section 4); it is never a raw-signal bypass.
 - Because both gains are pinned to unity, the bypassed output cannot exceed the input: bypass is a guaranteed-unity escape, not a gain stage.
+- The DSP sequences the three coupled values sample by sample. On engage it holds the active gains, converges depth to zero, then converges both gains to unity. On disengage it holds depth at zero, converges both gains to their latest pot targets, then converges depth to its latest target. Time, upward, downward, crossover, and per-band targets continue through their normal update path throughout.
+- Each stage snaps once its remaining error is at most `0.001` depth (about -60 dB wet/dry weight) or `0.01 dB` per gain. These finite thresholds prevent an asymptotic stage from stalling, are below audibility, and add no detector-settle delay: the detector tracks while depth is already zero. A reversal during a moving-depth stage completes only that movement to zero; at the zero-depth waypoint (including either gain stage) the DSP immediately targets the latest requested gain endpoint, without first visiting the opposite one.
+- A latest depth-pot value may replace the depth target while the disengaging depth stage is moving. Gain-pot values received in that stage are retained in the complete snapshot but deferred until depth has settled; only then does ordinary active gain smoothing begin. Thus no stage moves depth and gains together.
+- DSP regression coverage uses the issue #4 48 kHz / 1 kHz / 0.05-amplitude sine probe, warmed states, and sliding 10 ms RMS windows with a 1 ms hop. Its transition peak allowance is `0.1 dB` above the louder endpoint (leaving only normal crossover reconstruction ripple), and it includes a non-unity input-gain case.
 - The switch latches mechanically, so its debounced position *is* the bypass state; there is no press to detect and nothing to toggle. A new position is adopted once it has survived 15 consecutive reads (28 ms at the 2 ms poll interval, so up to 30 ms between the throw and the parameters following), which is what makes the contact bounce of a single throw produce exactly one state change.
 - `time`, `upward`, and `downward` keep tracking their controls while bypassed. Disengaging the bypass restores the Depth and gain controls' positions at that moment, not the positions they held when the bypass was engaged.
 - A switch resting in the bypassed position when the process starts comes up bypassed: the panel position is the state, from the first reading onward.
+- Required hardware follow-up (not yet recorded as passed): on the Pi, use a sustained signal and audio-interface level meter to check both bypass directions with non-unity input/output gain positions.

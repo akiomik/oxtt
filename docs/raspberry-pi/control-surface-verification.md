@@ -20,7 +20,7 @@ substitute your own.
 Two things are deliberately *not* verified here. The audio path itself is
 covered by [`usb-audio-verification.md`](usb-audio-verification.md) and its
 `128×3` baseline is reused unchanged; the pure conditioning logic (filter,
-deadband, debounce, bypass override) is covered by the unit and property tests
+deadband, debounce, explicit bypass-level transport) is covered by the unit and property tests
 in `src/control/mapping.rs` and needs no hardware. What this document verifies
 is the part that only real hardware can show: what the assembled surface
 actually reads, and whether the whole chain from a knob to the audio callback
@@ -228,6 +228,10 @@ All checks passed.
 - **Disengaging bypass restores the Depth and both gain pots' *current*
   position**, not the position held when bypass was engaged. Confirmed.
 - **Exit report.** `oxtt: xrun_count=0` and `oxtt: control_read_failures=0`.
+
+### Required bypass-transition follow-up
+
+Not yet performed for the coordinated transition implementation: feed a sustained signal, set non-unity input and output gain positions, and observe the audio-interface level meter through both effect-to-bypass and bypass-to-effect throws. Record the measured endpoint and transition levels before marking this follow-up passed.
 
 ### Regression check
 
