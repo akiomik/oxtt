@@ -26,23 +26,58 @@ keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
 categories = ["multimedia::audio"]
 
 [features]
+default = ["jack-host"]
+
+# The JACK host: the `oxtt` binary, plus the control surface's transport layer
+# (`control::thread`), which only a JACK build needs — Bela reads its controls
+# inside the audio callback and has nothing to carry across a thread boundary
+# (ADR 0010, ADR 0011). `signal-hook` and `triple_buffer` belong to it for the
+# same reason.
+jack-host = ["dep:jack", "dep:signal-hook", "dep:triple_buffer"]
+
+# The Bela host: the `oxtt-bela` binary, cross-compiled for a Bela Gem Stereo
+# (ADR 0011, docs/bela/cross-compile.md). Unlike `pi-controls` this builds on
+# any platform: `bela`'s device code is behind a `bela_device` cfg its build
+# script only sets for aarch64 Linux, so the application type, the control
+# conversion and their tests compile and run on a development machine.
+bela-host = ["dep:bela"]
+
 # The Raspberry Pi control surface (SPI ADC + GPIO). Off by default because
 # `rppal` is Linux-only and fails to compile on macOS, where the DSP core and
 # its tests are developed; only a build targeting the Pi itself enables this.
+# It is a control surface for the JACK host, not a host of its own.
 pi-controls = ["dep:rppal"]
 
 [dependencies]
+bela = { version = "0.6", optional = true }
 clap = { version = "4", features = ["derive"] }
 ebur128 = "0.1.10"
 hound = "3.5.1"
-jack = { workspace = true }
+jack = { workspace = true, optional = true }
 nutype = "0.7.0"
 rppal = { workspace = true, optional = true }
-signal-hook = "0.4"
+signal-hook = { version = "0.4", optional = true }
 thiserror = { workspace = true }
 # Hands whole `OttParams` snapshots from the control thread to the audio
 # callback without a lock or an allocation (docs/contracts.md §6).
-triple_buffer = "9"
+triple_buffer = { version = "9", optional = true }
+
+# `oxtt` (JACK) and `oxtt-bela` link different audio systems that exist on
+# different machines, so each binary is tied to its host's feature rather than
+# being cfg'd out from the inside. `oxtt-render` needs neither.
+[[bin]]
+name = "oxtt"
+path = "src/main.rs"
+required-features = ["jack-host"]
+
+[[bin]]
+name = "oxtt-bela"
+path = "src/bin/oxtt-bela.rs"
+required-features = ["bela-host"]
+
+[[bin]]
+name = "oxtt-render"
+path = "src/bin/oxtt-render.rs"
 
 [dev-dependencies]
 no-panic = "0.1"

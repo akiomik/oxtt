@@ -1,7 +1,12 @@
 //! Command-line argument definitions for the `oxtt` binary (docs/contracts.md §1).
 
+#[cfg(feature = "bela-host")]
+use core::num::NonZeroU32;
+
 use clap::{Args, Parser};
 
+#[cfg(feature = "bela-host")]
+use crate::bela_host::RunOptions;
 use crate::params::{
     ConfigError, CrossoverFreqHigh, CrossoverFreqLow, CrossoverSplit, IoGain, NormalizedF32,
     OttParams, Preset,
@@ -77,6 +82,94 @@ pub struct Cli {
     #[cfg(feature = "pi-controls")]
     #[arg(long)]
     pub controls: bool,
+}
+
+/// Command-line arguments for the Bela host.
+///
+/// A separate parser from [`Cli`] rather than shared flags, because the two
+/// hosts differ in more than they share: JACK reports xruns and Bela reports
+/// underruns, JACK is told its block size and sample rate by the server while
+/// Bela is asked for them, and only Bela has codec levels.
+///
+/// oxtt does not pass a command line on to `bela::Bela`. Everything the board
+/// needs to be told has a flag here, so that there is one `--help` and so that
+/// libbela's own options are never exposed — several of them end the process
+/// rather than report an error (bela-rs `docs/board-facts.md`), and
+/// `--thread-count` would silently break DSP that carries state across frames
+/// if `OttApplication::validate_settings` were not there to catch it.
+#[cfg(feature = "bela-host")]
+#[derive(Parser, Debug, Clone)]
+#[command(
+    name = "oxtt-bela",
+    version,
+    about = "A 3-band upward/downward multiband compressor for Bela Gem Stereo",
+    long_about = None,
+    after_help = "NOTE: `default` and `riot` presets are intentionally strong and can exceed 0 dBFS.\nStart with `safe-start` and a low monitor level.",
+    allow_negative_numbers = true
+)]
+pub struct BelaCli {
+    /// Startup preset and global parameter overrides.
+    #[command(flatten)]
+    pub params: ParamsArgs,
+
+    /// audio frames per block
+    #[arg(long, default_value_t = crate::bela_host::PERIOD_SIZE)]
+    pub period: NonZeroU32,
+
+    /// audio sample rate to ask the board for
+    #[arg(long, value_name = "Hz", default_value_t = crate::bela_host::SAMPLE_RATE_HZ)]
+    pub sample_rate: NonZeroU32,
+
+    /// drive depth/time/upward/downward and the two gains from the hardware
+    /// control surface (pots on A0-A5, bypass switch on D0)
+    ///
+    /// Opt-in for the same reason as the Raspberry Pi's flag: the same binary
+    /// has to stay runnable on a board with nothing wired to its headers,
+    /// which is how the audio verification runs it.
+    #[arg(long)]
+    pub controls: bool,
+
+    /// measure CPU load this many times per block and report it on exit
+    ///
+    /// Off by default because libbela refuses CPU monitoring above a period
+    /// of `MAX_MONITORED_PERIOD_SIZE`, and failing to start over a diagnostic
+    /// nobody asked for would be the wrong trade.
+    #[arg(long, value_name = "PER_BLOCK")]
+    pub report_cpu: Option<NonZeroU32>,
+
+    /// print the run's underrun and control-surface counts to stderr after a
+    /// normal exit
+    #[arg(long)]
+    pub report_on_exit: bool,
+
+    /// codec analog input gain, applied before the DSP
+    ///
+    /// Not to be confused with `--input-gain`, which is the per-effect-band
+    /// gain inside the DSP. This one is the converter's.
+    #[arg(long, value_name = "dB")]
+    pub adc_gain_db: Option<f32>,
+
+    /// codec line output level, applied after the DSP
+    ///
+    /// Not to be confused with `--output-gain`, which is the post-sum gain
+    /// inside the DSP. This one is the converter's.
+    #[arg(long, value_name = "dB")]
+    pub line_out_level_db: Option<f32>,
+}
+
+#[cfg(feature = "bela-host")]
+impl From<&BelaCli> for RunOptions {
+    fn from(cli: &BelaCli) -> Self {
+        Self {
+            period_size: cli.period,
+            sample_rate: cli.sample_rate,
+            controls: cli.controls,
+            cpu_monitoring: cli.report_cpu,
+            adc_gain_db: cli.adc_gain_db,
+            line_out_level_db: cli.line_out_level_db,
+            report_on_exit: cli.report_on_exit,
+        }
+    }
 }
 
 /// Crossover octave separation is checked here, immediately after parsing

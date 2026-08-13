@@ -152,20 +152,28 @@ pub struct RawControls {
     pub bypass_engaged: bool,
 }
 
-/// Layer A: a source of [`RawControls`] readings.
+/// A source of [`RawControls`] readings that owns its hardware and is polled
+/// from a thread of its own.
 ///
-/// This is not a general platform-abstraction layer, and should not grow into
-/// one. It exists for exactly two reasons:
+/// This is the shape the Raspberry Pi's control surface has, not a platform
+/// seam, and it should not grow into one. `read` takes `&mut self` because
+/// the SPI bus and the GPIO line live inside the implementation, and it
+/// returns a `Result` because an SPI transfer can fail — neither is true of
+/// every platform. The Bela host reads its pots out of the block context it
+/// is handed, so it has no `self` to own them and nothing to fail; it builds
+/// a [`RawControls`] directly instead of implementing this trait (see
+/// `src/bela_host/controls.rs` and ADR 0010).
 ///
-/// - a fake source lets the mapping layer and (later) the control thread be
-///   exercised on a development machine, with no MCP3008 and no Linux;
-/// - it confines what a platform port has to rewrite to the hardware read
-///   itself — the conditioning, the parameter mapping, and the transport all
-///   stay put.
+/// What both platforms share is the *value*: [`RawControls`] is the seam
+/// between the hardware read and the mapping layer, and that is where the
+/// portability lives.
+///
+/// It still earns its place here: a fake source lets the mapping layer and
+/// the control thread be exercised on a development machine, with no MCP3008
+/// and no Linux.
 ///
 /// Implementations are free to block or allocate: a source is polled from the
-/// control thread on the Pi. A Bela port reading inside `render()` is the
-/// exception and must respect docs/contracts.md §6 in its own implementation.
+/// control thread on the Pi, never from the audio callback.
 pub trait ControlSource {
     /// How this source's hardware read can fail.
     type Error: StdError;
