@@ -167,8 +167,19 @@ Source connected and silent:
 
 Identical within 0.02 dB between −12 dB and 0 dB, so the dominant noise is
 downstream of the input gain. The rule that follows: set the input gain as high
-as the source allows without clipping. The board's clean range is about 77 dB
-peak-to-noise and cannot be raised by adjusting the level chain.
+as the source allows without clipping.
+
+The output gain was ruled out the same way. With the effect out of the way it
+buys nothing — the floor moves 0.5 dB across 18 dB of output gain, because what
+`--depth 0` shows is the DAC rather than the ADC. With the effect running the
+floor scales 1:1 with it, because by then the noise is the ADC's raised about
+31 dB by the upward compressor. Either way the ratio does not move.
+
+The converters measure roughly what TI claims for them: about 98 dBA from the
+clean input ceiling to the floor at unity output gain, against a 92 dB ADC and
+a 102 dBA DAC. The board is about 30 dB behind the interface it is measured
+with, and that gap is the whole of the problem
+([noise-floor.md](noise-floor.md)).
 
 ### The effect raises the noise floor into audibility — CONFIRMED
 

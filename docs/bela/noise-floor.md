@@ -123,14 +123,71 @@ between source level and input gain do not change it. The 2.6 dB at +16 dB is
 the input stage starting to contribute at high gain.
 
 That settles the rule: **set the input gain as high as the source allows
-without clipping, and nothing else about the level chain matters.** The ceiling
-is the same however the gain is divided: both configurations clip at about
-−10 dBFS peak at the Babyface.
+without clipping.** The ceiling is the same however the gain is divided: both
+configurations clip at about −10 dBFS peak at the Babyface.
 
-So the board's clean dynamic range is fixed at roughly **77 dB peak-to-noise**
-(−10 dBFS clean peak against a −86.8 dBFS floor), or about 62 dB RMS-to-noise
-for material with a 15 dB crest factor. It cannot be raised by adjusting
-anything.
+### Nor with the output gain, where it matters
+
+The other end of the chain is worth ruling out too, because `safe-start`'s
+output gain is −18 dB and that attenuates everything ahead of it before the
+converter that follows.
+
+With the effect out of the way (`--depth 0`), the floor barely moves:
+
+| Output gain | A-weighted |
+| --- | --- |
+| −18 dB (preset) | −91.61 dBA |
+| −6 dB | −91.55 dBA |
+| 0 dB | −91.07 dBA |
+
+0.5 dB across 18 dB of gain. So **the floor `--depth 0` shows is the DAC and
+the output stage, not the ADC** — the ADC's contribution is attenuated below it
+by the same −18 dB and never surfaces. That has a consequence for how the
+figures here should be read: *nothing in this document measures the ADC.*
+
+With the effect running it is the other way round:
+
+| Output gain | A-weighted |
+| --- | --- |
+| −18 dB (preset) | −77.34 dBA |
+| 0 dB | −59.08 dBA |
+| +6 dB | −53.06 dBA |
+
+1:1 with the gain. By then the noise is the ADC's, raised about 31 dB by the
+upward compressor, which puts it far above the DAC's own — so it scales with
+the signal and the ratio does not move. **The 24 dB of unused DAC headroom
+buys nothing**, which was worth measuring because it looked like it should.
+
+### The datasheet figures
+
+| | Specification | Measured here |
+| --- | --- | --- |
+| RME Babyface Pro FS, line 3/4 | 116 dB RMS unweighted, 120 dBA | −116.47 dBFS floor, unconnected |
+| Bela Gem: TI TLV320AIC3104, ADC | 92 dB SNR (typ) | never the limiting term; not measured |
+| Bela Gem: TI TLV320AIC3104, DAC | 102 dBA SNR | −91.07 dBA floor at unity output gain |
+
+The interface matches its specification almost exactly, which is the reassuring
+half — it is a valid reference rather than a contributor.
+
+The codec's figures are consistent with what was measured, and they correct one
+of the readings above. A round trip at unity output gain puts the clean input
+ceiling about 98 dBA above the floor, which is what a 102 dBA DAC in series
+with a 92 dB ADC should give, give or take the precision available here. So the
+board's converters are doing roughly what they claim.
+
+**That means the "77 dB peak-to-noise" this section first arrived at was
+measuring `safe-start`'s −18 dB output gain, not the board.** Attenuating by
+18 dB before a converter with a fixed noise floor throws away 18 dB, and that
+is all that figure was showing. The board is about 30 dB behind the interface,
+not 40.
+
+It changes nothing about the problem. The gain that matters is the upward
+compressor's, it is applied before the output gain, and the noise it raises
+scales with the output gain exactly as the signal does.
+
+A register change is reported to buy the codec about 1.5 dB at the cost of
+power. Unconfirmed, and 1.5 dB against a 12 dB shortfall does not change the
+decision either way.
 
 ### It is broadband, and it is high-frequency
 
