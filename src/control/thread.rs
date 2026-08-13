@@ -240,7 +240,7 @@ fn report_read_failure(failures_before: u64, error: &impl fmt::Display) {
 // unwrapping known-good fixtures and panicking on a missed deadline are the
 // intent here rather than an oversight. The float comparisons are exact for
 // the same reason as in `mapping.rs`: a published value is a hand-computable
-// count divided by `ADC_MAX_COUNT`, not the result of accumulated arithmetic.
+// count divided by `POT_POSITION_MAX`, not the result of accumulated arithmetic.
 #[allow(clippy::unwrap_used, clippy::panic, clippy::float_cmp)]
 mod tests {
     use core::convert::Infallible;
@@ -249,7 +249,7 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::control::{ADC_MAX_COUNT, AdcCount, Pots, RawControls};
+    use crate::control::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
     use crate::dsp::OttProcessor;
     use crate::params::Preset;
 
@@ -280,7 +280,7 @@ mod tests {
     }
 
     fn reading(raw: u16) -> RawControls {
-        let count = AdcCount::try_new(raw).unwrap();
+        let count = PotPosition::try_new(raw).unwrap();
         RawControls {
             pots: Pots {
                 depth: count,
@@ -295,7 +295,7 @@ mod tests {
     }
 
     fn normalized(raw: u16) -> f32 {
-        f32::from(raw) / f32::from(ADC_MAX_COUNT)
+        f32::from(raw) / f32::from(POT_POSITION_MAX)
     }
 
     /// A pot the test can turn, standing in for the MCP3008.

@@ -34,5 +34,5 @@ mod thread;
 pub use mapping::ControlMapping;
 #[cfg(feature = "pi-controls")]
 pub use pi::{PiControlError, PiControls};
-pub use raw::{ADC_MAX_COUNT, AdcCount, ControlSource, Pots, RawControls};
+pub use raw::{ControlSource, POT_POSITION_MAX, PotPosition, Pots, RawControls};
 pub use thread::{ControlHandle, DEFAULT_POLL_INTERVAL};

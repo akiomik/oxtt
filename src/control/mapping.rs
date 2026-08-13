@@ -13,7 +13,7 @@
 
 use crate::params::{ControlSnapshot, IoGain, NormalizedF32, OttParams};
 
-use super::raw::{ADC_MAX_COUNT, Pots, RawControls};
+use super::raw::{POT_POSITION_MAX, Pots, RawControls};
 
 /// One-pole low-pass coefficient applied to each pot's raw count, per read.
 ///
@@ -76,7 +76,7 @@ const GAIN_MIN_DB: f32 = -24.0;
 /// How many dB the gain pots sweep from stop to stop.
 ///
 /// `GAIN_MIN_DB + GAIN_SPAN_DB` is [`IoGain`]'s upper bound, so the map is
-/// `dB = raw / ADC_MAX_COUNT * GAIN_SPAN_DB + GAIN_MIN_DB`: plain and linear,
+/// `dB = raw / POT_POSITION_MAX * GAIN_SPAN_DB + GAIN_MIN_DB`: plain and linear,
 /// with count 0 landing on exactly -24 dB, count 1023 on exactly +24 dB, and
 /// unity at the mid point of the pot's rotation — which is the position a
 /// player can find without looking, and the one a gain knob should mean
@@ -351,7 +351,7 @@ impl ControlMapping {
 /// `counts` is filter state, bounded by the raw counts that produced it, so
 /// every fraction below is finite and within `0.0..=1.0`.
 fn params_with_pots(base: OttParams, counts: Pots<f32>) -> OttParams {
-    let fractions = counts.map(|count| count / f32::from(ADC_MAX_COUNT));
+    let fractions = counts.map(|count| count / f32::from(POT_POSITION_MAX));
 
     let mut params = base;
     params.global.depth = normalized_or(fractions.depth, base.global.depth);
@@ -409,7 +409,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::control::AdcCount;
+    use crate::control::PotPosition;
     use crate::params::Preset;
 
     const PROPERTY_CASES: u32 = 128;
@@ -421,8 +421,8 @@ mod tests {
     /// is 511.5. Where the gain pots sit for the tests that are not about them.
     const GAIN_CENTRE_COUNT: u16 = 512;
 
-    fn count(raw: u16) -> AdcCount {
-        AdcCount::try_new(raw).unwrap()
+    fn count(raw: u16) -> PotPosition {
+        PotPosition::try_new(raw).unwrap()
     }
 
     /// A reading of the four effect pots, with both gain pots parked at the
@@ -460,7 +460,7 @@ mod tests {
     }
 
     fn normalized(raw: u16) -> f32 {
-        f32::from(raw) / f32::from(ADC_MAX_COUNT)
+        f32::from(raw) / f32::from(POT_POSITION_MAX)
     }
 
     /// The dB a gain pot at `raw` maps to, spelled out independently of the
@@ -666,7 +666,7 @@ mod tests {
             "a gain pot at its lower stop must be exactly -24 dB"
         );
         assert_eq!(
-            first_published_gains(ADC_MAX_COUNT, ADC_MAX_COUNT),
+            first_published_gains(POT_POSITION_MAX, POT_POSITION_MAX),
             (24.0, 24.0),
             "a gain pot at its upper stop must be exactly +24 dB"
         );
@@ -703,7 +703,7 @@ mod tests {
 
         let bottom = step(0, 200);
         let middle = step(400, 600);
-        let top = step(823, ADC_MAX_COUNT);
+        let top = step(823, POT_POSITION_MAX);
         assert!(
             (bottom - middle).abs() < 1e-4 && (middle - top).abs() < 1e-4,
             "200 counts must be the same number of dB anywhere on the sweep, got {bottom}, {middle}, {top}"
@@ -1011,8 +1011,8 @@ mod tests {
         );
     }
 
-    fn arbitrary_count() -> impl Strategy<Value = AdcCount> {
-        (0..=ADC_MAX_COUNT).prop_map(count)
+    fn arbitrary_count() -> impl Strategy<Value = PotPosition> {
+        (0..=POT_POSITION_MAX).prop_map(count)
     }
 
     fn arbitrary_reading() -> impl Strategy<Value = RawControls> {
@@ -1090,8 +1090,8 @@ mod tests {
         /// fallback cannot hide inside the tolerance.
         #[test]
         fn the_gain_map_never_falls_back_to_the_base_value(
-            input_raw in 0..=ADC_MAX_COUNT,
-            output_raw in 0..=ADC_MAX_COUNT,
+            input_raw in 0..=POT_POSITION_MAX,
+            output_raw in 0..=POT_POSITION_MAX,
         ) {
             let mut mapping = ControlMapping::new(Preset::SafeStart.params());
             let params = mapping

@@ -10,34 +10,63 @@ use core::error::Error as StdError;
 
 use nutype::nutype;
 
-/// The largest count an MCP3008 conversion can produce.
+/// The position of a pot at its upper stop.
 ///
-/// The MCP3008 is a 10-bit successive-approximation converter, so a
-/// single-ended conversion spans `0..=2^10 - 1` and full scale is the
-/// reference voltage (3.3 V on the Pi's header).
-pub const ADC_MAX_COUNT: u16 = 1023;
+/// The scale is 1024 steps because that is what the Raspberry Pi's MCP3008
+/// produces directly: a 10-bit successive-approximation conversion spans
+/// `0..=2^10 - 1`, with full scale at the reference voltage (3.3 V on the
+/// Pi's header). It stays the scale on a platform whose converter is a
+/// different width, because the mapping layer's constants — the deadband
+/// above all — are calibrated in these steps.
+pub const POT_POSITION_MAX: u16 = 1023;
 
-/// One MCP3008 conversion result: a 10-bit count, from zero up to [`ADC_MAX_COUNT`].
+/// Where a pot is sitting, as a step from zero up to [`POT_POSITION_MAX`].
+///
+/// A quantised position rather than one converter's output: the Pi's
+/// MCP3008 produces this scale directly, and a platform reading its pots
+/// some other way maps onto it (`src/bela_host/controls.rs`). What travels
+/// through the mapping layer is where the pot is, not how it was measured.
 ///
 /// Only the ceiling needs a validator; `u16` already excludes negative
-/// counts, and 0 is a legitimate reading (pot at its lower stop).
+/// positions, and 0 is a legitimate reading (pot at its lower stop).
 ///
 /// Following the convention in `src/params/value.rs`, the fallible `try_new`
-/// is the entry point for untrusted input — here a byte pair off the SPI bus
-/// rather than a CLI argument — and `get()` is the accessor. There is no
-/// `new_const`: no count is ever written as a literal outside tests.
+/// is the entry point for untrusted input — here a byte pair off the SPI bus,
+/// or a reading out of an audio callback's block — `new_const` is for
+/// literals, and `get()` is the accessor.
 #[nutype(
     const_fn,
-    validate(less_or_equal = ADC_MAX_COUNT),
+    validate(less_or_equal = POT_POSITION_MAX),
     derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)
 )]
-pub struct AdcCount(u16);
+pub struct PotPosition(u16);
 
-impl AdcCount {
+impl PotPosition {
     /// Returns the wrapped value.
     #[must_use]
     pub const fn get(self) -> u16 {
         self.into_inner()
+    }
+
+    /// Wraps a literal position, failing to compile if it is out of range.
+    ///
+    /// The same shape as `new_const` in `src/params/value.rs`, and here for a
+    /// sharper reason than call-site brevity: the Bela host needs a position
+    /// to fall back to when a reading means nothing, and it needs it inside
+    /// the audio callback, where `try_new(0).unwrap()` would put a panic path
+    /// on the real-time path to express something already known at compile
+    /// time (docs/contracts.md §6).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` is above [`POT_POSITION_MAX`].
+    #[must_use]
+    #[allow(clippy::panic)] // the only way to fail a const-context literal at compile time.
+    pub const fn new_const(value: u16) -> Self {
+        match Self::try_new(value) {
+            Ok(v) => v,
+            Err(_) => panic!("PotPosition literal out of range"),
+        }
     }
 }
 
@@ -106,7 +135,7 @@ impl<T> Pots<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawControls {
     /// The six pot readings.
-    pub pots: Pots<AdcCount>,
+    pub pots: Pots<PotPosition>,
     /// Which position the bypass switch is resting in: `true` for bypassed.
     ///
     /// The panel part is a mechanically *latching* (alternate-action) switch,
@@ -157,11 +186,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn adc_count_accepts_the_full_10_bit_range_and_rejects_above_it() {
-        assert!(AdcCount::try_new(0).is_ok());
-        assert!(AdcCount::try_new(ADC_MAX_COUNT).is_ok());
-        assert!(AdcCount::try_new(ADC_MAX_COUNT + 1).is_err());
-        assert_eq!(AdcCount::try_new(512).unwrap().get(), 512);
+    fn pot_position_accepts_the_full_scale_and_rejects_above_it() {
+        assert!(PotPosition::try_new(0).is_ok());
+        assert!(PotPosition::try_new(POT_POSITION_MAX).is_ok());
+        assert!(PotPosition::try_new(POT_POSITION_MAX + 1).is_err());
+        assert_eq!(PotPosition::try_new(512).unwrap().get(), 512);
     }
 
     #[test]
@@ -270,12 +299,12 @@ mod tests {
     fn a_fake_source_can_stand_in_for_hardware() {
         let reading = RawControls {
             pots: Pots {
-                depth: AdcCount::try_new(1).unwrap(),
-                time: AdcCount::try_new(2).unwrap(),
-                upward: AdcCount::try_new(3).unwrap(),
-                downward: AdcCount::try_new(4).unwrap(),
-                input_gain: AdcCount::try_new(5).unwrap(),
-                output_gain: AdcCount::try_new(6).unwrap(),
+                depth: PotPosition::try_new(1).unwrap(),
+                time: PotPosition::try_new(2).unwrap(),
+                upward: PotPosition::try_new(3).unwrap(),
+                downward: PotPosition::try_new(4).unwrap(),
+                input_gain: PotPosition::try_new(5).unwrap(),
+                output_gain: PotPosition::try_new(6).unwrap(),
             },
             bypass_engaged: true,
         };

@@ -40,7 +40,7 @@ use rppal::spi::Error as SpiError;
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use thiserror::Error;
 
-use super::raw::{AdcCount, AdcCountError, ControlSource, Pots, RawControls};
+use super::raw::{ControlSource, PotPosition, PotPositionError, Pots, RawControls};
 
 /// GPIO pin (BCM numbering) the bypass switch is wired to.
 ///
@@ -124,8 +124,8 @@ const fn decode_response(response: [u8; 3]) -> u16 {
     // `from_be_bytes` rather than a shift-and-or: it is the same value with no
     // arithmetic to prove non-trapping, and it makes the byte order explicit.
     // Masking the high byte first bounds the result at `0x03FF` = 1023, which
-    // is `ADC_MAX_COUNT`, so every possible response decodes to a valid
-    // `AdcCount` (exhaustively asserted in the tests below).
+    // is `POT_POSITION_MAX`, so every possible response decodes to a valid
+    // `PotPosition` (exhaustively asserted in the tests below).
     u16::from_be_bytes([high & HIGH_BITS_MASK, low])
 }
 
@@ -143,9 +143,9 @@ pub enum PiControlError {
     /// The bypass switch's GPIO pin could not be acquired or read.
     #[error("bypass switch GPIO{BYPASS_GPIO} access failed: {0}")]
     Gpio(#[from] GpioError),
-    /// A decoded conversion was out of range for [`AdcCount`].
+    /// A decoded conversion was out of range for [`PotPosition`].
     #[error("MCP3008 conversion out of range: {0}")]
-    Count(#[from] AdcCountError),
+    Count(#[from] PotPositionError),
 }
 
 /// Layer A for the Raspberry Pi: an MCP3008 on SPI0/CE0 and a bypass switch on
@@ -184,17 +184,17 @@ impl PiControls {
     }
 
     /// Runs one conversion on `channel` and returns its count.
-    fn read_channel(&self, channel: u8) -> Result<AdcCount, PiControlError> {
+    fn read_channel(&self, channel: u8) -> Result<PotPosition, PiControlError> {
         let mut response = [0_u8; 3];
         self.spi.transfer(&mut response, &command_for(channel))?;
 
         // `decode_response` masks to 10 bits, so its result cannot exceed
-        // `ADC_MAX_COUNT` and this conversion cannot actually fail. It is
+        // `POT_POSITION_MAX` and this conversion cannot actually fail. It is
         // still propagated rather than unwrapped: the alternative is a panic
         // on the control thread if that reasoning ever stops holding, and
         // `PiControlError::Count` turns the same event into a counted,
         // reported read failure that leaves audio running.
-        Ok(AdcCount::try_new(decode_response(response))?)
+        Ok(PotPosition::try_new(decode_response(response))?)
     }
 }
 
@@ -240,7 +240,7 @@ impl ControlSource for PiControls {
 // only that the mock matches this code.
 mod tests {
     use super::*;
-    use crate::control::ADC_MAX_COUNT;
+    use crate::control::POT_POSITION_MAX;
 
     #[test]
     fn the_command_selects_each_wired_channel() {
@@ -300,7 +300,7 @@ mod tests {
     fn a_full_scale_response_decodes_to_the_adc_ceiling() {
         assert_eq!(
             decode_response([0x00, 0xFF, 0xFF]),
-            ADC_MAX_COUNT,
+            POT_POSITION_MAX,
             "an all-ones response is full scale, not an overflow"
         );
     }
@@ -345,18 +345,18 @@ mod tests {
     #[test]
     fn every_possible_response_decodes_to_a_valid_count() {
         // The exhaustive form of the claim `read_channel` relies on: masking
-        // to 10 bits means `AdcCount::try_new` cannot reject a decoded
+        // to 10 bits means `PotPosition::try_new` cannot reject a decoded
         // response, whatever the bus returns.
         for high in 0..=u8::MAX {
             for low in 0..=u8::MAX {
                 let count = decode_response([0xFF, high, low]);
                 assert!(
-                    count <= ADC_MAX_COUNT,
+                    count <= POT_POSITION_MAX,
                     "decoded {count} from high={high:#04x} low={low:#04x}, above the 10-bit ceiling"
                 );
                 assert!(
-                    AdcCount::try_new(count).is_ok(),
-                    "AdcCount rejected {count}, decoded from high={high:#04x} low={low:#04x}"
+                    PotPosition::try_new(count).is_ok(),
+                    "PotPosition rejected {count}, decoded from high={high:#04x} low={low:#04x}"
                 );
             }
         }
