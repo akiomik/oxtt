@@ -1,7 +1,19 @@
-# Scoped to this exact target triple (not `[build]`/`RUSTFLAGS`) so it only
-# fires when actually compiling for the Raspberry Pi 5 (built natively on
-# the Pi itself, not cross-compiled); CI (ubuntu-latest,
-# x86_64-unknown-linux-gnu) and macOS development builds never compile for
-# this triple, so they are unaffected.
-[target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=cortex-a76"]
+# Intentionally empty of `[target.aarch64-unknown-linux-gnu]`.
+#
+# Two supported boards now compile for that one triple and want opposite
+# settings from it: a Raspberry Pi 5 is a Cortex-A76 built natively on the Pi,
+# and a Bela Gem Stereo is a Cortex-A53 cross-compiled from a development
+# machine with a linker of its own. A `[target.<triple>]` section cannot tell
+# them apart, and whichever one it described would silently mis-build the
+# other — a Pi binary linked with a cross toolchain, or a Bela binary built
+# for the wrong microarchitecture.
+#
+# So each build passes its own settings through the environment instead, from
+# the script that knows which board it is building for:
+#
+#   scripts/pi/build.sh     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS
+#   scripts/bela/build.sh   the same, plus ..._LINKER
+#
+# Those variables outrank this file, so nothing here has to be overridden.
+# What is left is a plain `cargo check --target aarch64-unknown-linux-gnu`
+# that needs no linker and no sysroot, which is what CI type-checks with.

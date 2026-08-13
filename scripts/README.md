@@ -1,4 +1,26 @@
-# Test scripts
+# Scripts
+
+## Build scripts
+
+`pi-build.sh`, `bela-build.sh` and `bela-deploy.sh` build and deploy `oxtt`.
+They exist because the two boards compile for the same target triple
+(`aarch64-unknown-linux-gnu`) and want opposite settings from it — a Raspberry
+Pi 5 is a Cortex-A76 built natively, a Bela Gem Stereo is a Cortex-A53
+cross-compiled with a linker of its own — so a single `[target.<triple>]`
+section in `.cargo/config.toml` cannot describe both, and each build exports
+its own settings instead. All three take `--help`.
+
+| Script | What it does |
+| --- | --- |
+| `pi-build.sh [--controls]` | Native release build on the Pi, tuned for Cortex-A76. Refuses to run off an aarch64 Linux host. |
+| `bela-build.sh` | Cross-compiles `oxtt-bela` for a Bela Gem Stereo. Needs `BELA_SYSROOT`; `BELA_LINKER` selects the cross compiler driver. |
+| `bela-deploy.sh [--host H] [--no-run] [-- args...]` | Copies the built binary to the board, stops `bela_daemon`, and runs it over `ssh -t`. Does not build. |
+
+See [`docs/bela/cross-compile.md`](../docs/bela/cross-compile.md) for the Bela
+toolchain and sysroot setup, and
+[`docs/raspberry-pi/`](../docs/raspberry-pi/) for the Pi.
+
+## Test scripts
 
 `pi-jack-usb-soak-test.sh` and `pi-jack-usb-latency-test.sh` verify `oxtt` on a
 Raspberry Pi 5 running as a JACK client with a class-compliant USB audio
