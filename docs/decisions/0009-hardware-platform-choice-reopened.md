@@ -6,6 +6,12 @@ Accepted
 
 Supersedes [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md).
 
+Amended by [ADR 0011](0011-bela-gem-stereo-as-the-second-host.md), which makes
+the platform choice this ADR deliberately left open, and corrects one premise
+in the Bela candidate below: the `bela-rs` this ADR found unmaintained is
+[`andrewcsmith/bela-rs`](https://github.com/andrewcsmith/bela-rs), and it is
+not the crate oxtt uses. See the correction note in "The three candidates".
+
 ADR 0008's USB clock-slip findings, its `48 kHz` / `128×3` / ~11 ms USB baseline,
 and its core requirement — that the audio interface share its clock in hardware
 (I2S-class), not over USB isochronous transfer — are unchanged and carry forward.
@@ -99,7 +105,22 @@ The dedicated-board candidates weighed (not decided) are:
   2021, predates the Gem/PocketBeagle 2 hardware, and was already documented as
   incomplete (missing `rt_printf`, unresolved panic-unwind safety on the render
   thread) at its last update. Budget a from-scratch `bindgen` binding rather than
-  a ready-made wrapper. Landed cost ≈¥28,000 (Gem Stereo Starter Kit, import
+  a ready-made wrapper.
+
+  **Corrected (ADR 0011): budget neither.** The assessment above is of
+  [`andrewcsmith/bela-rs`](https://github.com/andrewcsmith/bela-rs) and was
+  accurate for it. It is not the only crate of that name:
+  [`akiomik/bela-rs`](https://github.com/akiomik/bela-rs) — the `bela` and
+  `bela-sys` crates — is a different codebase written against Gem Stereo
+  hardware and measured on it, and it answers every specific objection raised
+  here: it has `rt_println!`, it documents `panic = "abort"` as the premise for
+  crossing the callback boundary, and its numbers come from a PocketBeagle 2
+  rather than from the boards this ADR's assessment predates. oxtt uses it, and
+  the from-scratch binding this paragraph budgets for was never written. This
+  correction only strengthens the conclusion the paragraph belongs to: the Bela
+  option is cheaper in software than stated, not more expensive.
+
+  Landed cost ≈¥28,000 (Gem Stereo Starter Kit, import
   only, no Japanese distributor). Its multi-core Linux SoC draws roughly an order
   of magnitude less power than the Pi 5 and has proven headroom for FFT-heavy
   spectral effects, but no populate-and-go pedal PCB or enclosure design exists
@@ -458,7 +479,12 @@ favor (FFT-heavy spectral-effect headroom, substantiated lower power draw).
   — the embedded-Linux dedicated-board candidate; [`bela-rs`](https://github.com/andrewcsmith/bela-rs)
   is a Rust wrapper over its C API but has had no commits since 2021 and
   predates the current Gem/PocketBeagle 2 hardware, so treat it as
-  unmaintained. [shop.bela.io](https://shop.bela.io/) is the current storefront
+  unmaintained. **A second, unrelated project shares the name:**
+  [`akiomik/bela-rs`](https://github.com/akiomik/bela-rs) publishes the
+  [`bela`](https://crates.io/crates/bela) and
+  [`bela-sys`](https://crates.io/crates/bela-sys) crates, is written and
+  measured against Bela Gem Stereo, and is what oxtt actually uses (ADR 0011).
+  [shop.bela.io](https://shop.bela.io/) is the current storefront
   (Bela Gem Stereo/Multi on PocketBeagle 2; "Bela Mini" is discontinued).
 - [`daisy-embassy`](https://github.com/daisy-embassy/daisy-embassy) — the
   actively maintained Rust HAL for Daisy Seed (Embassy async runtime);

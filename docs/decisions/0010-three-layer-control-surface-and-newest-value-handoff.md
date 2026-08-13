@@ -75,6 +75,21 @@ with the re-check rule kept next to the constants themselves in
   to model "a platform". Anything a real second platform turns out to need is
   cheaper to discover against that platform than to guess at now.
 
+  **Revised (ADR 0011): the seam is the `RawControls` *value*, not the trait
+  that produces one.** The second platform arrived and did not implement
+  `ControlSource`. Every part of that signature turned out to be the Raspberry
+  Pi's shape rather than a shared one: `read(&mut self)` assumes the reader
+  owns its hardware, where Bela's samples arrive in a block context the
+  callback is handed; the `Result` assumes a read can fail, where an analog
+  read cannot; and `&mut self` is unavailable in `render` at all. Adding a
+  context parameter to the trait would have made it exactly the platform
+  abstraction layer this decision refuses. So the Bela host builds a
+  `RawControls` from a free function and layer B is reached the same way from
+  either side. The refusal above stands — what it protected was the layering,
+  and the layering held; the trait was one platform's way of producing the
+  value, which is what the sentence above should have said. `ControlSource`
+  stays for the Pi, and for the fake source its second reason names.
+
 - **Hold layer B to the audio callback's own prohibitions** even though nothing
   calls it from a callback today: no allocation, no panic, no I/O, no clock, no
   threads (`docs/contracts.md` §6, machine-checked by the same `no_panic` proof
@@ -170,7 +185,26 @@ with the re-check rule kept next to the constants themselves in
   rewrites layer A against Bela's own analog/digital I/O API, and **throws away
   layer C**: no poll interval, no thread, no triple buffer, no `stop_and_join`,
   and no read-failure counter, because the read happens inline in `render()`.
-  A Daisy or Teensy port keeps layer B for the same reason and rewrites A
+
+  **Confirmed (ADR 0011), with one addition this did not anticipate.** The Bela
+  host does all three: layer B is used with *no source change at all* — not one
+  constant — layer A is a free function over the block context's analog frame,
+  and layer C is gone, down to being compiled only under the `jack-host`
+  feature so the dependency graph says so too. The read is in `render_pre`
+  rather than `render`, because that is the callback holding both the mapping
+  layer and the render states, which is what removes the queue.
+
+  What this missed is that dropping layer C also drops the poll *interval*, and
+  layer B's constants were calibrated against one: the deadband, the filter
+  coefficient and the debounce count are defined per read, so the callback rate
+  becomes their time base. Bela's callback runs six times faster than the Pi's
+  polling, which would cut the bypass debounce to 5 ms. Layer B stayed verbatim
+  because the *host* decimates instead — `PollDecimator`, which reads on every
+  *n*th block. "Layer B is platform-independent" therefore comes with a duty
+  attached: a host that drives it owes it reads at the rate it was calibrated
+  for, and that duty is now written down in `docs/contracts.md` §8.
+
+- A Daisy or Teensy port keeps layer B for the same reason and rewrites A
   against a vendor `no_std` HAL, but also loses the `clap` CLI that supplies
   layer B's base parameters (ADR 0009, finding 4), so the base parameter set
   becomes compiled-in preset data there. In every case the conditioning, the
