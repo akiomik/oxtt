@@ -140,7 +140,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-Separately, `cargo test --release` also proves `OttProcessor::process`/`reset` and `ControlMapping::update` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+Separately, `cargo test --release` also proves `OttProcessor::process`/`process_frame`/`reset` and `ControlMapping::update` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
 
 The suite is organized by module and none of it requires a running JACK server:
 

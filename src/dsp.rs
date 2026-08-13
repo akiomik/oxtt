@@ -389,8 +389,28 @@ impl OttProcessor {
         Ok(())
     }
 
+    /// Processes one stereo frame, for a host whose callback hands over the
+    /// block a frame at a time rather than as four equal-length slices.
+    ///
+    /// This is the same processing [`process`](Self::process) performs — that
+    /// method is a loop over this one — so the two agree sample for sample,
+    /// and the choice between them is the shape the host's buffers arrive in,
+    /// not a difference in what comes out. Neither carries any state a block
+    /// boundary can be seen in (docs/contracts.md §3).
+    ///
+    /// A host with separate per-channel buffers, or one reading a whole file,
+    /// wants `process`: the slice loop pays the length check once instead of
+    /// once per frame. A host handing over interleaved frames — Bela's
+    /// `render`, where the input and output of one frame arrive paired — wants
+    /// this one, because de-interleaving a block into scratch buffers just to
+    /// call `process` would copy every sample twice for nothing.
+    // Proven panic-free for the same reason and by the same means as
+    // `process` (docs/contracts.md §6); `process` calls this, so the two
+    // proofs cover the same code, but a host calling this directly is
+    // entitled to the guarantee without going through `process`.
+    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     #[inline]
-    fn process_frame(&mut self, left_in: f32, right_in: f32) -> (f32, f32) {
+    pub fn process_frame(&mut self, left_in: f32, right_in: f32) -> (f32, f32) {
         // If an input sample is NaN/+-Inf, treat that sample as 0 (docs/contracts.md §4).
         let left_in = if left_in.is_finite() { left_in } else { 0.0 };
         let right_in = if right_in.is_finite() { right_in } else { 0.0 };

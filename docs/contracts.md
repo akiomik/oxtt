@@ -32,7 +32,9 @@ The crossover-pair and threshold-order invariants hold for every constructed `Cr
 
 `OttProcessor::process` accepts any slice lengths. If its four input/output slices do not all have the same length, it returns `ProcessError::BufferLengthMismatch` without writing either output. Otherwise it processes and writes exactly that many stereo frames.
 
-For a fixed processor state and input sequence, output is bit-identical regardless of how the input is partitioned across `process` calls.
+`OttProcessor::process_frame` processes exactly one stereo frame and cannot fail. `process` is a loop over it, so the two produce identical output for the same state and input; which one a host calls is decided by the shape its buffers arrive in, not by any difference in result. A host with per-channel buffers uses `process`, which pays the length check once per block; a host handed interleaved frames uses `process_frame`, which needs no intermediate buffer.
+
+For a fixed processor state and input sequence, output is bit-identical regardless of how the input is partitioned across `process` and `process_frame` calls, and regardless of which of the two is used.
 
 ## 4. Signal invariants
 
