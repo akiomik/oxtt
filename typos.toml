@@ -1,3 +1,9 @@
 [default.extend-words]
 # "retuned" (re-tuned) is a real word in this context, not a typo of "returned".
 retuned = "retuned"
+# "mis" only ever appears here as a hyphenated prefix — "mis-wired",
+# "mis-build" — which is neither "miss" nor "mist".
+mis = "mis"
+# Elektron Syntakt, one of the line-level sources the input stage is for
+# (ADR 0009, docs/bela/).
+Syntakt = "Syntakt"

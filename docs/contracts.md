@@ -56,9 +56,11 @@ During a transition, coefficients may be updated as needed. Once both cutoffs ar
 
 ## 6. Real-time callback
 
-`AudioProcessHandler::process` and its transitive DSP calls must not allocate or free heap memory; acquire or wait on a lock; use a blocking channel operation; perform file or standard-stream I/O; spawn, join, or sleep a thread; panic or unwind; or take more than time proportional to the callback's frame count.
+Every host callback that runs while audio is flowing, and its transitive DSP calls, must not allocate or free heap memory; acquire or wait on a lock; use a blocking channel operation; perform file or standard-stream I/O; spawn, join, or sleep a thread; panic or unwind; or take more than time proportional to the callback's frame count. This covers `AudioProcessHandler::process` under JACK, and `render_pre` and `render` under Bela.
 
-The current JACK callbacks communicate shutdown, sample-rate changes, and xrun diagnostics through atomics. An xrun notification increments a diagnostic counter only; it must not format or emit a log record from the JACK-managed thread. The control surface's path into the callback (section 8) satisfies these same non-blocking, allocation-free requirements, and any further control path must too.
+The callbacks that run *outside* audio are not bound by it: a host's setup and its post-stop reporting may allocate and may write to stderr. Under Bela that is `validate_settings`, `setup`, `create_render_state` and `cleanup`, the last of which is where a run's diagnostics are printed (section 9).
+
+The JACK callbacks communicate shutdown, sample-rate changes, and xrun diagnostics through atomics. An xrun notification increments a diagnostic counter only; it must not format or emit a log record from the JACK-managed thread. The control surface's path into the callback (section 8) satisfies these same non-blocking, allocation-free requirements on both hosts, and any further control path must too.
 
 ## 7. JACK host lifecycle
 
@@ -68,20 +70,32 @@ The host uses JACK's assigned sample rate and buffer size. It reports connection
 
 ## 8. Control surface
 
-This section applies to a run with a physical control surface attached: six potentiometers and a latching bypass switch (`--controls`, available only in a `pi-controls` build). A run without one behaves exactly as sections 1–7 describe, including its exit report.
+This section applies to a run with a physical control surface attached: six potentiometers and a latching bypass switch, requested with `--controls`. A run without one behaves exactly as sections 1–7 describe, including its exit report.
 
-Separation from the audio callback:
+The two hosts read that hardware differently and share everything after the read. What is shared is the mapping layer, whose input is a `RawControls` value and whose output is a `ControlSnapshot`: a complete `OttParams` payload plus an explicit debounced bypass level. How a `RawControls` is produced is the platform's business.
 
-- Hardware is never read from the audio callback. Potentiometer and switch reads happen on a separate control thread; the callback only ever consumes finished `ControlSnapshot` values: a complete `OttParams` payload plus an explicit debounced bypass level.
-- The handoff into the callback is non-blocking, allocation-free, and lock-free in the callback's direction, and takes constant time whether or not a control moved. It satisfies section 6 in full.
-- Per cycle the callback takes at most the newest published snapshot. It never drains a backlog; intermediate positions a control passed through are not queued.
+Where the read happens:
+
+- Under JACK the audio callback cannot read the hardware, so a separate control thread does, and the callback only ever consumes finished snapshots.
+- Under Bela the samples are already in the block the callback is handed, so the read, the mapping and the handoff all happen in `render_pre`, and there is no thread and no queue. This is only permissible because the mapping layer itself satisfies section 6.
+
+The handoff into processing, on either host:
+
+- It is non-blocking, allocation-free, and lock-free in the callback's direction, and takes constant time whether or not a control moved.
+- Per cycle at most the newest snapshot is applied. Neither host drains a backlog; intermediate positions a control passed through are not queued.
 - A snapshot is applied strictly after any pending sample-rate reset in the same cycle, so a reset never discards it.
-- A snapshot rejected by `set_control_snapshot` leaves the processor unchanged (section 2). The callback neither reports nor retries it; the next accepted snapshot supersedes it.
+- A snapshot rejected by `set_control_snapshot` leaves the processor unchanged (section 2). It is neither reported at the time nor retried; the next accepted snapshot supersedes it. Bela counts rejections for its exit report (section 9).
+
+Read rate:
+
+- The mapping layer has no clock. Its jitter filter is defined per read and its bypass debounce counts reads, so **the host's read rate is what turns those constants into times, and supplying reads at the rate they were calibrated for is the host's obligation, not the mapping layer's.** That rate is 500 Hz, from the Raspberry Pi's 2 ms poll interval and the jitter measured at it.
+- JACK meets it with the poll interval directly. Bela's callback runs far faster than 500 Hz, so its host reads on every *n*th block, with *n* chosen from the block rate the audio system reports. At 48 kHz with a period of 16 the division is exact.
+- A host that cannot come near 500 Hz must say what rate it does supply, because the debounce and filter time constants scale with it.
 
 Failure behaviour:
 
-- Failing to acquire the hardware at startup is fatal: the process reports it to stderr and exits non-zero rather than running with controls that do nothing.
-- A hardware read failure once running stops neither audio, nor the control thread, nor the process. It publishes nothing, so the last good snapshot stays in force, and it is counted. Stderr reporting from the control thread is throttled; the exact total is printed after a normal stop, alongside the xrun count and under the same `--report-xruns-on-exit` flag (section 7).
+- Failing to acquire the hardware at startup is fatal: the process reports it to stderr and exits non-zero rather than running with controls that do nothing. Under Bela the equivalent is a board that cannot supply the channels the surface needs, refused before the audio system is built (section 9).
+- A hardware read failure once running stops neither audio, nor the control thread, nor the process. It publishes nothing, so the last good snapshot stays in force, and it is counted. Stderr reporting from the control thread is throttled; the exact total is printed after a normal stop, alongside the xrun count and under the same `--report-xruns-on-exit` flag (section 7). This applies to JACK only: a Bela analog read cannot fail, so there is nothing to survive and nothing to count.
 
 Parameter ownership:
 
@@ -98,7 +112,21 @@ Bypass:
 - Every complete snapshot, including all global, crossover, and band targets, updates the latent effect branch while bypassed. Disengaging therefore fades to the current effect and its current detector state, not to a stale position. `set_params` cancels an explicit bypass request and targets the active effect branch normally.
 - The one 20 ms sample-rate-independent bypass-mix smoother has `0` for effect and `1` for bypass. It snaps to its target when the remaining weight is at most `0.001` (about -60 dB), giving a finite deterministic endpoint. A reversal simply retargets that smoother to the newest explicit level.
 - DSP regression coverage uses the issue #4 48 kHz / 1 kHz / 0.05-amplitude sine probe, warmed states, and sliding 10 ms RMS windows with a 1 ms hop. In both directions, with non-unity input and output gains, each window must stay within `+/-0.1 dB` of the two warmed endpoint levels: peak no more than `0.1 dB` above the louder endpoint and trough no more than `0.1 dB` below the quieter one.
-- The switch latches mechanically, so its debounced position *is* the bypass state; there is no press to detect and nothing to toggle. A new position is adopted once it has survived 15 consecutive reads (28 ms at the 2 ms poll interval, so up to 30 ms between the throw and the parameters following), which is what makes the contact bounce of a single throw produce exactly one state change.
+- The switch latches mechanically, so its debounced position *is* the bypass state; there is no press to detect and nothing to toggle. A new position is adopted once it has survived 15 consecutive reads, which is what makes the contact bounce of a single throw produce exactly one state change. That is 28 ms at the 500 Hz read rate above, so up to 30 ms between the throw and the parameters following — and it is 28 ms only for as long as the host meets its read-rate obligation.
 - `time`, `upward`, and `downward` keep tracking their controls while bypassed. Disengaging the bypass restores the Depth and gain controls' positions at that moment, not the positions they held when the bypass was engaged.
 - A switch resting in the bypassed position when the process starts comes up bypassed: the panel position is the state, from the first reading onward.
 - Required hardware follow-up (not yet recorded as passed): on the Pi, use a sustained signal and audio-interface level meter to check both bypass directions with non-unity input/output gain positions.
+
+## 9. Bela host lifecycle
+
+`bela_host::run` asks the board for stereo in and out at 48 kHz with a period of 16 frames, eight analog inputs, digital I/O, one render thread, and underrun detection. It never sets the analog *output* channel count: a Gem Stereo has none, and a request whose input and output counts disagree fails initialisation. It does not pass a command line on to libbela; every setting has a flag on `oxtt-bela`.
+
+Refusal happens as early as the fact is knowable:
+
+- Parameters are validated before any audio system exists, so an invalid parameter set is reported as itself.
+- A configuration the application will not run under — more than one render thread, too few analog or digital channels for a requested control surface, or a crossover pair above the Nyquist-relative limit at the configured sample rate — is refused from `validate_settings`, which runs before initialisation. The refusal carries a reason and leaves the process able to build a different audio system.
+- Only the delivered audio channel counts are checked in `setup`, because libbela ignores the requested counts and the delivered ones do not exist until initialisation has run. Refusing there fails initialisation, which is why nothing else is checked there.
+
+While running, the processor is per render thread and the mapping layer is not: there is one control surface, and `render_pre` writes each new snapshot into every render state directly.
+
+The run ends on `SIGINT`, `SIGTERM`, `SIGHUP`, the board's stop button, or an internal stop request. After a normal stop, `cleanup` reports the underrun count and the elapsed audio frames, plus the CPU reading if CPU monitoring was enabled and the control-surface publish and rejection counts if the run had a control surface — one `oxtt: name=value` line each, and only when `--report-on-exit` is requested. Normal operation has no mandatory diagnostic output. Reporting from `cleanup` rather than from the caller is forced by the audio system consuming the application; `cleanup` runs after audio has stopped, so section 6 does not reach it.

@@ -4,6 +4,27 @@
 
 - Rust, edition 2024 (rustc >= 1.88).
 - A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary. Not required to build the crate or run `cargo test`.
+- For the Bela host only: a cross toolchain and a sysroot from the board — see [`bela/cross-compile.md`](bela/cross-compile.md). Not required to build, lint or test the Bela host's portable half, which is almost all of it.
+
+## Hosts and features
+
+There are two host adapters, one per feature, and they are never both in one binary:
+
+| Feature | Binary | What it needs |
+| --- | --- | --- |
+| `jack-host` (default) | `oxtt` | a JACK server to run; `libjack` headers to build |
+| `bela-host` | `oxtt-bela` | a Bela Gem Stereo to run; nothing extra to build or test off-device |
+| `pi-controls` | — | a Raspberry Pi; `rppal`, which is Linux-only |
+
+`pi-controls` is a control surface for the JACK host, not a host of its own.
+
+Everything below the adapters — the DSP, the parameters, the presets, the control surface's mapping layer — builds with **neither** host feature enabled, and CI asserts that:
+
+```sh
+cargo clippy -p oxtt --no-default-features --all-targets -- -D warnings
+```
+
+This matters more than it looks: it is what kept adding a second host to writing an adapter rather than unpicking the first one.
 
 ## Build
 
@@ -52,10 +73,18 @@ git clone https://github.com/akiomik/oxtt.git
 cd oxtt
 rustup show active-toolchain
 rustc -vV
-cargo build --release --locked
+scripts/pi-build.sh
 file target/release/oxtt
 ldd target/release/oxtt
 ```
+
+`scripts/pi-build.sh` is `cargo build --release --locked` with
+`-C target-cpu=cortex-a76` exported for it. That flag used to live in
+`.cargo/config.toml` under `[target.aarch64-unknown-linux-gnu]`, and cannot any
+more: a Bela Gem compiles for the same triple and is a Cortex-A53, so one
+section describing the Pi would silently mis-build the Bela and vice versa.
+Each build now exports its own settings from its own script — see
+[`bela/cross-compile.md`](bela/cross-compile.md) for the other half.
 
 Before running the binary, confirm that `rustc -vV` reports
 `host: aarch64-unknown-linux-gnu`, `file` reports an AArch64 ELF binary, and
@@ -113,7 +142,34 @@ runnable binary (see the next section).
 CI covers the feature natively on Linux in the `pi-controls` job, which lints,
 tests, and builds it on an `ubuntu-latest` runner.
 
-### Why macOS cross-compilation is not the baseline
+## Bela Host
+
+The Bela host is the opposite case: it needs no extra anything to work on. The
+`bela` crate puts its device code behind a `bela_device` cfg its build script
+sets only for aarch64 Linux, so on macOS — and on an ordinary CI runner — the
+application type, the control conversion and their tests are ordinary code:
+
+```sh
+cargo clippy -p oxtt --no-default-features --features bela-host --all-targets -- -D warnings
+cargo test  -p oxtt --no-default-features --features bela-host --all-targets
+```
+
+The half behind that cfg is compiled by cross-*checking*, which links nothing
+and so needs neither `libbela` nor a sysroot:
+
+```sh
+rustup target add aarch64-unknown-linux-gnu
+cargo clippy -p oxtt --no-default-features --features bela-host --all-targets \
+  --target aarch64-unknown-linux-gnu -- -D warnings
+```
+
+Producing a runnable binary *is* a real cross-compile, and that is
+[`bela/cross-compile.md`](bela/cross-compile.md).
+
+CI runs all three: `bela-host` for the portable half, `bela-device` for the
+cfg'd half, and `no-host` for the shared code with neither host enabled.
+
+### Why macOS cross-compilation is not the baseline for the Pi
 
 Adding `aarch64-unknown-linux-gnu` to `rust-toolchain.toml` only installs that
 target's Rust standard library. A macOS host would still need a Linux/AArch64
@@ -126,6 +182,13 @@ For Raspberry Pi verification, transfer the source with Git and build on the
 Pi. Introduce a containerized cross-build workflow (and then add the Rust target
 explicitly) only if native build time or repeated deployment becomes a measured
 problem.
+
+This is a judgement about the Pi, not about cross-compilation. The Bela host
+*is* cross-compiled, because there is no alternative: the board is not a build
+host. What makes it worth the moving parts there is that the parts are fewer —
+`bela-sys` derives the linker arguments from the sysroot and relays them
+through Cargo metadata, so there is no `pkg-config` question and nothing to
+copy into this repository.
 
 ## Format and Lint
 
@@ -151,7 +214,8 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `src/dsp/smooth.rs` — parameter-smoothing tests
-- `src/control/` — control-surface conditioning (jitter filter, deadband, explicit bypass level), the control thread and its handoff, and, only under `--features pi-controls`, the MCP3008 command/response encoding
+- `src/control/` — control-surface conditioning (jitter filter, deadband, explicit bypass level), and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
+- `src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the read decimator, the settings the board is asked for, and the exit report's wording
 
 See [contracts.md](contracts.md) for the guarantees those tests protect.
 

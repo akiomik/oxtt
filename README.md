@@ -6,7 +6,16 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 
 ## Status
 
-**Work in progress.** The end goal is a DIY hardware effector, controlled by physical switches and potentiometers. Today `oxtt` runs as a JACK client whose parameters come from the CLI and, on a Raspberry Pi build with `--controls`, from a physical control surface: six potentiometers on an MCP3008 SPI ADC drive depth/time/upward/downward and the input/output gains, and a latching switch bypasses the effect. Both the JACK client (with a class-compliant USB audio interface) and the control surface have been verified on real hardware, though the two gain pots and the latching switch postdate that verification and are not yet covered by it (see [`docs/raspberry-pi/`](docs/raspberry-pi/)). What is not done: the control surface is a breadboard rather than a pedal, and the hardware platform itself is an open question — the Raspberry Pi 5 runs too hot for a sealed pedal enclosure, which rules out staying on Pi 5 with an I2S HAT; the current leading migration target is **Bela Gem**, with Daisy Seed as an alternative candidate (see [ADR 0009](docs/decisions/0009-hardware-platform-choice-reopened.md)).
+**Work in progress.** The end goal is a DIY hardware effector, controlled by physical switches and potentiometers.
+
+`oxtt` runs under two hosts, selected by Cargo feature:
+
+- **JACK** (`jack-host`, on by default) — the `oxtt` binary. Verified on a Raspberry Pi 5 with a class-compliant USB audio interface, and the way the DSP is developed and tested on a desktop.
+- **Bela Gem Stereo** (`bela-host`) — the `oxtt-bela` binary, cross-compiled and copied to the board. This is the migration target ADR 0009 left open and [ADR 0011](docs/decisions/0011-bela-gem-stereo-as-the-second-host.md) chose: roughly 1 ms round-trip latency, fanless, and full Linux, so the DSP runs unchanged. It runs on the board at 48 kHz with no underruns and about 19% of one core, but **nothing has been listened to yet** — see [`docs/bela/audio-verification.md`](docs/bela/audio-verification.md) for exactly what is and is not established.
+
+Either host can drive six potentiometers and a latching bypass switch instead of the CLI (`--controls`): the pots drive depth/time/upward/downward and the input/output gains, and the switch bypasses the effect. On the Raspberry Pi that surface has been verified on real hardware, though the two gain pots and the latching switch postdate that verification and are not yet covered by it (see [`docs/raspberry-pi/`](docs/raspberry-pi/)); on Bela the code path runs on the board but nothing is wired to it yet (see [`docs/bela/`](docs/bela/)).
+
+What is not done: the control surface is a breadboard rather than a pedal, and whether a Bela Gem stays cool inside a sealed pedal enclosure — the open question ADR 0009 recorded — has not been measured.
 
 `oxtt` does not aim for binary, preset, or sample-accurate output compatibility with Xfer OTT or any other reference implementation; it is an independent implementation of well-known DSP techniques.
 
@@ -17,8 +26,9 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 ## Requirements
 
 - Rust, edition 2024 (rustc >= 1.88)
-- A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary — not required to build the crate or run `cargo test`
-- To use the physical control surface (`--controls`, the `pi-controls` Cargo feature): a Raspberry Pi 5 wired up as described in [`docs/raspberry-pi/`](docs/raspberry-pi/)
+- For the JACK host: a JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary — not required to build the crate or run `cargo test`
+- For the Bela host: a Bela Gem Stereo, a cross toolchain, and a sysroot synced off the board, as described in [`docs/bela/cross-compile.md`](docs/bela/cross-compile.md)
+- For the Raspberry Pi control surface (`--controls`, the `pi-controls` Cargo feature): a Raspberry Pi 5 wired up as described in [`docs/raspberry-pi/`](docs/raspberry-pi/)
 
 ## Build
 
@@ -26,13 +36,20 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 cargo build --release
 ```
 
-The physical control surface is behind the optional `pi-controls` Cargo feature, off by default because it depends on `rppal` (Linux-only):
+That is the JACK host, which is the default. The Bela host is a cross-compile, so it has a script:
 
 ```sh
-cargo build --release --features pi-controls
+BELA_SYSROOT=~/bela-sysroot scripts/bela-build.sh
+scripts/bela-deploy.sh -- --preset safe-start
 ```
 
-See [`docs/development.md`](docs/development.md) for local setup details, including macOS-specific notes.
+The Raspberry Pi control surface is behind the optional `pi-controls` Cargo feature, off by default because it depends on `rppal` (Linux-only). Build it on the Pi:
+
+```sh
+scripts/pi-build.sh --controls
+```
+
+See [`docs/development.md`](docs/development.md) for local setup details, including macOS-specific notes, and [`docs/bela/cross-compile.md`](docs/bela/cross-compile.md) for the Bela toolchain.
 
 ## Run
 
@@ -71,13 +88,26 @@ limiter; inspect the reported sample and true peaks before playback.
 
 ### `--controls`
 
-On a `pi-controls` build (see Build above) running on a Raspberry Pi 5, pass `--controls` to drive parameters from the physical control surface instead of the CLI flags:
+Both hosts accept `--controls`, which drives six parameters from a physical control surface instead of the CLI flags: potentiometers for depth/time/upward/downward and the input/output gains, and a latching switch that bypasses the effect. Everything after the hardware read is shared — the jitter filtering, the deadband, the debounce and the mapping to parameters are the same code on both boards ([ADR 0010](docs/decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)).
+
+The flag is opt-in on both, so the same binary still runs off CLI flags alone with nothing wired up.
+
+On a Raspberry Pi 5, with a `pi-controls` build — six pots on an MCP3008 SPI ADC, latching switch on GPIO17:
 
 ```sh
-cargo run --release --features pi-controls -- --controls
+scripts/pi-build.sh --controls
+./target/release/oxtt --controls
 ```
 
-Six potentiometers on an MCP3008 SPI ADC drive depth/time/upward/downward and the input/output gains, and a latching switch on GPIO17 bypasses the effect. The flag is opt-in and only exists in `pi-controls` builds, so the same binary still runs off CLI flags alone on a Pi with no hardware attached. See [`docs/raspberry-pi/`](docs/raspberry-pi/) for the wiring and setup.
+The flag does not exist at all without that feature. See [`docs/raspberry-pi/`](docs/raspberry-pi/) for the wiring and setup.
+
+On a Bela Gem Stereo — six pots on `A0`–`A5`, latching switch on `D0`, using the board's own converter and GPIO rather than an external ADC:
+
+```sh
+scripts/bela-deploy.sh -- --controls
+```
+
+See [`docs/bela/control-surface-setup.md`](docs/bela/control-surface-setup.md) for the wiring, including the one difference from the Pi: Bela's digital pins have no internal pull-up, so the switch needs an external one.
 
 ## Documentation
 
@@ -88,3 +118,4 @@ Technical documentation lives under `docs/`:
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs)
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes
 - [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5: JACK-over-USB setup, audio-stability and latency verification, and the physical control surface's wiring/SPI setup and hardware verification
+- [`docs/bela/`](docs/bela/) — running `oxtt` on a Bela Gem Stereo: cross-compilation setup, the control surface's wiring, and what has been measured on the board

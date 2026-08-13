@@ -1,8 +1,12 @@
 # Architecture
 
-This document describes the internal architecture of the `oxtt` DSP engine, its JACK host adapter, and the physical control surface that drives it: how audio data flows through the system, which component owns which state, and where the real-time / non-real-time boundary lies.
+This document describes the internal architecture of the `oxtt` DSP engine, its two host adapters, and the physical control surface that drives it: how audio data flows through the system, which component owns which state, and where the real-time / non-real-time boundary lies.
+
+There are two hosts, selected by Cargo feature and never both in one binary: `jack-host` (on by default) runs the DSP under a JACK server, and `bela-host` runs it under Bela's render callbacks on a Bela Gem Stereo (`decisions/0011-bela-gem-stereo-as-the-second-host.md`). Everything below the host adapters is shared, and builds with neither feature enabled.
 
 ## Component Overview
+
+### JACK host (`jack-host`)
 
 ```
 main.rs
@@ -22,9 +26,38 @@ main.rs
        -> Notifications           JACK notification callback (shutdown, sample-rate change)
 ```
 
-`OttProcessor` (`src/dsp.rs`) has no dependency on JACK types or any other host-audio API; it operates purely on `&[f32]` slices. `jack_host.rs` only registers ports and wires callbacks — it contains no DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without a JACK server, and what would let the Linux-only ALSA-direct adapter selected for a future Raspberry Pi native backend be added without touching `dsp/` (see `decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md`).
+### Bela host (`bela-host`)
 
-The control surface (`src/control.rs`) is layered on the same principle. Layer A is the hardware read behind the `ControlSource` trait — the only platform-specific piece, implemented for the Raspberry Pi by `PiControls` (`src/control/pi.rs`) behind the `pi-controls` feature. Layer B, `ControlMapping` (`src/control/mapping.rs`), turns raw ADC counts into a complete `OttParams` and is pure, allocation-free and panic-free, so it holds itself to the audio callback's own prohibitions (`contracts.md` section 6) even though only layer C calls it today. Layer C, `ControlHandle` (`src/control/thread.rs`), is the polling thread and the handoff into the callback, and is the only layer a platform that reads its controls inside its own real-time callback would drop. See `decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`.
+```
+bin/oxtt-bela.rs
+  -> cli::BelaCli::parse          CLI parsing (clap); nothing is passed on to libbela
+  -> bela_host::run               builds OttProcessor, then the audio system
+       -> bela_host::settings        48 kHz, 16-frame period, 8 analog in, 1 render thread
+       -> OttApplication             the BelaApplication libbela drives
+            validate_settings        refuses a bad configuration *before* Bela_initAudio
+            setup                    checks delivered channels, resets to the board's rate
+            create_render_state       one OttProcessor copy per render thread
+            render_pre               layer A + layer B + the handoff, all in one callback
+                 -> controls::PollDecimator     read on every nth block (~500 Hz)
+                 -> controls::raw_controls      layer A: A0-A5 pots, D0 bypass switch
+                 -> control::ControlMapping     layer B: unchanged, shared with JACK
+                 -> OttProcessor::set_control_snapshot   straight into each render state
+            render                   RenderContext::audio_io -> frames()
+                 -> dsp::OttProcessor::process_frame     (same DSP as above)
+            cleanup                  underruns, elapsed frames, CPU, control counters
+```
+
+Only `bela_host::run` needs a board. Everything else above it — the application type, the control conversion, and their tests — compiles and runs on a development machine, because `bela`'s device code sits behind a `bela_device` cfg its build script sets only for aarch64 Linux.
+
+### What the two share
+
+`OttProcessor` (`src/dsp.rs`) has no dependency on JACK, on libbela, or on any other host-audio API; it operates purely on `f32` samples. `jack_host.rs` and `bela_host.rs` register ports and wire callbacks — neither contains DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without an audio system at all, and it is what made the second host an adapter rather than a port.
+
+The two hosts reach the DSP through different doors for the same reason they exist separately: JACK hands over four per-channel buffers, so it calls `process`; Bela hands over interleaved frames paired with their outputs, so it calls `process_frame` and needs no intermediate buffer. `process` is a loop over `process_frame`, and `contracts.md` section 3 states that the two agree.
+
+The control surface (`src/control.rs`) is layered on the same principle. Layer B, `ControlMapping` (`src/control/mapping.rs`), turns raw pot positions into a complete `OttParams` and is pure, allocation-free and panic-free, so it holds itself to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call it from `render_pre` directly. Layer A is the hardware read — `PiControls` (`src/control/pi.rs`) behind the `pi-controls` feature for the Raspberry Pi, and the free functions in `src/bela_host/controls.rs` for Bela. Layer C, `ControlHandle` (`src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
+
+The seam between layer A and layer B is the `RawControls` *value*, not the `ControlSource` trait — the trait is the Raspberry Pi's way of producing one, and the Bela host does not implement it (`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`, revised by ADR 0011). What layer B gains in exchange for being platform-independent is a duty on its callers: its constants are defined per read, so a host owes it reads at the rate they were calibrated for. JACK's poll interval supplies that directly; Bela's `PollDecimator` reads on every *n*th block to reach it.
 
 ## Signal Flow
 
@@ -61,12 +94,15 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 
 With a control surface attached, two more owners exist, both outside the DSP:
 
-- `ControlMapping` (`src/control/mapping.rs`), owned by the control thread, holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in ADC counts — and, once per mapping rather than per pot, the last published `ControlSnapshot` and the debounced switch position. The snapshot contains the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward`/`input_gain`/`output_gain` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the ADC channel order through to the mapped parameters.
-- `ControlHandle` (`src/control/thread.rs`) owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `ControlSnapshot` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side.
+- `ControlMapping` (`src/control/mapping.rs`) holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in `PotPosition` steps — and, once per mapping rather than per pot, the last published `ControlSnapshot` and the debounced switch position. The snapshot contains the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `depth`/`time`/`upward`/`downward`/`input_gain`/`output_gain` for the same reason `Bands<T>` fixes it at three, so one representation carries the concept from the channel order through to the mapped parameters. Under JACK the control thread owns it; under Bela the `OttApplication` does, because there is one control surface rather than one per render thread.
+- `ControlHandle` (`src/control/thread.rs`), under `jack-host` only, owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `ControlSnapshot` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side. The Bela host has no counterpart: `render_pre` writes into the render states directly.
+- `OttApplication` (`src/bela_host/app.rs`), under `bela-host` only, owns the processor prototype every render state is copied from, the mapping layer, the read divisor `setup` chose, and the publish/rejection counters `cleanup` reports. Each `OttRenderState` owns exactly one `OttProcessor` and nothing else — no scratch buffers, because Bela's paired input/output view is walked a frame at a time.
 
 Neither of those owns any DSP state. A control snapshot reaches `OttProcessor` through its explicit `set_control_snapshot` seam; the CLI remains on the ordinary `set_params` path.
 
 ## Real-Time / Non-Real-Time Boundary
+
+Under JACK:
 
 ```
 non-real-time                            |  real-time (JACK audio thread)
@@ -82,9 +118,30 @@ main loop: poll shutdown flag, sleep     |  Notifications::sample_rate / shutdow
 deactivate(), stop_and_join, CLI report  |  (JACK-internal thread, Atomic stores only)
 ```
 
-`AudioProcessHandler` and `Notifications` (`src/jack_host.rs`) communicate only through `Arc<AtomicBool>` and `Arc<AtomicU32>`. `Notifications` also updates an `Arc<AtomicU64>` xrun diagnostic counter; the main thread reads it only after deactivation and the CLI emits it only for `--report-xruns-on-exit`. The audio callback never blocks on a lock, allocates, or performs I/O. See `contracts.md` (section 6) for the full list of operations prohibited inside the callback.
+Under Bela:
 
-The control surface crosses this boundary the same way. An MCP3008 conversion is a blocking `ioctl`, so it belongs on the control thread, which polls the hardware every 2 ms, conditions the reading, and publishes a finished `OttParams` only when the conditioned value actually moved. The callback's end of that handoff — `triple_buffer::Output::update`, a single atomic swap plus an index assignment — is wait-free, allocation-free and constant-time, so a knob turn costs the callback the same as a knob at rest. This is the "bounded non-blocking queue instead of a new lock" earlier revisions of this document anticipated, with the bound at one: parameters are level-based, so the callback wants the knob's newest position and never a backlog of the positions it passed through. `contracts.md` section 8 states the guarantees; `decisions/0010-three-layer-control-surface-and-newest-value-handoff.md` records why the capacity is one.
+```
+non-real-time                            |  real-time (Bela audio thread)
+-----------------------------------------|---------------------------------------
+oxtt-bela: BelaCli::parse,               |  render_pre
+  OttProcessor::new, Bela::new           |    - PollDecimator::tick
+validate_settings (before initAudio)     |    - read analog frame + D0
+setup, create_render_state               |    - raw_controls, ControlMapping::update
+  (allocation allowed; no audio yet)     |    - set_control_snapshot into each state
+                                         |      (no alloc, no lock, no I/O)
+until_stopped: signal handlers, sleep    |
+cleanup: diagnostics to stderr           |  render
+  (audio already stopped)                |    - RenderContext::audio_io().frames()
+                                         |    - OttProcessor::process_frame per frame
+```
+
+The two boundaries differ in where the control read sits, and in nothing else. Under JACK it is on the far side, because an MCP3008 conversion is a blocking `ioctl`; under Bela it is on the near side, because the samples are already in the block the callback was handed and reading them is two slice accesses.
+
+`AudioProcessHandler` and `Notifications` (`src/jack_host.rs`) communicate only through `Arc<AtomicBool>` and `Arc<AtomicU32>`. `Notifications` also updates an `Arc<AtomicU64>` xrun diagnostic counter; the main thread reads it only after deactivation and the CLI emits it only for `--report-xruns-on-exit`. The audio callback never blocks on a lock, allocates, or performs I/O. See `contracts.md` (section 6) for the full list of operations prohibited inside the callback, and section 9 for the Bela host's lifecycle.
+
+The control surface crosses the JACK boundary through a queue of capacity one. The control thread polls the hardware every 2 ms, conditions the reading, and publishes a finished `OttParams` only when the conditioned value actually moved. The callback's end of that handoff — `triple_buffer::Output::update`, a single atomic swap plus an index assignment — is wait-free, allocation-free and constant-time, so a knob turn costs the callback the same as a knob at rest. This is the "bounded non-blocking queue instead of a new lock" earlier revisions of this document anticipated, with the bound at one: parameters are level-based, so the callback wants the knob's newest position and never a backlog of the positions it passed through. `contracts.md` section 8 states the guarantees; `decisions/0010-three-layer-control-surface-and-newest-value-handoff.md` records why the capacity is one.
+
+Under Bela there is no queue to cross, because there is no boundary between the reader and the processor: `render_pre` holds the mapping layer and every render state at once, and writes a new snapshot straight into each. What the Pi spends on transport, Bela spends on decimation instead — reading on every sixth block, so that the mapping layer's per-read constants keep the times they were calibrated for (`contracts.md` section 8).
 
 ## Parameter Update Path
 
