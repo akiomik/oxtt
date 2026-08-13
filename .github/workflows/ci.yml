@@ -61,6 +61,65 @@ jobs:
       - name: cargo build --features pi-controls
         run: cargo build -p oxtt --features pi-controls --locked
 
+  bela-host:
+    # `bela`'s device code is behind a `bela_device` cfg its build script only
+    # sets for aarch64 Linux, so on this runner the crate builds with no
+    # sysroot, no cross toolchain and no extra packages — and the Bela host's
+    # application type, control conversion and their tests are ordinary code
+    # that compiles and runs here. Only `bela_host::run` needs a board, and it
+    # is covered by the `bela-device` job below.
+    name: Bela host feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --features bela-host
+        run: cargo clippy -p oxtt --no-default-features --features bela-host --all-targets -- -D warnings
+      - name: cargo test --features bela-host
+        run: cargo test -p oxtt --no-default-features --features bela-host --all-targets --locked
+      - name: cargo test --release (no-panic proof, docs/contracts.md §6)
+        run: cargo test -p oxtt --release --no-default-features --features bela-host --locked
+
+  bela-device:
+    # Type-checks the half of the Bela host that only exists on the board:
+    # everything behind `cfg(bela_device)`, which nothing above compiles.
+    # `cargo clippy` does not link, so this needs neither `libbela` nor the
+    # 800 MB sysroot a real device build copies off the board — only the
+    # target's standard library. Producing an actual binary is a
+    # cross-compile from a development machine (docs/bela/cross-compile.md).
+    #
+    # The no-panic proof cannot follow it here: proving it needs
+    # `cargo test --release`, which needs to run the tests, which needs the
+    # board. The proof stays a property of the source and the optimiser,
+    # established on x86-64 by the jobs above.
+    name: Bela device target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: aarch64-unknown-linux-gnu
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --target aarch64-unknown-linux-gnu
+        run: cargo clippy -p oxtt --no-default-features --features bela-host --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
+
+  no-host:
+    # The DSP, the parameters and the control surface's mapping layer belong
+    # to no host and must keep building without one — that is what lets a
+    # second host be added by writing an adapter rather than by unpicking the
+    # first. Nothing else checks this: every other job enables a host.
+    name: No host feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy --no-default-features
+        run: cargo clippy -p oxtt --no-default-features --all-targets -- -D warnings
+      - name: cargo test --no-default-features
+        run: cargo test -p oxtt --no-default-features --all-targets --locked
+
   msrv:
     name: MSRV (1.88.0)
     runs-on: ubuntu-latest
@@ -82,3 +141,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo build (MSRV)
         run: cargo build --workspace --all-targets --locked
+      # `--workspace` builds the default features, so the Bela host is not in
+      # the line above and needs its own. `bela`'s own MSRV is 1.85, below
+      # this one, so it is expected to hold.
+      - name: cargo build --features bela-host (MSRV)
+        run: cargo build -p oxtt --no-default-features --features bela-host --all-targets --locked
