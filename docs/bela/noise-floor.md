@@ -73,6 +73,32 @@ switching jack that grounds the input when nothing is in it, which is the same
 reasoning that grounds the unused analog inputs in
 [`control-surface-setup.md`](control-surface-setup.md).
 
+### Shorting the input, when the source has to be taken out of the answer
+
+Some questions need the source gone rather than silent — whether a noise that
+follows the analog gain is the board's input stage or the source's own output
+noise is one, and it is open. Unplugging does not do it: an empty jack is an
+antenna, and its readings drift between runs. **A shorted input does**, and it
+is the standard way to measure a stage's own input-referred noise. It is also
+safe: nothing is driving the connector.
+
+Shorted means *every signal conductor tied to the sleeve at the connector*. A
+plug wired that way is the direct route. An RCA shorting plug through an
+adapter reaches the same place, with one thing to check: the adapter carries
+the RCA shell to the sleeve and the centre to the tip, so tip-to-sleeve is
+shorted either way, but **a stereo adapter may leave the ring unconnected**,
+which shorts one channel and leaves the other open. Continuity between tip,
+ring and sleeve settles it in a second.
+
+**A half-shorted connector is not a wasted measurement — it is a better one.**
+It puts a shorted channel and an open channel in the *same* recording, so the
+comparison no longer spans two runs, which is exactly what made the
+empty-jack sweep unreliable. Analyse the two capture channels separately
+rather than averaging them.
+
+None of this has been done. It is written down because the question it answers
+is open and the equipment for it is ordinary.
+
 Three pitfalls cost real time and are worth writing down, because anything
 driving `oxtt-bela` over ssh will hit all three:
 
