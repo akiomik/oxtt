@@ -25,6 +25,7 @@ resistor you buy is environment-specific.
 | Pots | Six linear-taper (B-curve) potentiometers, 10 kΩ, on analog inputs `A0`–`A5` |
 | Unused analog inputs | `A6` and `A7`, tied to ground — never left floating |
 | Bypass switch | Latching (alternate-action) switch on digital `D0`, active low against an **external** 10 kΩ pull-up to 3.3 V |
+| Clip indicator | Red LED on digital `D1`, active high, through a 1 kΩ series resistor to ground. Optional — `--clip-led 1` |
 | Pot reference | 3.3 V from the board, against the converter's 4.096 V full scale |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
@@ -49,10 +50,56 @@ input:
 3.3 V ── 10 kΩ ──┬──> D0    bypass switch
                  └── switch ── GND
 
+D1 ── 1 kΩ ── LED ── GND           clip indicator (optional)
+
 GND ──> A6, A7                     unused analog inputs
 ```
 
-Three things in that diagram are the whole document.
+Three things in that diagram are the whole document, and the indicator adds a
+fourth.
+
+### The two resistors are not the same kind of resistor
+
+The 10 kΩ on `D0` is a pull-up: it only has to beat the pin's leakage, so a
+large value is right and a small one wastes current when the switch is closed.
+The 1 kΩ on `D1` limits the LED's current, and is sized from the LED instead:
+at 3.3 V into a red LED's ~2.0 V forward drop it gives about 1.3 mA, which is
+visible on a modern LED without asking much of the pin. Going below 330 Ω
+(≈4 mA) is not advisable — no per-pin drive figure for this board is published
+in libbela, `bela-rs`'s `docs/board-facts.md`, or the board's own
+documentation, so the sizing here is conservative rather than derived.
+
+A blue or white LED is a poor choice at 3.3 V: its forward drop leaves almost
+no headroom across the resistor, so brightness becomes a function of the
+diode's own tolerance. Red, yellow or green.
+
+### The indicator is active high, and the switch is active low
+
+Opposite conventions, each for its own reason.
+
+Every digital channel starts as an *input* and returns to one when the next
+audio system starts, so an undriven `D1` leaves the LED dark. Active high
+therefore means "dark unless something is lighting it", which is the right
+failure for an indicator: a crashed or absent program cannot claim the input is
+clean, because it cannot claim anything.
+
+The switch is active low against a pull-up so that a broken connection reads as
+*not bypassed* — the effect keeps working rather than silently dropping out.
+
+**A digital output goes on driving after the program that set it exits.** A run
+killed while the indicator is lit leaves it lit; the next run clears it, which
+is initialisation opening all sixteen channels as inputs again. Both halves are
+measured (`bela-rs` `docs/board-facts.md`, and again here on 2026-08-16).
+`oxtt-bela` does not try to beat this — the last `render_pre` before a stop is
+not guaranteed to run — so a stale lit indicator means "the last run ended
+during clipping", not "the input is clipping now".
+
+### `D0` is refused for the indicator, with or without `--controls`
+
+`--clip-led 0` fails before the audio system is built, whether or not the
+control surface was asked for. The switch is wired to `D0` either way, and
+driving a pin that a closed switch holds at ground is a short rather than a
+misreading.
 
 ### Linear taper is a correctness requirement
 

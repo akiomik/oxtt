@@ -116,6 +116,60 @@ impl InputMeter {
     }
 }
 
+/// Turns clipped frames into something a human can see.
+///
+/// A clipped frame is 21 µs at 48 kHz, and an indicator lit for 21 µs is an
+/// indicator that is never seen. This holds it on for a fixed number of frames
+/// after the last one, retriggering while clipping continues, which is the
+/// same shape libbela gives its own underrun LED — that one holds for 20000
+/// frames, and matching it means the two indicators on a board behave alike.
+///
+/// Counted in frames rather than in blocks or seconds so that the hold is the
+/// same length whatever the period size, and so that nothing here needs a
+/// clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipIndicator {
+    hold_frames: u64,
+    remaining: u64,
+    seen: u64,
+}
+
+impl ClipIndicator {
+    /// An unlit indicator that will hold for `hold_frames` after each clip.
+    #[must_use]
+    pub const fn new(hold_frames: u64) -> Self {
+        Self {
+            hold_frames,
+            remaining: 0,
+            seen: 0,
+        }
+    }
+
+    /// Advances by one block and says whether the indicator should be lit.
+    ///
+    /// `clipped_frames` is the meter's running total, not a per-block count:
+    /// the meter accumulates over the run and this watches it for movement,
+    /// which is what lets the two live in different places.
+    ///
+    /// Real-time safe: two comparisons and a subtraction (docs/contracts.md
+    /// §6).
+    pub const fn update(&mut self, clipped_frames: u64, block_frames: u64) -> bool {
+        if clipped_frames > self.seen {
+            self.seen = clipped_frames;
+            self.remaining = self.hold_frames;
+        } else {
+            self.remaining = self.remaining.saturating_sub(block_frames);
+        }
+        self.lit()
+    }
+
+    /// Whether the indicator is currently held on.
+    #[must_use]
+    pub const fn lit(self) -> bool {
+        self.remaining > 0
+    }
+}
+
 #[cfg(test)]
 #[expect(
     clippy::float_cmp,
@@ -208,5 +262,54 @@ mod tests {
         let mut meter = InputMeter::new();
         meter.observe(0.5, 0.0);
         assert_eq!(meter.merged(InputMeter::new()), meter);
+    }
+
+    #[test]
+    fn an_indicator_starts_unlit_and_stays_unlit_without_clipping() {
+        let mut led = ClipIndicator::new(100);
+        assert!(!led.lit());
+        assert!(!led.update(0, 16));
+        assert!(!led.update(0, 16));
+    }
+
+    /// The whole point: one clipped frame out of a block has to be visible
+    /// long after the block it happened in.
+    #[test]
+    fn one_clipped_frame_lights_it_for_the_whole_hold() {
+        let mut led = ClipIndicator::new(64);
+        assert!(led.update(1, 16), "the block the clip arrived in");
+        // 64 frames of hold against 16-frame blocks: three more blocks lit,
+        // and the fourth dark.
+        for block in 1..=3 {
+            assert!(led.update(1, 16), "block {block} after the clip");
+        }
+        assert!(!led.update(1, 16));
+    }
+
+    #[test]
+    fn continued_clipping_retriggers_the_hold() {
+        let mut led = ClipIndicator::new(100);
+        led.update(1, 16);
+        for count in 2..20 {
+            assert!(led.update(count, 16), "clipping at block {count}");
+        }
+    }
+
+    /// The meter's total only ever rises, so a total that has not moved means
+    /// no new clipping — not that the run restarted.
+    #[test]
+    fn a_total_that_stops_moving_lets_the_hold_expire() {
+        let mut led = ClipIndicator::new(32);
+        led.update(7, 16);
+        assert!(led.update(7, 16));
+        assert!(!led.update(7, 16));
+    }
+
+    /// A block longer than the whole hold must not wrap the counter round.
+    #[test]
+    fn a_block_longer_than_the_hold_just_ends_it() {
+        let mut led = ClipIndicator::new(64);
+        led.update(1, 16);
+        assert!(!led.update(1, 4096));
     }
 }

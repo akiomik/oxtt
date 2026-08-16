@@ -35,6 +35,7 @@ which need no hardware.
 | Pots | Six linear-taper 10 kΩ, `A0`–`A5` = Depth, Time, Upward, Downward, Input Gain, Output Gain |
 | Unused analog inputs | `A6` and `A7`, tied to ground |
 | Bypass switch | Latching, on `D0`, active low against an external 10 kΩ pull-up to 3.3 V |
+| Clip indicator | Red LED on `D1`, active high, 1 kΩ series resistor to ground |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
 ## 2. Build
@@ -215,7 +216,53 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
 - **No zipper noise, stepping, or drift** from turning a pot or from leaving
   one motionless.
 
-## 6. Outstanding
+## 6. The clip indicator
+
+**Result: PASS.** The board reports nothing about input clipping — libbela has
+no peak or clip API, and its own two LEDs are spoken for: blue is "running" and
+red is its underrun indicator, both opened by libbela itself and neither
+reachable from an application. `--clip-led <channel>` drives an LED of oxtt's
+own instead.
+
+### A digital output drives the pin
+
+Verified before wiring anything of oxtt's to it, with a throwaway program that
+toggled `D1` at 2 Hz: the LED followed. This is the one thing the software
+cannot check for itself — reading back an output channel returns the value that
+was written rather than the state of the pin (`bela-rs`
+`docs/board-facts.md`) — so it needs an eye on the LED.
+
+### Bad channels are refused before the audio system exists
+
+```
+$ ./oxtt-bela --clip-led 0
+oxtt: Bela error: the application refused the resolved settings: the clip indicator cannot share D0 with the bypass switch
+$ ./oxtt-bela --clip-led 16
+oxtt: Bela error: the application refused the resolved settings: the clip indicator needs a digital channel the board delivers
+```
+
+Both from `validate_settings`, so neither built an audio system — the failure
+mode `contracts.md` §9 is arranged to avoid. `D0` is refused whether or not
+`--controls` was given, because the switch is wired there regardless.
+
+### It lights on clipping and not otherwise
+
+Sustained single note, `--clip-led 1`, fifteen seconds each:
+
+| Run | `--adc-gain-db` | `input_peak_dbfs` | `input_clipped` | Indicator |
+| --- | --- | --- | --- | --- |
+| 1 | +24 | 0.0 | 68023 | **lit** |
+| 2 | +20 | −2.8 | 0 | dark |
+
+Run 1 clipped continuously and the indicator was on; it stayed on after the run
+ended, which is a digital output going on driving after its program exits. Run
+2 cleared it at startup and it stayed dark for the whole fifteen seconds.
+
+The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes a
+21 µs clipped frame visible at all. Its arithmetic is covered by unit tests in
+`src/metering.rs`; what the board adds is that the pin follows.
+
+## 7. Outstanding
 
 - **Pulling an input mid-session has not been performed**, for the same reason
   as on the Pi: the breadboard is too dense to disturb safely while the rig is
@@ -227,7 +274,7 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
   surface moves into an enclosure with a loom, which is the change most likely
   to move the jitter figure the deadband is sized against.
 
-## 7. Completion criteria
+## 8. Completion criteria
 
 Met:
 
@@ -243,4 +290,4 @@ Met:
 - The switch measured against a counter rather than by ear: ten throws, no pot
   touched, `1 + 10` publishes.
 
-Outstanding: section 6.
+Outstanding: section 7.

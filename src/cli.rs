@@ -155,6 +155,15 @@ pub struct BelaCli {
     /// inside the DSP. This one is the converter's.
     #[arg(long, value_name = "dB")]
     pub line_out_level_db: Option<f32>,
+
+    /// light an LED on this digital channel while the input is clipping
+    ///
+    /// Nothing on this board reports input clipping, so without an indicator
+    /// it is only visible after the run, in `--report-on-exit`. `D0` is
+    /// refused: the bypass switch is wired there whether or not `--controls`
+    /// asked for it. See `docs/bela/control-surface-setup.md` for the wiring.
+    #[arg(long, value_name = "CHANNEL")]
+    pub clip_led: Option<usize>,
 }
 
 #[cfg(feature = "bela-host")]
@@ -167,6 +176,7 @@ impl From<&BelaCli> for RunOptions {
             cpu_monitoring: cli.report_cpu,
             adc_gain_db: cli.adc_gain_db,
             line_out_level_db: cli.line_out_level_db,
+            clip_led: cli.clip_led,
             report_on_exit: cli.report_on_exit,
         }
     }

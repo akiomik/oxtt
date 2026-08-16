@@ -9,14 +9,14 @@
 use core::fmt;
 
 use bela::{
-    BelaApplication, BlockContext, CleanupContext, RenderContext, ResolvedSettings, SetupContext,
-    ThreadInfo,
+    BelaApplication, BlockContext, CleanupContext, PinMode, RenderContext, ResolvedSettings,
+    SetupContext, ThreadInfo,
 };
 
 use super::controls::{ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, raw_controls};
 use crate::control::ControlMapping;
 use crate::dsp::OttProcessor;
-use crate::metering::InputMeter;
+use crate::metering::{ClipIndicator, InputMeter};
 use crate::params::OttParams;
 
 /// Analog frame the control surface is read from.
@@ -41,6 +41,13 @@ const BYPASS_CHANNEL: usize = 0;
 /// Digital channels the control surface occupies: just the one the bypass
 /// switch is on, so `D0` has to exist for `digital_read` to reach it.
 const DIGITAL_CHANNELS_USED: usize = BYPASS_CHANNEL + 1;
+
+/// How long the clip indicator stays lit after the last clipped frame.
+///
+/// 0.42 seconds at 48 kHz, which is libbela's own `underrunLedDuration` to the
+/// frame. The two indicators on a finished board should not blink at
+/// noticeably different speeds, and there is no better-argued number to pick.
+const CLIP_HOLD_FRAMES: u64 = 20_000;
 
 /// Audio channels oxtt processes. Stereo in, stereo out; a Gem Stereo has
 /// exactly this and nothing else.
@@ -83,6 +90,9 @@ pub struct OttApplication {
     poll: PollDecimator,
     publishes: u64,
     rejects: u64,
+    /// The digital channel an LED is wired to, and the hold that makes a
+    /// 21 µs event visible on it. `None` is a run with nothing wired.
+    clip_led: Option<(usize, ClipIndicator)>,
     report_on_exit: bool,
 }
 
@@ -96,6 +106,11 @@ impl OttApplication {
     /// `controls` asks for the physical control surface. With it off, the
     /// parameters stay exactly what the command line said for the whole run.
     ///
+    /// `clip_led` is the digital channel an indicator LED is wired to, if
+    /// there is one. Nothing on this board reports input clipping, so this is
+    /// the only way to see it while playing rather than after the run
+    /// (`docs/bela/control-surface-setup.md`).
+    ///
     /// `report_on_exit` prints [`RunDiagnostics`] once the run has finished.
     /// The host cannot print them for us: [`bela::Bela::until_stopped`]
     /// consumes the audio system and never hands the application back, so
@@ -105,6 +120,7 @@ impl OttApplication {
         processor: OttProcessor,
         params: OttParams,
         controls: bool,
+        clip_led: Option<usize>,
         report_on_exit: bool,
     ) -> Self {
         Self {
@@ -127,6 +143,10 @@ impl OttApplication {
             poll: PollDecimator::EVERY_BLOCK,
             publishes: 0,
             rejects: 0,
+            clip_led: match clip_led {
+                Some(channel) => Some((channel, ClipIndicator::new(CLIP_HOLD_FRAMES))),
+                None => None,
+            },
             report_on_exit,
         }
     }
@@ -200,6 +220,13 @@ impl BelaApplication for OttApplication {
             }
         }
 
+        if let Some((channel, _)) = self.clip_led {
+            let digital = usize::try_from(settings.num_digital_channels()).unwrap_or(0);
+            if let Some(reason) = clip_led_refusal(channel, settings.use_digital(), digital) {
+                return Err(reason);
+            }
+        }
+
         // The Nyquist-relative crossover limit is the one parameter check
         // that needs a sample rate, so it is the one the command line could
         // not make on its own (`src/cli.rs`). Making it here means an
@@ -269,6 +296,21 @@ impl BelaApplication for OttApplication {
     /// layer (itself proven panic-free), and a validated assignment. No
     /// allocation, no lock, no I/O (docs/contracts.md §6).
     fn render_pre(&mut self, states: &mut [OttRenderState], context: &mut BlockContext) {
+        // Before the decimator, and not behind it: the indicator is not a
+        // control, it belongs to every block, and it has to work on a run
+        // with no control surface at all.
+        if let Some((channel, indicator)) = self.clip_led.as_mut() {
+            let clipped = input_meter(states).clipped_frames();
+            let frames = u64::try_from(context.audio_frames()).unwrap_or(u64::MAX);
+            let lit = indicator.update(clipped, frames);
+            // Both re-applied every block. A direction and value set only
+            // once can fail to reach the pin at larger period sizes
+            // (`bela-rs` `docs/board-facts.md`), and the cost of not relying
+            // on that is two writes into a buffer the callback already holds.
+            context.pin_mode(0, *channel, PinMode::Output);
+            context.digital_write(0, *channel, lit);
+        }
+
         if !self.poll.tick() {
             return;
         }
@@ -470,29 +512,57 @@ impl OttApplication {
     /// built and checked without printing them.
     ///
     /// The input meter comes from the states rather than from the application
-    /// because that is what `render` can reach without a lock. With
-    /// `thread_count` pinned to 1 there is one, but the fold is written for
-    /// however many arrive.
+    /// because that is what `render` can reach without a lock.
     #[must_use]
     pub fn diagnostics(
         &self,
         states: &[OttRenderState],
         context: &CleanupContext,
     ) -> RunDiagnostics {
-        let input = states
-            .iter()
-            .map(|state| state.input)
-            .fold(InputMeter::new(), InputMeter::merged);
-
         RunDiagnostics {
             underrun_count: context.underrun_count(),
             audio_frames_elapsed: context.audio_frames_elapsed(),
-            input,
+            input: input_meter(states),
             cpu_percentage: context.cpu_usage().map(|usage| usage.percentage()),
             publishes: self.has_controls().then_some(self.publishes),
             rejects: self.has_controls().then_some(self.rejects),
         }
     }
+}
+
+/// Why a clip-indicator channel cannot be used, if it cannot.
+///
+/// Separate from [`BelaApplication::validate_settings`] because a
+/// `ResolvedSettings` is deliberately not constructible outside the audio
+/// system — what makes it *resolved* is where it comes from — so the rule
+/// itself is what gets tested.
+const fn clip_led_refusal(
+    channel: usize,
+    use_digital: bool,
+    digital_channels: usize,
+) -> Option<&'static str> {
+    // Refused whether or not `--controls` is on. The bypass switch is wired to
+    // D0 either way, and driving a pin a closed switch holds at ground is a
+    // short rather than a misreading.
+    if channel == BYPASS_CHANNEL {
+        return Some("the clip indicator cannot share D0 with the bypass switch");
+    }
+    if !use_digital || digital_channels <= channel {
+        return Some("the clip indicator needs a digital channel the board delivers");
+    }
+    None
+}
+
+/// Combines the render states' input meters into one.
+///
+/// With `thread_count` pinned to 1 there is a single state, but the fold is
+/// written for however many arrive. Called once a block from `render_pre` and
+/// once from `cleanup`; over one element it is a copy.
+fn input_meter(states: &[OttRenderState]) -> InputMeter {
+    states
+        .iter()
+        .map(|state| state.input)
+        .fold(InputMeter::new(), InputMeter::merged)
 }
 
 #[cfg(test)]
@@ -579,11 +649,40 @@ mod tests {
         assert!(!diagnostics().to_string().contains("cpu_percentage"));
     }
 
-    #[test]
-    fn the_control_surface_is_off_unless_asked_for() {
+    fn application(controls: bool, clip_led: Option<usize>) -> OttApplication {
         let params = Preset::SafeStart.params();
         let processor = OttProcessor::new(48_000.0, params).unwrap();
-        assert!(!OttApplication::new(processor, params, false, false).has_controls());
-        assert!(OttApplication::new(processor, params, true, false).has_controls());
+        OttApplication::new(processor, params, controls, clip_led, false)
+    }
+
+    #[test]
+    fn the_control_surface_is_off_unless_asked_for() {
+        assert!(!application(false, None).has_controls());
+        assert!(application(true, None).has_controls());
+    }
+
+    #[test]
+    fn the_clip_indicator_is_off_unless_asked_for() {
+        assert!(application(false, None).clip_led.is_none());
+        assert!(application(false, Some(1)).clip_led.is_some());
+    }
+
+    /// The bypass switch is wired to `D0` whether or not `--controls` asked
+    /// for it, so driving that pin is a short against a closed switch.
+    #[test]
+    fn the_clip_indicator_cannot_take_the_bypass_channel() {
+        assert!(clip_led_refusal(BYPASS_CHANNEL, true, 16).is_some());
+    }
+
+    #[test]
+    fn a_clip_indicator_channel_the_board_does_not_deliver_is_refused() {
+        assert!(clip_led_refusal(16, true, 16).is_some());
+        assert!(clip_led_refusal(15, true, 16).is_none());
+    }
+
+    #[test]
+    fn a_clip_indicator_needs_digital_io_to_be_enabled() {
+        assert!(clip_led_refusal(1, false, 16).is_some());
+        assert!(clip_led_refusal(1, true, 16).is_none());
     }
 }

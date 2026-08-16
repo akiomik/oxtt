@@ -98,6 +98,11 @@ pub struct RunOptions {
     pub adc_gain_db: Option<f32>,
     /// Line output level, in dB, applied to the codec after the DSP.
     pub line_out_level_db: Option<f32>,
+    /// Digital channel an LED is wired to, lit while the input clips.
+    ///
+    /// `None` on a board with nothing wired to its digital pins, which is
+    /// every run that is not a pedal.
+    pub clip_led: Option<usize>,
     /// Print [`RunDiagnostics`] after a normal exit.
     pub report_on_exit: bool,
 }
@@ -111,6 +116,7 @@ impl Default for RunOptions {
             cpu_monitoring: None,
             adc_gain_db: None,
             line_out_level_db: None,
+            clip_led: None,
             report_on_exit: false,
         }
     }
@@ -188,8 +194,13 @@ mod device {
         )]
         let sample_rate = options.sample_rate.get() as f32;
         let processor = OttProcessor::new(sample_rate, params)?;
-        let application =
-            OttApplication::new(processor, params, options.controls, options.report_on_exit);
+        let application = OttApplication::new(
+            processor,
+            params,
+            options.controls,
+            options.clip_led,
+            options.report_on_exit,
+        );
 
         let mut bela = Bela::new(application, &settings(options))?;
 
