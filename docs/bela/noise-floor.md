@@ -295,3 +295,10 @@ the noise is and it is not where most of the effect is.
 - **Whether the predicted per-band allocation actually sounds better** than the
   global 0.3 it is derived from.
 - **Whether `riot` is worth designing for this board at all.**
+- **Whether this board is the platform.** This measurement is the reason that
+  is still open: it postdates
+  [ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md), which
+  adds the host but does not answer the hardware question
+  [ADR 0009](../decisions/0009-hardware-platform-choice-reopened.md) reopened.
+  Until the per-band allocation above has been listened to, "the effect is
+  usable here" is unestablished.

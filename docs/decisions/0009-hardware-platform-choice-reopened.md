@@ -6,11 +6,25 @@ Accepted
 
 Supersedes [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md).
 
-Amended by [ADR 0011](0011-bela-gem-stereo-as-the-second-host.md), which makes
-the platform choice this ADR deliberately left open, and corrects one premise
-in the Bela candidate below: the `bela-rs` this ADR found unmaintained is
+Amended by [ADR 0011](0011-bela-gem-stereo-as-the-second-host.md), which adds a
+Bela Gem Stereo host to oxtt and corrects one premise in the Bela candidate
+below: the `bela-rs` this ADR found unmaintained is
 [`andrewcsmith/bela-rs`](https://github.com/andrewcsmith/bela-rs), and it is
 not the crate oxtt uses. See the correction note in "The three candidates".
+
+**The platform choice this ADR reopened is still open.** ADR 0011 decides the
+software structure — two hosts behind Cargo features — not the hardware; what
+it is waiting on is in its "What is not decided". Chiefly: the Gem's converters
+measure about 30 dB narrower than the environment oxtt's presets were
+calibrated in, which no candidate in this ADR was compared on.
+
+**One standard set below is corrected there too.** "Power draw versus Raspberry
+Pi 5" makes thermal margin *inside a sealed pedal enclosure* an open item to
+settle before the platform ADR. That asks more of the Bela candidate than this
+ADR asked of the Pi 5, whose form-factor verdict (finding 2) rests on published
+power figures and the need for active cooling rather than on any enclosure
+measurement — and the pedal is not committed to a sealed enclosure. The
+like-for-like comparison is an open board, and that is what ADR 0011 records.
 
 ADR 0008's USB clock-slip findings, its `48 kHz` / `128×3` / ~11 ms USB baseline,
 and its core requirement — that the audio interface share its clock in hardware
@@ -293,6 +307,21 @@ flagging so it isn't repeated: warnings about the **original** PocketBeagle
 apply to PocketBeagle 2.) Independent, third-party measurement of Bela Gem/
 PocketBeagle 2 power draw and temperature inside a sealed pedal enclosure remains
 an open item for hands-on evaluation before the platform ADR.
+
+**Corrected (ADR 0011): the sealed enclosure is the wrong bar, and it is not a
+gate.** The paragraph above asks for a measurement of the Bela candidate that
+this ADR never asked of the Pi 5. Finding 2 rules the Pi 5 out of the pedal form
+on published power figures and the need for active cooling — no enclosure was
+involved. Held to that same standard, the Gem now has a *measured* figure where
+the Pi 5 has only published ones: 48.8 °C to 49.5 °C over sixty seconds of the
+heaviest preset, open board, no heatsink
+([`docs/bela/audio-verification.md`](../bela/audio-verification.md)). It is
+consistent with the order-of-magnitude power difference established above, and
+it is like-for-like with how the Pi 5 was judged. Two things stay genuinely
+open, and neither is a precondition for choosing a platform: a run long enough
+to be a soak, and a re-measurement in whatever enclosure the pedal eventually
+gets — which the project has not committed to being a sealed one. What does
+gate the platform choice is elsewhere: see ADR 0011's "What is not decided".
 
 ### Building the pedal: Daisy's carrier-board ecosystem versus Bela Gem's gap
 

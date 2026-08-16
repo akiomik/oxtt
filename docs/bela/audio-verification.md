@@ -3,8 +3,9 @@
 What a Bela Gem Stereo did with `oxtt-bela`, measured on the board. This is the
 first milestone of the port ([ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md)):
 the DSP running under Bela's callbacks with its parameters from the command
-line. The control surface needs wiring and has not been verified yet; it will
-get its own document, as it has on the Raspberry Pi
+line. The control surface has its own document
+([`control-surface-verification.md`](control-surface-verification.md)), as it
+does on the Raspberry Pi
 ([`raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)).
 
 For the setup these results come from, see [`cross-compile.md`](cross-compile.md).
@@ -83,9 +84,13 @@ oxtt: cpu_percentage=18.9
 2946848 frames is 61.4 s at 48 kHz. SoC temperature went from 48.8 °C to
 49.5 °C over the run, on an open board with no enclosure and no heatsink.
 
-**This does not address the sealed-enclosure question** ADR 0009 left open. An
-open board on a desk is the easy case; the thing that needs measuring is a
-closed pedal enclosure, and that measurement needs an enclosure.
+That is the same footing ADR 0009 judged the Raspberry Pi 5's thermal fit on —
+published power figures and an open board, not an enclosure measurement — so it
+is a like-for-like reading rather than the easy half of a harder question. Two
+things it does not cover: 60 seconds is not a soak, and if the pedal ends up in
+an enclosure that restricts airflow, the figure has to be taken again in that
+enclosure. Neither is a gate on the board, and neither requires the enclosure
+to be a sealed one; ADR 0011 records why.
 
 ### Refusals are typed, and do not cost the process — PASS
 
@@ -219,4 +224,6 @@ options are in [noise-floor.md](noise-floor.md).
   defensive against a board that does not deliver what was asked for, and
   against a future that passes arguments through. They have not been observed
   firing.
-- **Thermal behaviour in a sealed enclosure**, as above.
+- **Thermal behaviour over a long run, and inside whatever enclosure the pedal
+  gets**, as above. The open-board reading stands; what is missing is duration,
+  and a re-measurement once the mechanical form is decided.

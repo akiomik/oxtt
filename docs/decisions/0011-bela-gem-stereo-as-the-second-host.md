@@ -2,12 +2,25 @@
 
 ## Status
 
-Accepted
+Accepted, **scoped to the software**.
+
+This ADR decides that oxtt gains a Bela Gem Stereo host alongside JACK. It does
+not decide that the hardware platform question ADR 0009 reopened is answered —
+though it was first written as if it did, and this section has been narrowed in
+place to say what it actually settles. What changed the reading is a
+measurement that came after it: the board's converters are about 30 dB narrower
+than the environment oxtt's presets were calibrated in, which `safe-start`
+turns into audible hiss ([`docs/bela/noise-floor.md`](../bela/noise-floor.md)).
+The fix is predicted and not yet heard, so "the effect is usable on this board"
+is not yet established — and neither is the platform. See "What is not
+decided".
 
 Amends [ADR 0009](0009-hardware-platform-choice-reopened.md), which reopened
-the hardware platform question and explicitly declined to answer it. This ADR
-answers it, and corrects the one premise in ADR 0009 that turned out to be
-about a different piece of software than its name suggested.
+the hardware platform question and explicitly declined to answer it. **That
+question stays open.** What this ADR corrects in ADR 0009 is one premise that
+turned out to be about a different piece of software than its name suggested,
+and one standard that asked more of this board than of the one it was compared
+with — the thermal note under "What is not decided".
 
 Revises two decisions in
 [ADR 0010](0010-three-layer-control-surface-and-newest-value-handoff.md) in
@@ -18,8 +31,9 @@ obliges a host to do.
 
 ADR 0009 left three candidates on the table and refused to rank them, because
 the deciding evidence was hands-on rather than documentary. A Bela Gem Stereo
-has since arrived, which settles the part of the question that needed hardware
-to settle.
+has since arrived, and the hands-on evaluation has begun. Enough of it has
+landed to justify writing the host — which is what this ADR decides — and not
+enough to close ADR 0009.
 
 Two things had changed since ADR 0009 was written, both in the direction of
 Bela.
@@ -181,11 +195,27 @@ type-checks the device half with.
   (`docs/contracts.md` §8).
 - The offline renderer keeps using the block API and is unaffected. Two entry
   points into the DSP now exist; §3 states that they agree.
-- **What is not decided.** Whether JACK and `pi-controls` are eventually
-  retired. Whether a Gem Stereo stays cool in a sealed pedal enclosure — the
-  open item ADR 0009 recorded, still open, and now the main thing standing
-  between this board and the pedal. Both need measurements that need the
-  hardware, which is now on hand.
+- **What is not decided: whether this board is the platform.** The Gem's
+  converters measure about 30 dB narrower than the environment oxtt's presets
+  were calibrated in, and upward compression converts that difference into
+  audible hiss ([`docs/bela/noise-floor.md`](../bela/noise-floor.md)). The
+  mitigation — spending the same noise budget per band instead of globally — is
+  a prediction that has not been listened to, because the per-band amounts are
+  preset data and not reachable from the command line. Until it has been, the
+  effect is not established as usable here, and ADR 0009's question cannot
+  close. The round-trip latency that is this board's stated advantage is also
+  still the vendor's figure rather than a measurement of oxtt's.
+- Also undecided: whether JACK and `pi-controls` are eventually retired.
+- **Thermal margin is measured the way the Pi 5's was, and is not a gate.**
+  Sixty seconds of the heaviest preset moved the SoC from 48.8 °C to 49.5 °C on
+  an open board with no enclosure and no heatsink — the same open-board footing
+  ADR 0009 judged the Pi 5's power and cooling on, and consistent with the
+  order-of-magnitude power difference it recorded. What remains is a long soak,
+  and a re-measurement in whatever enclosure the pedal eventually gets. ADR
+  0009's phrasing — margin "inside a *sealed pedal enclosure*", to be settled
+  before the platform ADR — asked more of this board than of the one it was
+  being compared with, and the pedal is not committed to a sealed enclosure in
+  the first place.
 
 ## References
 
@@ -205,7 +235,9 @@ type-checks the device half with.
   [#114](https://github.com/akiomik/bela-rs/issues/114) non-panicking accessors
   (closed; the slice accessors made it unnecessary here).
 - [ADR 0009](0009-hardware-platform-choice-reopened.md) — the candidates, the
-  power and thermal evidence, and the enclosure question this ADR inherits.
+  power and thermal evidence, and the platform question that stays open.
+- [`docs/bela/noise-floor.md`](../bela/noise-floor.md) — what the board's
+  converters measure, and what upward compression costs on them.
 - [ADR 0010](0010-three-layer-control-surface-and-newest-value-handoff.md) —
   the three-layer split this port is the test of.
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — where 48 kHz
