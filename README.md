@@ -107,7 +107,7 @@ On a Bela Gem Stereo — six pots on `A0`–`A5`, latching switch on `D0`, using
 scripts/bela-deploy.sh -- --controls
 ```
 
-See [`docs/bela/control-surface-setup.md`](docs/bela/control-surface-setup.md) for the wiring, including the one difference from the Pi: Bela's digital pins have no internal pull-up, so the switch needs an external one.
+See [`docs/bela/control-surface-setup.md`](docs/bela/control-surface-setup.md) for the wiring, including the one difference from the Pi: Bela's digital pins have no internal pull-up, so the switch needs an external one. [`docs/bela/control-surface-verification.md`](docs/bela/control-surface-verification.md) records what the assembled surface measured — including the idle jitter that gives this board its own deadband ([ADR 0012](docs/decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)).
 
 ## Documentation
 
