@@ -103,8 +103,16 @@ input:
 | −60 dBFS | +8.8 dB | +33.9 dB |
 
 `riot` puts the floor about 25 dB higher than `safe-start` does, which is why
-`riot` hisses on the Raspberry Pi host too. `riot` is out of scope here — it is
-acknowledged as not yet designed. `safe-start` is the problem.
+`riot` hisses on the Raspberry Pi host too.
+
+**`riot` is therefore out of scope for this document, and not because the
+board is too small for it.** Its own design is unfinished — it compresses about
+55 dB of dynamic range and raises whatever floor it is given by roughly 45 dB —
+and that is true on every host oxtt has. Nothing measured here is evidence
+about `riot` that the Raspberry Pi did not already have. Treating it as a Bela
+question would put a project-wide preset problem behind a board-specific gate.
+
+`safe-start` is the problem this document is about.
 
 ### It is not gain staging — but the gain staging was wrong anyway
 
@@ -579,7 +587,6 @@ it is a listening question rather than a measurement one.
   replace. The published candidate is settled on noise — it measures 2 dB
   worse, not equal — so what is undecided is whether some other allocation
   buys enough audible compression to be worth having at the same floor.
-- **Whether `riot` is worth designing for this board at all.**
 - **Whether this board is the platform.** This measurement is the reason that
   is still open: it postdates
   [ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md), which
