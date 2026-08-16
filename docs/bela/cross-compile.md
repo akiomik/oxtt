@@ -78,6 +78,52 @@ Ctrl-C reaches `oxtt-bela` rather than the local `ssh`.
 **Note:** the `default` and `riot` presets are intentionally strong and can
 exceed 0 dBFS. Start with `safe-start` and a low monitor level.
 
+## Setting the gains for a source
+
+Do this once per source. Getting it wrong is worth about 11 dB of noise, which
+is most of the difference between `safe-start` hissing on this board and not
+([noise-floor.md](noise-floor.md)).
+
+The board's default input gain is +16 dB and clips a line-level source without
+reporting it, so `--adc-gain-db` always has to be set. `--report-on-exit`
+prints what arrived:
+
+```sh
+scripts/bela-deploy.sh -- --preset safe-start --adc-gain-db 6 --report-on-exit
+```
+
+```
+oxtt: input_peak_dbfs=-6.7
+oxtt: input_clipped=0
+```
+
+1. **Play the loudest thing the source will play**, and run for ten seconds or
+   so with `--adc-gain-db 6`.
+2. **`input_clipped` must be 0.** If it is not, lower `--adc-gain-db` until it
+   is. Anything above zero makes `input_peak_dbfs` a floor rather than a
+   reading, because the converter ran out of range before the signal did.
+3. **Do not raise it above +6 dB** even if there is headroom. Analog gain buys
+   signal-to-noise up to that point and nothing above it — past +6 the input
+   stage's own noise rises with the gain — so more only spends headroom.
+4. **Take the same amount out digitally.** With `--adc-gain-db` at +6 rather
+   than the −12 that suits no source in particular, move the other two by the
+   same 18 dB in the opposite directions:
+
+   ```sh
+   scripts/bela-deploy.sh -- --preset safe-start \
+     --adc-gain-db 6 --input-gain -18 --output-gain 0
+   ```
+
+   The compressor then sees exactly the signal it saw before, so the effect and
+   the bypass level match are unchanged, and the converter's noise arrives
+   18 dB quieter. Both paths leave 18 dB louder — turn the monitor down by the
+   same amount.
+
+The ceiling is the source's, not the board's: the same instrument at the same
+output setting measured 18 dB apart between a pattern and a single note. There
+is no default that fits both, which is why the figures are reported rather than
+assumed.
+
 ## No linker wrapper
 
 `bela-rs` ships `scripts/aarch64-bela-linker.sh`, a wrapper that adds

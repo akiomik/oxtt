@@ -16,13 +16,20 @@ passage. On an RME Babyface Pro FS the raised floor lands at about -85 dBFS
 and nobody hears it. On a Bela Gem Stereo it lands about 30 dB higher, and
 everybody does.
 
-Nothing is wrong with the port, and after correcting the input gain nothing is
-wrong with the board's gain staging either. The board's converters have about
-30 dB less usable range than the interface `oxtt` was developed against, and
-`oxtt`'s upward compression converts that deficit directly into audible hiss.
+Nothing is wrong with the port. The board's converters have about 30 dB less
+usable range than the interface `oxtt` was developed against, and `oxtt`'s
+upward compression converts that deficit directly into audible hiss.
 
-**`safe-start` as written does not work on this board.** How to fix that is
-the open question.
+**Most of it was gain staging.** `safe-start` at its own settings measures
+−77.3 dBA against an acceptable −88 dBA, and 11.2 dB of that gap closes by
+moving the three gains together — analog gain up, digital input gain down,
+output gain up — which leaves the effect and the bypass match exactly as they
+were. That lands it at −88.5 dBA with **no preset change**. Whether that is
+acceptable by ear has not been established.
+
+The remaining floor is not the effect's to move: with the effect silent this
+board still produces −91.2 dBA, added after the DSP, and the accepted −88 dBA
+is only 3.0 dB above it.
 
 ## How this was measured
 
@@ -107,7 +114,7 @@ audio-taper volume control — the clean ceiling moves to about -12 dB.
 
 Nothing reports this. It is visible only as squashed peaks.
 
-### Gain staging cannot be improved further
+### Gain staging cannot be improved further — wrong, by 11 dB
 
 With the source silent, the floor does not move with the input gain:
 
@@ -122,9 +129,33 @@ the input gain — the converter's own — so the source's volume and the split
 between source level and input gain do not change it. The 2.6 dB at +16 dB is
 the input stage starting to contribute at high gain.
 
-That settles the rule: **set the input gain as high as the source allows
-without clipping.** The ceiling is the same however the gain is divided: both
-configurations clip at about −10 dBFS peak at the Babyface.
+**That was read as a rule — set the input gain as high as the source allows
+without clipping — and it is wrong above +6 dB.** The table is measured at the
+output, where the post-effect floor sits 26 dB above the converter path and
+hides it entirely; *Nor with the output gain, where it matters* below has that
+separation. Lifting the converter path clear of that floor with
+`--depth 0 --output-gain 24` shows it moving all along (2026-08-16, source
+silent):
+
+| `--adc-gain-db` | Converter path | Noise step | Gain step | S/N bought |
+| --- | --- | --- | --- | --- |
+| −12 | −74.97 dBA | — | — | — |
+| 0 | −72.28 dBA | +2.69 | 12 | **+9.3** |
+| +6 | −67.82 dBA | +4.46 | 6 | **+1.5** |
+| +12 | −61.60 dBA | +6.21 | 6 | −0.2 |
+| +16 | −57.22 dBA | +4.38 | 4 | −0.4 |
+
+**Analog gain buys signal-to-noise up to about +6 dB and nothing above it.**
+Past that the noise follows the gain one for one, which is the input stage's
+own noise being amplified along with the signal; more gain only spends
+headroom. The corrected rule:
+
+> Set `--adc-gain-db` to **+6 dB, or the highest the source allows without
+> clipping, whichever is lower.**
+
+The clipping ceiling is what `input_peak_dbfs` and `input_clipped` are for, and
+it is source-dependent by 18 dB or more
+([audio-verification.md](audio-verification.md)).
 
 ### Nor with the output gain, where it matters
 
@@ -227,7 +258,65 @@ That matches how it is heard. At the point where it becomes objectionable, the
 complaint is not "hiss" but that the high-frequency tail of a percussion hit
 merges with the noise and pulls attention to it.
 
+## What correct gain staging is worth
+
+The three gains are not interchangeable, and the difference is the whole
+problem. `--adc-gain-db` is analog and sits in front of everything, including
+the bypass path. `input_gain` is digital and sits *inside* the effect branch —
+`bypass_left` in `src/dsp.rs` is the crossover reconstruction of the raw input
+and never sees it. `output_gain` is digital and applies to the effect branch
+only, after the bands are summed.
+
+So raising `--adc-gain-db` on its own is not a substitute for `input_gain`: it
+lifts the bypass path too, and it moves the signal relative to the
+compressor's fixed thresholds, which changes what the effect does. Taking X dB
+in the converter without changing anything else means moving all three:
+
+| | |
+| --- | --- |
+| `--adc-gain-db` | **+X** |
+| `input_gain` | **−X** |
+| `output_gain` | **+X** |
+
+The compressor then sees `A·10^(X/20) · g·10^(−X/20)` — exactly what it saw
+before — while the converter's noise, which does not follow the analog gain in
+the region that matters, arrives X dB quieter. Both paths leave X dB louder,
+so the level is taken back downstream and the bypass match is preserved.
+
+**Measured with the source playing** (sustained single note, X = 12):
+
+| | RMS | A-weighted | Mid | High | Peak |
+| --- | --- | --- | --- | --- | --- |
+| Change | +12.03 | +12.08 | +12.10 | +12.04 | +11.83 |
+
+Every band moves by the 12 dB that was put in and nothing else moves. **The
+effect is untouched.**
+
+**Measured with the source silent**, `safe-start` at its full upward setting,
+each configuration referred back to a matched output level:
+
+| X | `adc / in / out` | Floor | Improvement |
+| --- | --- | --- | --- |
+| 0 | −12 / 0 / −18 | **−77.33 dBA** | — |
+| 12 | 0 / −12 / −6 | −86.81 dBA | 9.5 dB |
+| **18** | **+6 / −18 / 0** | **−88.48 dBA** | **11.2 dB** |
+| 24 | +12 / −24 / +6 | −88.47 dBA | 11.1 dB |
+
+It saturates at 11 dB, at an analog gain of +6 — the same point the converter
+sweep above puts it, from the other direction.
+
+**`safe-start` at its own upward setting reaches the acceptable floor with no
+preset change at all.** The 12 dB it was judged to miss by was gain staging,
+not the preset. What remains to be established is whether −88.5 dBA is
+acceptable *by ear* in this configuration; the −88 dBA line was drawn at a
+different operating point and this one has not been listened to.
+
 ## What it costs
+
+Everything in this section is measured at the operating point that predates
+the one above — Syntakt at full output, `--adc-gain-db -12`, `input_gain 0`,
+`output_gain −18`. The figures are what the upward setting costs *there*. The
+section above is worth 11 dB against all of them.
 
 At the corrected operating point (Syntakt at full output, input gain −12 dB),
 listening at a fixed monitor level, with the source stopped:
@@ -346,9 +435,18 @@ afford at these settings.
 
 **"The same effect and the same signal-to-noise as the JACK host" is not
 achievable.** The board is short by about 30 dB of converter range and no
-amount of DSP recovers it. Something has to give, and the measurements say the
-cheapest thing to give is high-band upward compression, because that is where
-the noise is and it is not where most of the effect is.
+amount of DSP recovers it. Something has to give — but 11 dB of what looked
+like it had to give turned out to be gain staging rather than the effect, so
+the amount that actually has to give is much smaller than this document
+originally argued.
+
+**The gain-staging result should have come first.** Three of the four attempts
+recorded above were spent deciding the gain staging was already right, on
+measurements taken at the output where the post-effect floor hid the evidence.
+The general lesson is not about gain staging: it is that a floor measured at
+the output of a chain says nothing about where in the chain it was generated,
+and the cheapest way to find out is to move a gain that sits at a known point
+and see what follows it.
 
 **A per-band preset is worth less than it looked.** The measurement above says
 the total cannot go more than about 3 dB below global 0.3 whatever the
@@ -361,14 +459,21 @@ it is a listening question rather than a measurement one.
 
 ## Undecided
 
-- **Whether to add a preset with per-band upward amounts**, and what to call
-  it. `bela` is concrete but misleading — the preset is for a converter with a
-  high noise floor, not for a board. `ADR 0006` fixes the band values of
-  `Default` as a compatibility contract, so a new preset is free to differ.
+- **Whether `safe-start` at −88.5 dBA is acceptable by ear.** The floor is
+  measured; the −88 dBA line it is being held to was drawn by listening at a
+  different operating point, and this configuration — output 18 dB hotter,
+  monitor 18 dB down — has not been heard. **Everything below depends on
+  this**: if it passes, the board needs correct gain staging and no new preset.
+- **Whether to add a preset with per-band upward amounts at all**, and what to
+  call it. `bela` is concrete but misleading — the preset would be for a
+  converter with a high noise floor, not for a board. `ADR 0006` fixes the band
+  values of `Default` as a compatibility contract, so a new preset is free to
+  differ.
 - **What the default input gain should be.** Inheriting the board's +16 dB
-  clips line level and cannot stand. The right value depends on the source, and
-  lowering it costs signal-to-noise one-for-one, so a conservative default is
-  not free.
+  clips line level and cannot stand. The upper end is now known — analog gain
+  stops buying signal-to-noise at +6 dB — but the clipping ceiling below it is
+  the source's, and it moves by 18 dB between one piece of material and
+  another on the same instrument.
 - **Whether a per-band allocation sounds better** than the global 0.3 it would
   replace. The published candidate is settled on noise — it measures 2 dB
   worse, not equal — so what is undecided is whether some other allocation

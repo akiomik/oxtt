@@ -251,6 +251,38 @@ across all five points (largest residual 0.61 dB) puts the converter path at
 from that; the short form is that the preset can only move about 3 dB of the
 floor that is audible.
 
+### Moving the three gains together is worth 11 dB — PASS
+
+`--adc-gain-db` is analog and in front of everything including the bypass path;
+`input_gain` is digital and inside the effect branch; `output_gain` is digital
+and after the bands are summed. Taking X dB in the converter while leaving
+everything else alone therefore means `+X / −X / +X` across the three.
+
+Source playing (Elektron Syntakt, sustained single note), X = 12:
+
+| | RMS | A-weighted | Mid | High | Peak |
+| --- | --- | --- | --- | --- | --- |
+| Change | +12.03 | +12.08 | +12.10 | +12.04 | +11.83 |
+
+Every band moves by the gain that was put in and nothing else moves, which is
+what "the effect is untouched" has to mean. Source silent, `safe-start` at its
+own upward setting, each configuration referred back to a matched output level:
+
+| X | `adc / in / out` | Floor |
+| --- | --- | --- |
+| 0 | −12 / 0 / −18 | −77.33 dBA |
+| 12 | 0 / −12 / −6 | −86.81 dBA |
+| **18** | **+6 / −18 / 0** | **−88.48 dBA** |
+| 24 | +12 / −24 / +6 | −88.47 dBA |
+
+**11.2 dB, and `safe-start` reaches the acceptable floor at its own settings
+with no preset change.** It saturates at an analog gain of +6 dB, which is
+where the converter's own noise starts following the gain one for one
+([noise-floor.md](noise-floor.md)).
+
+Not established: whether −88.5 dBA is acceptable *by ear*. The −88 dBA line was
+drawn by listening at the operating point in the row above it.
+
 ### The per-band upward candidate is noisier than the setting it replaces — FAIL
 
 `noise-floor.md` predicted −88.2 dBA for low 0.800 / mid 0.450 / high 0.150,
