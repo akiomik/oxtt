@@ -124,17 +124,19 @@ oxtt: input_clipped=0
    18 dB quieter. Both paths leave 18 dB louder — turn the monitor down by the
    same amount.
 
-The ceiling is the source's, not the board's: the same instrument at the same
-output setting measured 18 dB apart between a pattern and a single note. There
-is no default that fits both, which is why the figures are reported rather than
-assumed.
+The ceiling is the source's, not the board's, and it moves a long way with what
+the source is playing: a single note on an Elektron Syntakt at full output
+metered a ceiling of +6 dB, while the same instrument playing a pattern was put
+near −12 dB by the crest-factor work that predates the meter — an inference
+from a half-output measurement rather than a reading, so treat the gap as large
+rather than as exactly 18 dB. There is no default that fits both, which is why
+the figures are reported rather than assumed.
 
 ### The output side has the same trade, and one wrong knob
 
 `--headphone-level-db` is the codec's analog output level. On a Gem Stereo it
-is *the* output level: the board's line output is driven from the codec's
-high-power outputs, so libbela's line out level writes registers that are not
-in this board's signal path and changes nothing at all
+is *the* output level: libbela's line out level moves the output by 0.00 dB
+over 24 dB of request, while this one moves it one for one
 ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
 therefore has no `--line-out-level-db`; it would have been a flag that reported
 success and did nothing.

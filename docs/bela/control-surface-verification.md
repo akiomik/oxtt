@@ -254,9 +254,18 @@ Sustained single note, `--clip-led 1`, fifteen seconds each:
 | 1 | +24 | 0.0 | 68023 | **lit** |
 | 2 | +20 | −2.8 | 0 | dark |
 
-Run 1 clipped continuously and the indicator was on; it stayed on after the run
-ended, which is a digital output going on driving after its program exits. Run
-2 cleared it at startup and it stayed dark for the whole fifteen seconds.
+**What was seen across the pair is that the indicator lit and then went out.**
+Which of the two runs each state belonged to was not distinguished by eye — the
+runs are back to back and the transition is at the boundary — so the column
+above is the counters' account of it, not the observer's: only run 1 clipped,
+the indicator is driven from that count, and the previous section established
+that the pin follows what is written to it. Going out at run 2's start rather
+than at run 1's end is the same digital-output persistence measured there.
+
+What that leaves unobserved: whether the indicator stayed dark for the whole of
+run 2, and whether it went out promptly on run 2's start rather than sometime
+during it. Neither would change the result, and both would need a second pair
+of runs separated by a pause.
 
 The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes a
 21 µs clipped frame visible at all. Its arithmetic is covered by unit tests in

@@ -294,8 +294,10 @@ output:
 | −12 dB | **0.00 dB** | −11.79 dB |
 | −24 dB | **0.00 dB** | −23.26 dB |
 
-The Gem Stereo's output is driven from the codec's high-power outputs, and
-libbela's line out level writes the LOP registers this board does not use
+What is *observed* is that one call changes the output and the other does not,
+and that libbela's line out level writes the DAC-to-LOP registers. That the
+Gem Stereo's output is therefore driven from the codec's high-power outputs
+follows from those two, but has not been read off a schematic
 ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
 has `--headphone-level-db` and no line out level for that reason.
 

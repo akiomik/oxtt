@@ -34,10 +34,14 @@ is only 3.0 dB above it.
 ## How this was measured
 
 Source → Bela Gem Stereo → RME Babyface Pro FS → host, recording the
-Babyface's channels 3/4. The Babyface's own input floor is -116.5 dBFS with
-nothing connected, stable across every session, and 30 dB below anything being
-measured — so it is a valid reference for the board rather than a contributor
-to it.
+Babyface's channels 3/4. The Babyface's own input floor is recorded alongside
+every measurement, on channels 1/2 with nothing connected, and is 25 dB or more
+below anything being measured — so it is a valid reference for the board rather
+than a contributor to it. It is **not** the same number across sessions: −116.5
+dBFS in the sessions up to 2026-08-16 and −120.6 from 2026-08-17, the
+interface's own input gain having moved between them. Comparisons within a
+session are safe; comparisons across sessions need that floor checked first,
+which is why it is quoted with each table.
 
 Levels are quoted at the Babyface. The Babyface's input gain was never
 established, so *absolute* dBFS figures do not describe levels inside the
@@ -200,9 +204,9 @@ So the rule is measured per source rather than asserted:
 > Syntakt they stopped paying at +6 dB.
 
 The clipping ceiling is what `input_peak_dbfs` and `input_clipped` are for, and
-it is source-dependent by 18 dB or more
-([audio-verification.md](audio-verification.md)). The **lower** bound is not
-source-dependent: below −12 dB the codec stops responding at all
+it moves a long way with the material
+([audio-verification.md](audio-verification.md)). The **lower** bound does not:
+below −12 dB the codec stops responding at all
 ([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
 
 ### Nor with the output gain, where it matters
@@ -281,9 +285,11 @@ real:
 | −24 dB | **0.00 dB** | −23.26 dB |
 
 `I2c_Codec::setLineOutVolume` writes `0x52` and `0x5C` — DAC to LEFT_LOP and
-RIGHT_LOP — and **the Gem Stereo's output is fed from the codec's high-power
-outputs instead**, which the headphone level controls. The call returns
-success either way, which is what made it cost a measurement to find
+RIGHT_LOP — so the reading that fits is that **the Gem Stereo's output is fed
+from the codec's high-power outputs instead**, which the headphone level
+controls. That last step is inferred from which call moves the output rather
+than read off a schematic; what is measured is the table above. The call
+returns success either way, which is what made it cost a measurement to find
 ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
 carries `--headphone-level-db` and no line out level.
 
@@ -595,9 +601,10 @@ it is a listening question rather than a measurement one.
   differ.
 - **What the default input gain should be.** Inheriting the board's +16 dB
   clips line level and cannot stand. The upper end is now known — analog gain
-  stops buying signal-to-noise at +6 dB — but the clipping ceiling below it is
-  the source's, and it moves by 18 dB between one piece of material and
-  another on the same instrument.
+  stopped buying signal-to-noise at +6 dB with the source that was measured,
+  though whether that ceiling is the board's or that source's is itself
+  undecided. The clipping ceiling below it is the source's and moves a long
+  way with the material.
 - **Whether a per-band allocation sounds better** than the global 0.3 it would
   replace. The published candidate is settled on noise — it measures 2 dB
   worse, not equal — so what is undecided is whether some other allocation

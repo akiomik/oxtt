@@ -96,17 +96,18 @@ pub struct RunOptions {
     /// identical from here — so it is worth finding per source rather than
     /// assuming (docs/bela/noise-floor.md).
     ///
-    /// The clipping ceiling is the source's, and moves by 18 dB between one
-    /// piece of material and another on the same instrument. The lower bound
-    /// is not: below -12 dB the codec stops responding altogether
+    /// The clipping ceiling is the source's, and moves a long way with what
+    /// the source plays: a metered +6 dB for one note against roughly -12 dB
+    /// inferred for a pattern, on the same instrument. The lower bound is not
+    /// the source's: below -12 dB the codec stops responding altogether
     /// ([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
     pub adc_gain_db: Option<f32>,
     /// Headphone output level, in dB, applied to the codec after the DSP.
     ///
-    /// The Gem Stereo's line output is driven from the codec's high-power
-    /// outputs, so this is what sets its level — libbela's line out level
-    /// writes registers that are not in this board's signal path and changes
-    /// nothing ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)).
+    /// On a Gem Stereo this is what sets the line output's level: measured,
+    /// it moves the output one for one while libbela's line out level moves
+    /// it 0.00 dB over 24 dB of request
+    /// ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)).
     ///
     /// `None` leaves libbela's default of -6 dB, and the range runs to +9 dB.
     ///
