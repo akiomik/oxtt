@@ -146,15 +146,22 @@ pub struct BelaCli {
     ///
     /// Not to be confused with `--input-gain`, which is the per-effect-band
     /// gain inside the DSP. This one is the converter's.
+    ///
+    /// Set it to +6 dB or the highest the source allows without clipping,
+    /// whichever is lower; `--report-on-exit` says which that is. Below
+    /// -12 dB the codec stops responding.
     #[arg(long, value_name = "dB")]
     pub adc_gain_db: Option<f32>,
 
-    /// codec line output level, applied after the DSP
+    /// codec headphone output level, applied after the DSP
     ///
     /// Not to be confused with `--output-gain`, which is the post-sum gain
-    /// inside the DSP. This one is the converter's.
+    /// inside the DSP. This one is the converter's, and on a Gem Stereo it is
+    /// what sets the line output's level — libbela's line out level writes
+    /// registers this board does not use. Set it for the level the next device
+    /// wants; unlike `--adc-gain-db` it does not buy signal-to-noise.
     #[arg(long, value_name = "dB")]
-    pub line_out_level_db: Option<f32>,
+    pub headphone_level_db: Option<f32>,
 
     /// light an LED on this digital channel while the input is clipping
     ///
@@ -175,7 +182,7 @@ impl From<&BelaCli> for RunOptions {
             controls: cli.controls,
             cpu_monitoring: cli.report_cpu,
             adc_gain_db: cli.adc_gain_db,
-            line_out_level_db: cli.line_out_level_db,
+            headphone_level_db: cli.headphone_level_db,
             clip_led: cli.clip_led,
             report_on_exit: cli.report_on_exit,
         }

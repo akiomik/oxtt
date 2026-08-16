@@ -283,6 +283,32 @@ where the converter's own noise starts following the gain one for one
 Not established: whether −88.5 dBA is acceptable *by ear*. The −88 dBA line was
 drawn by listening at the operating point in the row above it.
 
+### The codec's line out level does nothing; its headphone level is the output control — CONFIRMED
+
+A probe playing a 440 Hz tone generated on the board, with both codec output
+levels set on the handle in the same window, recorded from the Gem's line
+output:
+
+| Requested | `set_line_out_level` | `set_headphone_level` |
+| --- | --- | --- |
+| −12 dB | **0.00 dB** | −11.79 dB |
+| −24 dB | **0.00 dB** | −23.26 dB |
+
+The Gem Stereo's output is driven from the codec's high-power outputs, and
+libbela's line out level writes the LOP registers this board does not use
+([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
+has `--headphone-level-db` and no line out level for that reason.
+
+Raising the headphone level from libbela's −6 dB default to its +9 dB maximum
+is worth **4.81 dB of signal-to-noise against the output stage alone** — the
+tone takes the full 15 dB and the floor only 9.9 of it — and **0.46 dB against
+`safe-start`'s actual hiss**, which is run-to-run variation. The effect's own
+amplified noise follows `output_gain` and the headphone level in opposite
+directions and comes back exactly where it started, so the trade cannot win
+while that noise dominates. [noise-floor.md](noise-floor.md) has the
+decomposition. The flag exists because it is the only working output level
+control on this board, not because it buys signal-to-noise today.
+
 ### The per-band upward candidate is noisier than the setting it replaces — FAIL
 
 `noise-floor.md` predicted −88.2 dBA for low 0.800 / mid 0.450 / high 0.150,

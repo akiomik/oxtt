@@ -124,6 +124,32 @@ output setting measured 18 dB apart between a pattern and a single note. There
 is no default that fits both, which is why the figures are reported rather than
 assumed.
 
+### The output side has the same trade, and one wrong knob
+
+`--headphone-level-db` is the codec's analog output level. On a Gem Stereo it
+is *the* output level: the board's line output is driven from the codec's
+high-power outputs, so libbela's line out level writes registers that are not
+in this board's signal path and changes nothing at all
+([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
+therefore has no `--line-out-level-db`; it would have been a flag that reported
+success and did nothing.
+
+Use it to set the output level for whatever comes next. libbela's default is
+−6 dB and the range runs to +9 dB.
+
+**It is not the input side's trade over again.** Raising it and giving the same
+amount back with `--output-gain` is worth about 5 dB against the output stage
+measured on its own, and 0.46 dB — nothing — against the hiss a usable preset
+actually produces. The effect's own amplified noise follows the two controls in
+opposite directions and lands back where it started
+([noise-floor.md](noise-floor.md)). Set the headphone level for the level you
+want and leave it there; the gain staging that matters is the input side above.
+
+Check the output for clipping separately whatever you set. `input_peak_dbfs`
+and the clip indicator are both about the *input*; nothing here reports an
+output that exceeds full scale. The offline renderer's true peak, run over the
+same preset and the same gains, is the cheapest way to see it.
+
 ## No linker wrapper
 
 `bela-rs` ships `scripts/aarch64-bela-linker.sh`, a wrapper that adds

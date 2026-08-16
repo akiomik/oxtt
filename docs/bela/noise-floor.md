@@ -216,6 +216,82 @@ upward compressor, which puts it far above the DAC's own — so it scales with
 the signal and the ratio does not move. **The 24 dB of unused DAC headroom
 buys nothing**, which was worth measuring because it looked like it should.
 
+### The codec's own output level, and which one of them exists
+
+Both sweeps above are of the *digital* output gain. The codec has an analog
+level after it, and it is worth a section of its own because the obvious way
+to reach it does not work.
+
+**`--line-out-level-db` did nothing at all** (2026-08-16). Sixty-nine decibels
+of requested attenuation moved the floor by 0.06 dB. A probe playing a 440 Hz
+tone generated on the board settles which of the codec's two output levels is
+real:
+
+| Requested | `set_line_out_level` | `set_headphone_level` |
+| --- | --- | --- |
+| −12 dB | **0.00 dB** | −11.79 dB |
+| −24 dB | **0.00 dB** | −23.26 dB |
+
+`I2c_Codec::setLineOutVolume` writes `0x52` and `0x5C` — DAC to LEFT_LOP and
+RIGHT_LOP — and **the Gem Stereo's output is fed from the codec's high-power
+outputs instead**, which the headphone level controls. The call returns
+success either way, which is what made it cost a measurement to find
+([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)). `oxtt-bela`
+carries `--headphone-level-db` and no line out level.
+
+**Attenuating it buys nothing; raising it buys about 5 dB.** Digital silence
+written to the DAC, headphone level swept:
+
+| Headphone level | Floor |
+| --- | --- |
+| −6 dB (libbela's default) | −91.35 dBA |
+| −18 dB | −93.02 dBA |
+| −30 dB | −93.16 dBA |
+
+Twenty-four decibels of attenuation take 1.8 dB off the floor, so what the
+output stage adds is mostly generated *after* this control: about −93.2 dBA
+after it against −96.0 dBA before it. Going the other way, to the +9 dB
+maximum:
+
+| Headphone level | Tone | Floor | Signal-to-noise |
+| --- | --- | --- | --- |
+| −6 dB (default) | −19.38 dBFS | −91.35 dBA | 71.96 dB |
+| **+9 dB (maximum)** | −4.68 dBFS | −81.44 dBA | **76.77 dB** |
+
+**4.81 dB**, because the signal takes the full 15 dB and the floor only 9.9 of
+it.
+
+### …and it is worth nothing where the hiss actually is
+
+That measurement is against a floor the effect contributes nothing to — the
+probe writes digital silence, so the only noise in it is the output stage's.
+Against `safe-start` at its own upward setting it collapses. Source silent,
+the two configurations level-matched by construction:
+
+| `adc / in / out / headphone` | Floor |
+| --- | --- |
+| +6 / −18 / 0 / −6 (default) | −64.52 dBA |
+| +6 / −18 / −15 / **+9** | −64.98 dBA |
+
+**0.46 dB, which is run-to-run variation.** The arithmetic says why. Write the
+output floor as three terms: `D`, the effect's amplified input noise, which
+follows `output_gain` and then the headphone level; `P`, what the output stage
+adds before the headphone control, which follows only that; and `Q`, what it
+adds after, which follows nothing.
+
+- Default: `D + P + Q`
+- Traded: `D·10^(−15/20)·10^(15/20) + P·10^(15/20) + Q` = `D + P·10^(15/20) + Q`
+
+`D` comes back exactly where it started, `P` comes back 15 dB louder, and `Q`
+never moved. **The trade cannot win while `D` dominates**, and at this
+operating point it does — by enough that 15 dB on `P` is invisible.
+
+So the headphone level is a second-order lever. It is worth up to about 5 dB,
+but only once the effect's own contribution has been brought below the output
+stage, which is not where any usable preset sits today. The reason to have
+`--headphone-level-db` is that it is the *only* working output level control
+on this board, not that it buys signal-to-noise.
+
 ### The datasheet figures
 
 | | Specification | Measured here |

@@ -84,20 +84,37 @@ pub struct RunOptions {
     /// Analog input gain, in dB, applied to the codec before the DSP.
     ///
     /// `None` leaves the board's default of +16 dB, **which clips a
-    /// line-level source and has to be set** (docs/bela/noise-floor.md). An
-    /// Elektron Syntakt at full output saturates the converter at anything
-    /// above about -12 dB here; at half output, above about +7 dB. Clipping
-    /// is not reported anywhere — it shows up only as squashed peaks — so
-    /// nothing catches it for the caller.
+    /// line-level source and has to be set** (docs/bela/noise-floor.md).
+    /// [`RunDiagnostics::input`] is what makes the ceiling findable: nothing
+    /// on this board reports clipping otherwise.
     ///
-    /// Set it as high as the source allows without clipping. Higher is
-    /// better: the noise floor is dominated by the converter, downstream of
-    /// this gain, so it does not move when this does (measured: identical
-    /// within 0.02 dB at -12 dB and 0 dB). Every dB given away here is a dB
-    /// of signal-to-noise given away with it.
+    /// **Set it to +6 dB, or the highest the source allows without clipping,
+    /// whichever is lower.** The two bounds have different natures. The
+    /// clipping ceiling belongs to the source and moves by 18 dB between one
+    /// piece of material and another on the same instrument. The +6 dB is the
+    /// board's: below it this gain buys signal-to-noise, and above it the
+    /// input stage's own noise rises one for one with the gain, so more
+    /// spends headroom and returns nothing.
+    ///
+    /// Below -12 dB the codec stops responding altogether
+    /// ([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
     pub adc_gain_db: Option<f32>,
-    /// Line output level, in dB, applied to the codec after the DSP.
-    pub line_out_level_db: Option<f32>,
+    /// Headphone output level, in dB, applied to the codec after the DSP.
+    ///
+    /// The Gem Stereo's line output is driven from the codec's high-power
+    /// outputs, so this is what sets its level — libbela's line out level
+    /// writes registers that are not in this board's signal path and changes
+    /// nothing ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)).
+    ///
+    /// `None` leaves libbela's default of -6 dB, and the range runs to +9 dB.
+    ///
+    /// Set it for the level the next device wants. Trading it against
+    /// `output_gain` the way `adc_gain_db` is traded against `input_gain`
+    /// does *not* work: the effect's own amplified noise follows the two in
+    /// opposite directions and returns to where it started, which measures as
+    /// 4.8 dB against the output stage alone and 0.5 dB — nothing — against a
+    /// usable preset's hiss (docs/bela/noise-floor.md).
+    pub headphone_level_db: Option<f32>,
     /// Digital channel an LED is wired to, lit while the input clips.
     ///
     /// `None` on a board with nothing wired to its digital pins, which is
@@ -115,7 +132,7 @@ impl Default for RunOptions {
             controls: false,
             cpu_monitoring: None,
             adc_gain_db: None,
-            line_out_level_db: None,
+            headphone_level_db: None,
             clip_led: None,
             report_on_exit: false,
         }
@@ -210,8 +227,8 @@ mod device {
         if let Some(decibels) = options.adc_gain_db {
             bela.set_audio_input_gain(Channel::All, decibels)?;
         }
-        if let Some(decibels) = options.line_out_level_db {
-            bela.set_line_out_level(Channel::All, decibels)?;
+        if let Some(decibels) = options.headphone_level_db {
+            bela.set_headphone_level(Channel::All, decibels)?;
         }
 
         bela.until_stopped()?;
@@ -285,7 +302,7 @@ mod tests {
     fn codec_levels_do_not_reach_the_settings() {
         let levelled = settings(&RunOptions {
             adc_gain_db: Some(-6.0),
-            line_out_level_db: Some(-12.0),
+            headphone_level_db: Some(-12.0),
             ..RunOptions::default()
         });
         assert_eq!(settings(&RunOptions::default()), levelled);
