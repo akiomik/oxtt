@@ -7,8 +7,8 @@
 //! Two hosts, one per feature: `jack-host` (on by default) runs the DSP under
 //! a JACK server, and `bela-host` runs it under Bela's `render` callback on a
 //! Bela Gem Stereo (ADR 0011). Everything below the host adapters — the DSP,
-//! the parameters, and the control surface's mapping layer — is shared and
-//! builds with neither feature enabled.
+//! the parameters, the control surface's mapping layer and the input meter —
+//! is shared and builds with neither feature enabled.
 
 pub mod bands;
 #[cfg(feature = "bela-host")]
@@ -18,5 +18,6 @@ pub mod control;
 pub mod dsp;
 #[cfg(feature = "jack-host")]
 pub mod jack_host;
+pub mod metering;
 pub mod params;
 pub mod render;

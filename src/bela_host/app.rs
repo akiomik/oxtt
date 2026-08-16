@@ -16,6 +16,7 @@ use bela::{
 use super::controls::{ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, raw_controls};
 use crate::control::ControlMapping;
 use crate::dsp::OttProcessor;
+use crate::metering::InputMeter;
 use crate::params::OttParams;
 
 /// Analog frame the control surface is read from.
@@ -47,12 +48,19 @@ const AUDIO_CHANNELS: usize = 2;
 
 /// Everything one render thread mutates.
 ///
-/// Just the processor: [`OttProcessor`] is `Copy`, holds all of its state
-/// inline, and works a frame at a time, so there is no block-sized scratch
-/// buffer to own (see [`OttApplication::render`]).
+/// The processor, and the meter that records what arrived at the input.
+/// [`OttProcessor`] is `Copy`, holds all of its state inline, and works a
+/// frame at a time, so there is no block-sized scratch buffer to own (see
+/// [`OttApplication::render`]).
 #[derive(Debug, Clone, Copy)]
 pub struct OttRenderState {
     processor: OttProcessor,
+    /// What this thread's share of the input looked like.
+    ///
+    /// Per render state rather than on the application because this is the
+    /// state `render` holds uniquely; [`OttApplication::diagnostics`] combines
+    /// them once the run is over.
+    input: InputMeter,
 }
 
 /// The oxtt application: a processor prototype, the control surface's mapping
@@ -244,6 +252,7 @@ impl BelaApplication for OttApplication {
     ) -> OttRenderState {
         OttRenderState {
             processor: self.processor,
+            input: InputMeter::new(),
         }
     }
 
@@ -310,6 +319,11 @@ impl BelaApplication for OttApplication {
     /// block frame 0 and the output from this thread's first frame, and those
     /// coincide only because `thread_count` is 1.
     ///
+    /// It also meters what arrived, which is how an input gain gets set on a
+    /// board with no meter of its own ([`InputMeter`]). Two comparisons per
+    /// frame, on the render state this callback already holds uniquely — the
+    /// `&self` in the signature is the application, not the state.
+    ///
     /// Real-time safe: no allocation, no lock, no I/O, and no index — the
     /// slice patterns below cannot go out of bounds, and `process_frame` is
     /// proven panic-free (docs/contracts.md §6).
@@ -321,6 +335,9 @@ impl BelaApplication for OttApplication {
             let [left_in, right_in, ..] = *input else {
                 continue;
             };
+
+            state.input.observe(left_in, right_in);
+
             let (left_out, right_out) = state.processor.process_frame(left_in, right_in);
             if let [left, right, ..] = output {
                 *left = left_out;
@@ -340,9 +357,9 @@ impl BelaApplication for OttApplication {
         clippy::disallowed_macros,
         reason = "cleanup runs after audio has stopped, outside the real-time callbacks docs/contracts.md §6 governs; same exemption as src/main.rs"
     )]
-    fn cleanup(&mut self, _states: &mut [OttRenderState], context: &CleanupContext) {
+    fn cleanup(&mut self, states: &mut [OttRenderState], context: &CleanupContext) {
         if self.report_on_exit {
-            eprintln!("{}", self.diagnostics(context));
+            eprintln!("{}", self.diagnostics(states, context));
         }
     }
 }
@@ -356,6 +373,7 @@ impl BelaApplication for OttApplication {
 pub struct RunDiagnostics {
     underrun_count: u32,
     audio_frames_elapsed: u64,
+    input: InputMeter,
     cpu_percentage: Option<f32>,
     publishes: Option<u64>,
     rejects: Option<u64>,
@@ -372,6 +390,20 @@ impl RunDiagnostics {
     #[must_use]
     pub const fn audio_frames_elapsed(self) -> u64 {
         self.audio_frames_elapsed
+    }
+
+    /// What arrived at the input: the run's loudest sample and how many frames
+    /// hit full scale.
+    ///
+    /// The Bela host reports this and the JACK host does not, for a reason
+    /// about the hardware in front of them rather than about the hosts —
+    /// [`InputMeter`] has it. What it buys here is that `--adc-gain-db` can be
+    /// chosen from a number instead of by ear
+    /// (`docs/bela/cross-compile.md`), which nothing on this board otherwise
+    /// allows.
+    #[must_use]
+    pub const fn input(self) -> InputMeter {
+        self.input
     }
 
     /// The last CPU reading, or `None` if CPU monitoring was not enabled.
@@ -415,6 +447,8 @@ impl fmt::Display for RunDiagnostics {
             "\noxtt: audio_frames_elapsed={}",
             self.audio_frames_elapsed
         )?;
+        write!(f, "\noxtt: input_peak_dbfs={:.1}", self.input.peak_dbfs())?;
+        write!(f, "\noxtt: input_clipped={}", self.input.clipped_frames())?;
         if let Some(percentage) = self.cpu_percentage {
             write!(f, "\noxtt: cpu_percentage={percentage:.1}")?;
         }
@@ -429,15 +463,31 @@ impl fmt::Display for RunDiagnostics {
 }
 
 impl OttApplication {
-    /// Reads the run's diagnostics out of the cleanup context.
+    /// Reads the run's diagnostics out of the cleanup context and the render
+    /// states.
     ///
     /// Separate from [`BelaApplication::cleanup`] so that the figures can be
     /// built and checked without printing them.
+    ///
+    /// The input meter comes from the states rather than from the application
+    /// because that is what `render` can reach without a lock. With
+    /// `thread_count` pinned to 1 there is one, but the fold is written for
+    /// however many arrive.
     #[must_use]
-    pub fn diagnostics(&self, context: &CleanupContext) -> RunDiagnostics {
+    pub fn diagnostics(
+        &self,
+        states: &[OttRenderState],
+        context: &CleanupContext,
+    ) -> RunDiagnostics {
+        let input = states
+            .iter()
+            .map(|state| state.input)
+            .fold(InputMeter::new(), InputMeter::merged);
+
         RunDiagnostics {
             underrun_count: context.underrun_count(),
             audio_frames_elapsed: context.audio_frames_elapsed(),
+            input,
             cpu_percentage: context.cpu_usage().map(|usage| usage.percentage()),
             publishes: self.has_controls().then_some(self.publishes),
             rejects: self.has_controls().then_some(self.rejects),
@@ -451,10 +501,21 @@ mod tests {
     use super::*;
     use crate::params::Preset;
 
+    /// A meter that has seen one frame at the given magnitude, which is the
+    /// shortest way to build a `RunDiagnostics` with a known level in it.
+    fn metered(magnitude: f32) -> InputMeter {
+        let mut meter = InputMeter::new();
+        meter.observe(magnitude, 0.0);
+        meter
+    }
+
     fn diagnostics() -> RunDiagnostics {
         RunDiagnostics {
             underrun_count: 0,
             audio_frames_elapsed: 480_000,
+            // -6.0 dBFS, so the printed figure is a conversion rather than a
+            // number copied into the expectation.
+            input: metered(0.501_187),
             cpu_percentage: None,
             publishes: None,
             rejects: None,
@@ -465,7 +526,7 @@ mod tests {
     fn a_plain_run_reports_only_what_applies() {
         assert_eq!(
             diagnostics().to_string(),
-            "oxtt: underrun_count=0\noxtt: audio_frames_elapsed=480000"
+            "oxtt: underrun_count=0\noxtt: audio_frames_elapsed=480000\noxtt: input_peak_dbfs=-6.0\noxtt: input_clipped=0"
         );
     }
 
@@ -478,8 +539,34 @@ mod tests {
         };
         assert_eq!(
             report.to_string(),
-            "oxtt: underrun_count=0\noxtt: audio_frames_elapsed=480000\noxtt: control_publishes=12\noxtt: control_rejects=0"
+            "oxtt: underrun_count=0\noxtt: audio_frames_elapsed=480000\noxtt: input_peak_dbfs=-6.0\noxtt: input_clipped=0\noxtt: control_publishes=12\noxtt: control_rejects=0"
         );
+    }
+
+    /// The input figures are reported unconditionally, unlike the optional
+    /// ones: every run has an input, so a silent one is a measurement rather
+    /// than a figure that does not apply.
+    #[test]
+    fn a_silent_input_is_reported_rather_than_left_out() {
+        let report = RunDiagnostics {
+            input: InputMeter::new(),
+            ..diagnostics()
+        };
+        assert!(report.to_string().contains("\noxtt: input_peak_dbfs=-inf"));
+        assert!(report.to_string().contains("\noxtt: input_clipped=0"));
+    }
+
+    #[test]
+    fn a_clipped_run_says_how_many_frames_clipped() {
+        let mut input = InputMeter::new();
+        input.observe(1.0, 1.0);
+        input.observe(1.0, 0.0);
+        let report = RunDiagnostics {
+            input,
+            ..diagnostics()
+        };
+        assert!(report.to_string().contains("\noxtt: input_clipped=2"));
+        assert!(report.to_string().contains("\noxtt: input_peak_dbfs=0.0"));
     }
 
     #[test]

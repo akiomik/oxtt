@@ -154,11 +154,55 @@ half output, sweeping the input gain across a unity DSP path:
 
 A crest factor falling from 15 dB to 12 dB while the RMS step falls short of
 linear is peak clipping. The clean ceiling is +7 dB at half output, and about
-−12 dB at full output. Nothing reports this; it is visible only as squashed
-peaks.
+−12 dB at full output.
 
 `--adc-gain-db` must therefore be set for the source. What the default should
-be is undecided ([noise-floor.md](noise-floor.md)).
+be is undecided ([noise-floor.md](noise-floor.md)). At the time this was
+measured nothing reported the clipping and it was visible only as squashed
+peaks; the section below is what changed that.
+
+### The input meter tracks the input and pins at full scale — PASS
+
+`oxtt: input_peak_dbfs` and `oxtt: input_clipped` exist so that
+`--adc-gain-db` can be set from a number instead of inferred from a crest
+factor. Twelve-second runs, `--preset safe-start`, source an Elektron Syntakt
+at full main output playing a single-note loop — chosen over a pattern so that
+the peak is the same from one run to the next and the runs can be compared.
+
+| `--adc-gain-db` | `input_peak_dbfs` | Step | `input_clipped` |
+| ---: | ---: | ---: | ---: |
+| −12 | −18.4 | — | 0 |
+| −9 | −15.3 | +3.1 | 0 |
+| −6 | −12.4 | +2.9 | 0 |
+| −3 | −9.3 | +3.1 | 0 |
+| 0 | −6.3 | +3.0 | 0 |
+| +3 | −3.3 | +3.0 | 0 |
+| +6 | −0.3 | +3.0 | 0 |
+| +9 | 0.0 | — | 140099 |
+| +12 | 0.0 | — | 266526 |
+| +16 | 0.0 | — | 324508 |
+
+- **The peak tracks the input one for one.** Eighteen decibels in 3 dB steps,
+  every step within 0.1 dB of the gain that produced it. A second ladder on a
+  quieter source tracked the same way from −12 dB to +16 dB.
+- **It pins at full scale rather than running past it.** From +9 dB upward the
+  peak is 0.0 dBFS and stays there however much more gain is asked for, while
+  the clipped count keeps rising — 324508 of the run's 576000 frames at the
+  board's default, which is 56% of it.
+- **The clean ceiling for this source is +6 dB**, 0.3 dB below full scale.
+  The board's default of +16 dB overdrives it by 10 dB.
+- **Below −12 dB the codec stops responding.** −24, −18 and −12 all produce
+  the same level, and −12 → −9 is the first step that moves. That is a lower
+  bound on what `--adc-gain-db` can usefully be asked for; `bela-rs`'s
+  `board-facts.md` records libbela's own note that its decibel-to-register
+  conversion is approximate below −18 dB, and this is where it stops mattering
+  in practice.
+
+**The clean ceiling is a property of the material, not only of the gear.** The
+section above measures about −12 dB for the same instrument at the same output
+setting playing a pattern; this one measures +6 dB for a single note. Eighteen
+decibels apart, from one source, which is the case against any fixed default
+and the reason this figure is reported rather than chosen once.
 
 ### The noise floor does not move with the input gain — CONFIRMED
 
