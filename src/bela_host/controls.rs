@@ -41,6 +41,30 @@ const POT_SUPPLY_FRACTION: f32 = 3.3 / 4.096;
 /// the same reason (`src/control/pi.rs`).
 const POT_POSITION_FLOOR: PotPosition = PotPosition::new_const(0);
 
+/// How far a motionless pot's reading wanders on this board, in
+/// [`PotPosition`] steps, as the deadband that has to absorb it.
+///
+/// The Gem's converter is far quieter than the Raspberry Pi's MCP3008 on the
+/// same pots: measured over 60 seconds at each of full and mid travel, no
+/// channel's reading spanned more than **2.5 counts** end to end, against a
+/// raw σ of 6.39 on the Pi (`docs/bela/control-surface-verification.md`,
+/// `docs/raspberry-pi/control-surface-verification.md`).
+///
+/// Three counts is chosen against that measured span rather than against an
+/// estimated σ, and it is the stronger statement of the two: the whole
+/// excursion ever observed fits inside the band, so a motionless pot is
+/// silent rather than merely quiet. The mapping layer's rule —
+/// `deadband >= σ` of the raw jitter — is satisfied many times over by the
+/// same figure.
+///
+/// The Pi's eight counts would also have been silent here, which is exactly
+/// why it is not used: it would spend the board's quieter converter on
+/// nothing. Three counts is 0.29% of travel, roughly 341 distinct positions
+/// across a sweep against the Pi's 128, and `3 / 1023 * 48` ≈ 0.141 dB on the
+/// two gain pots — a quarter of the Pi's step and still far under what the
+/// DSP's 20 ms smoothing lets through as an audible move (ADR 0012).
+pub const DEADBAND_COUNTS: f32 = 3.0;
+
 /// Number of analog channels the control surface occupies, `A0` through `A5`.
 ///
 /// The order is [`Pots`]' field order, which is also the Pi's MCP3008 channel

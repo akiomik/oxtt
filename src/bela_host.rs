@@ -18,7 +18,8 @@ use crate::params::ConfigError;
 
 pub use app::{OttApplication, OttRenderState, RunDiagnostics};
 pub use controls::{
-    ANALOG_CHANNELS_USED, PollDecimator, TARGET_POLL_HZ, pot_position, raw_controls,
+    ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, TARGET_POLL_HZ, pot_position,
+    raw_controls,
 };
 
 /// Audio sample rate oxtt asks a Bela for.

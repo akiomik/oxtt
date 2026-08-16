@@ -128,6 +128,15 @@ every sixth block restores it exactly. The alternative — Bela-specific
 constants in layer B — would make the shared layer platform-dependent and put
 its calibration out of reach of the measurement that justified it.
 
+**Revised by [ADR 0012](0012-the-jitter-deadband-belongs-to-the-control-source.md)
+for the deadband alone.** Once the Gem's control surface was measured, the
+deadband proved to be a property of the converter rather than of layer B, and
+the two boards' figures differ by more than an order of magnitude. It is now
+supplied by layer A on both hosts — which is not the rejected alternative
+above but its inverse: layer B ends up naming no board at all, and keeps only
+the rule the value has to satisfy. The filter coefficient and the debounce
+count stay shared, and `PollDecimator` stays the reason they can be.
+
 **Rename `AdcCount` to `PotPosition`.** The type documented itself as "one
 MCP3008 conversion result", and Bela has no MCP3008. What is actually shared is
 a pot's position quantised to a fixed scale; that the Pi's converter produces

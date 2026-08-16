@@ -201,6 +201,18 @@ impl PiControls {
 impl ControlSource for PiControls {
     type Error = PiControlError;
 
+    /// Eight counts, from a worst-case raw σ of 6.39 measured across all six
+    /// channels at both full and mid travel
+    /// (`docs/raspberry-pi/control-surface-verification.md`).
+    ///
+    /// The mapping layer's rule is `DEADBAND_COUNTS >= σ` of the raw jitter,
+    /// so 8.0 ≥ 6.39 holds with room to spare — but not much: this is the
+    /// noisier of the two surfaces by a wide margin, and the figure has no
+    /// slack for a quieter one to inherit. It is 0.8% of travel, roughly 128
+    /// distinct positions across a sweep, and `8 / 1023 * 48` ≈ 0.375 dB on
+    /// the two gain pots.
+    const DEADBAND_COUNTS: f32 = 8.0;
+
     /// Reads the six channels and the switch as one sample.
     ///
     /// The conversions are sequential and each is a separate SPI transaction —

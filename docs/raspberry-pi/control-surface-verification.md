@@ -151,23 +151,31 @@ are checked against.
 
 - `FILTER_COEFFICIENT = 0.2` has a noise gain of exactly 1/3, so a raw σ of
   6.39 arrives at the deadband as σ ≈ 2.13 counts.
-- `DEADBAND_COUNTS = 8.0` is therefore roughly 3.8σ of what actually reaches
-  it — enough margin that a motionless pot is quiet, while 8 counts is only
-  ≈ 0.8% of travel and leaves roughly 128 distinct positions across a full
-  sweep.
+- `PiControls::DEADBAND_COUNTS = 8.0` is therefore roughly 3.8σ of what
+  actually reaches it — enough margin that a motionless pot is quiet, while 8
+  counts is only ≈ 0.8% of travel and leaves roughly 128 distinct positions
+  across a full sweep.
 
 Because the noise gain is exactly 1/3, keeping three sigma of margin reduces
-to `DEADBAND_COUNTS >= σ` of the *raw* jitter. `src/control/mapping.rs`
-records that as the form to re-check against if the pots, the wiring, or the
-ADC change, and carries the derivation; it is not repeated here. Against this
-measurement, 8.0 ≥ 6.39 holds with room to spare.
+to `deadband >= σ` of the *raw* jitter. `src/control/mapping.rs` records that
+as the form to re-check against if the pots, the wiring, or the ADC change,
+and carries the derivation; it is not repeated here. Against this measurement,
+8.0 ≥ 6.39 holds with room to spare.
+
+The value itself lives in `src/control/pi.rs`, next to the hardware it was
+measured on, rather than in the mapping layer: it is a property of this
+converter and not of the conditioning, and a second host measured an order of
+magnitude quieter
+([ADR 0012](../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md),
+[`docs/bela/control-surface-verification.md`](../bela/control-surface-verification.md)).
+Nothing about this measurement or the figure it justifies changed with that
+move.
 
 All six channels are the same part in the same divider on the same converter,
 so this measurement judges all of them, gain pots included. On the two gain
-pots the deadband also lands on a dB figure: `src/control/mapping.rs` works
-`DEADBAND_COUNTS` out as `8 / 1023 * 48` ≈ 0.375 dB across the pots' 48 dB
-span, which is well under the roughly 1 dB step a listener picks out on
-programme material.
+pots the deadband also lands on a dB figure: `src/control/mapping.rs` works it
+out as `8 / 1023 * 48` ≈ 0.375 dB across the pots' 48 dB span, which is well
+under the roughly 1 dB step a listener picks out on programme material.
 
 ## 5. Live JACK session
 

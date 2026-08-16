@@ -36,34 +36,6 @@ use super::raw::{POT_POSITION_MAX, Pots, RawControls};
 /// already handled downstream and there is nothing to gain from extra lag here.
 const FILTER_COEFFICIENT: f32 = 0.2;
 
-/// Hysteresis deadband against the last published value, in ADC counts.
-///
-/// Eight counts is roughly 3.8 times the σ ≈ 2.1 that survives
-/// [`FILTER_COEFFICIENT`], so a motionless pot is quiet rather than provably
-/// silent: the residual is noise, and an excursion past 3.8σ still publishes
-/// every so often. That costs nothing audible — the value published then
-/// differs by under 1% of travel, and the DSP smooths it over 20 ms.
-///
-/// Since this filter's noise gain is exactly 1/3, keeping three sigma of
-/// margin reduces to `DEADBAND_COUNTS >= σ` of the *raw* jitter, which is
-/// the form to re-check against if the pots, the wiring, or the ADC change.
-///
-/// As a fraction of travel the band is 8/1023 ≈ 0.8%, leaving roughly 128
-/// distinct positions across a pot's full sweep — finer than a hand can hold,
-/// and far finer than the parameters' audible resolution.
-///
-/// On the two gain pots that fraction lands on a dB figure, since
-/// [`GAIN_SPAN_DB`] is spread linearly across the same travel: eight counts is
-/// `8 / 1023 * 48` ≈ 0.375 dB. That is well under the roughly 1 dB step a
-/// listener can pick out on programme material, so the coarsest move the
-/// deadband can force is still finer than the ear resolves — and the DSP
-/// smooths even that over 20 ms.
-///
-/// It is hysteresis, not quantization: once a move clears the band, the
-/// published value jumps all the way to the filtered value, so repeated small
-/// moves in one direction cannot accumulate an offset.
-const DEADBAND_COUNTS: f32 = 8.0;
-
 /// The dB value the gain pots produce at their lower stop.
 ///
 /// This is [`IoGain`]'s own lower bound, not a narrowing of it: the pots sweep
@@ -237,14 +209,53 @@ struct Conditioned {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlMapping {
     base: OttParams,
+    /// Hysteresis deadband against the deadband reference, in ADC counts.
+    ///
+    /// Supplied by the caller rather than fixed here, because it is not a
+    /// property of this layer: it is how much a *motionless pot on a
+    /// particular converter* wanders, which is measured per control surface
+    /// and differs by more than an order of magnitude between the two that
+    /// exist (ADR 0012). Each layer A declares its own —
+    /// [`ControlSource::DEADBAND_COUNTS`](crate::control::ControlSource::DEADBAND_COUNTS)
+    /// on the Raspberry Pi, `bela_host::controls::DEADBAND_COUNTS` on a Gem.
+    ///
+    /// What stays here is the rule the value has to satisfy, because that is
+    /// what this layer's filter makes true whatever the hardware: since
+    /// [`FILTER_COEFFICIENT`]'s noise gain is exactly 1/3, keeping three sigma
+    /// of margin reduces to `deadband_counts >= σ` of the *raw* idle jitter.
+    /// That is the form to re-check against when the pots, the wiring or the
+    /// converter change, and it is the form both hosts' figures are justified
+    /// in (`docs/raspberry-pi/control-surface-verification.md`,
+    /// `docs/bela/control-surface-verification.md`).
+    ///
+    /// As a fraction of travel the band is `deadband_counts / 1023`, and on
+    /// the two gain pots it lands on a dB figure, since [`GAIN_SPAN_DB`] is
+    /// spread linearly across the same travel: `deadband_counts / 1023 * 48`.
+    /// Both hosts' values put that well under the roughly 1 dB step a listener
+    /// picks out on programme material, so the coarsest move the deadband can
+    /// force is finer than the ear resolves — and the DSP smooths even that
+    /// over 20 ms.
+    ///
+    /// It is hysteresis, not quantization: once a move clears the band, the
+    /// published value jumps all the way to the filtered value, so repeated
+    /// small moves in one direction cannot accumulate an offset.
+    deadband_counts: f32,
     state: Option<Conditioned>,
 }
 
 impl ControlMapping {
     /// Creates a mapping over the CLI-supplied parameter set.
+    ///
+    /// `deadband_counts` is the idle jitter the control surface being read was
+    /// measured to have; see the field of the same name for what it has to
+    /// satisfy and where each host's figure comes from.
     #[must_use]
-    pub const fn new(base: OttParams) -> Self {
-        Self { base, state: None }
+    pub const fn new(base: OttParams, deadband_counts: f32) -> Self {
+        Self {
+            base,
+            deadband_counts,
+            state: None,
+        }
     }
 
     /// Conditions one reading and returns the parameters to publish, if any.
@@ -277,10 +288,11 @@ impl ControlMapping {
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn update(&mut self, raw: RawControls) -> Option<ControlSnapshot> {
         let counts = raw.pots.map(|count| f32::from(count.get()));
-        // Copied out before `self.state` is borrowed mutably below: `base` is
-        // `Copy` and never changes, so the conversion takes it by value rather
-        // than re-borrowing `self` in the middle of the match.
+        // Copied out before `self.state` is borrowed mutably below: both are
+        // `Copy` and neither changes, so the conversion takes them by value
+        // rather than re-borrowing `self` in the middle of the match.
         let base = self.base;
+        let deadband_counts = self.deadband_counts;
 
         let published = match self.state.as_mut() {
             None => {
@@ -317,7 +329,7 @@ impl ControlMapping {
                     state
                         .filtered
                         .zip_with(state.reference, |filtered, reference| {
-                            if (filtered - reference).abs() >= DEADBAND_COUNTS {
+                            if (filtered - reference).abs() >= deadband_counts {
                                 filtered
                             } else {
                                 reference
@@ -420,9 +432,22 @@ mod tests {
     /// The closest a 10-bit count gets to the centre of a pot's rotation, which
     /// is 511.5. Where the gain pots sit for the tests that are not about them.
     const GAIN_CENTRE_COUNT: u16 = 512;
+    /// The deadband these tests condition against.
+    ///
+    /// The Raspberry Pi's measured figure, not because this layer prefers it —
+    /// it has no figure of its own any more (ADR 0012) — but because it is the
+    /// wider of the two that exist, so a test written against it also passes
+    /// on anything narrower. The counts the movement tests step by are sized
+    /// against this one.
+    const DEADBAND_COUNTS: f32 = 8.0;
 
     fn count(raw: u16) -> PotPosition {
         PotPosition::try_new(raw).unwrap()
+    }
+
+    /// A mapping over `base`, conditioning at [`DEADBAND_COUNTS`].
+    fn mapping(base: OttParams) -> ControlMapping {
+        ControlMapping::new(base, DEADBAND_COUNTS)
     }
 
     /// A reading of the four effect pots, with both gain pots parked at the
@@ -506,7 +531,7 @@ mod tests {
 
     #[test]
     fn first_update_publishes_the_reading_without_fading_in() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let params = mapping
             .update(reading(0, 512, 1023, 250))
             .expect("the first reading must publish");
@@ -519,7 +544,7 @@ mod tests {
 
     #[test]
     fn repeated_identical_readings_publish_only_once() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         assert!(
             mapping.update(uniform(500)).is_some(),
             "the first reading must publish"
@@ -534,7 +559,7 @@ mod tests {
 
     #[test]
     fn idle_jitter_within_the_deadband_never_publishes() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         assert!(
             mapping.update(uniform(500)).is_some(),
             "the first reading must publish"
@@ -555,9 +580,47 @@ mod tests {
         }
     }
 
+    /// The band belongs to the caller, not to this layer (ADR 0012): the same
+    /// movement a Raspberry Pi's eight counts swallow clears a Gem's three.
+    ///
+    /// This is the whole behavioural difference the per-source deadband buys,
+    /// so it is checked against both real figures rather than arbitrary ones.
+    #[test]
+    fn the_width_of_the_deadband_is_the_callers() {
+        /// A move too small for the Pi's band and large enough for the Gem's.
+        const STEP: u16 = 5;
+        /// The Bela Gem Stereo's measured figure (`src/bela_host/controls.rs`).
+        const NARROW_DEADBAND_COUNTS: f32 = 3.0;
+        let held = 500;
+        let moved = held + STEP;
+
+        let mut wide = ControlMapping::new(Preset::SafeStart.params(), DEADBAND_COUNTS);
+        let mut narrow = ControlMapping::new(Preset::SafeStart.params(), NARROW_DEADBAND_COUNTS);
+        assert!(
+            wide.update(uniform(held)).is_some() && narrow.update(uniform(held)).is_some(),
+            "the first reading must publish on both"
+        );
+
+        let mut wide_published = false;
+        let mut narrow_published = false;
+        for _ in 0..HELD_READS {
+            wide_published |= wide.update(uniform(moved)).is_some();
+            narrow_published |= narrow.update(uniform(moved)).is_some();
+        }
+
+        assert!(
+            !wide_published,
+            "a {STEP}-count move must stay inside a {DEADBAND_COUNTS}-count band"
+        );
+        assert!(
+            narrow_published,
+            "a {STEP}-count move must clear a {NARROW_DEADBAND_COUNTS}-count band"
+        );
+    }
+
     #[test]
     fn a_deliberate_turn_publishes_and_moves_toward_the_new_position() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let start = mapping
             .update(uniform(200))
             .expect("the first reading must publish");
@@ -591,7 +654,7 @@ mod tests {
 
     #[test]
     fn a_turn_downward_publishes_a_lower_value() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         mapping
             .update(uniform(800))
             .expect("the first reading must publish");
@@ -613,7 +676,7 @@ mod tests {
     #[test]
     fn only_the_six_pot_fields_are_replaced() {
         let base = Preset::Default.params();
-        let mut mapping = ControlMapping::new(base);
+        let mut mapping = mapping(base);
         let params = mapping
             .update(with_gains(reading(10, 20, 30, 40), 50, 60))
             .expect("the first reading must publish");
@@ -642,7 +705,7 @@ mod tests {
     /// the deadband has nothing to lag behind yet — so these tests read the
     /// mapping itself rather than the mapping plus a settling error.
     fn first_published_gains(input_gain: u16, output_gain: u16) -> (f32, f32) {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let params = mapping
             .update(with_gains(
                 reading(500, 500, 500, 500),
@@ -716,7 +779,7 @@ mod tests {
     /// settled value can sit up to eight counts (≈ 0.375 dB) short of the pot.
     #[test]
     fn turning_a_gain_pot_publishes_and_moves_only_its_own_field() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let idle = reading(500, 500, 500, 500);
         mapping
             .update(with_gains(idle, 100, 100))
@@ -767,7 +830,7 @@ mod tests {
     /// proven otherwise.
     #[test]
     fn a_single_engaged_reading_is_not_enough_to_believe() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         mapping
             .update(switched(uniform(500), false))
             .expect("the first reading must publish");
@@ -780,7 +843,7 @@ mod tests {
 
     #[test]
     fn a_debounced_move_to_the_bypassed_position_publishes_an_explicit_level() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let idle = with_gains(reading(600, 700, 800, 900), 200, 300);
         let before = mapping
             .update(idle)
@@ -817,7 +880,7 @@ mod tests {
 
     #[test]
     fn disengaging_restores_all_three_bypass_controlled_pots_current_positions() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let start = with_gains(reading(600, 500, 500, 500), 600, 600);
         mapping
             .update(start)
@@ -858,7 +921,7 @@ mod tests {
 
     #[test]
     fn contact_bounce_settles_to_exactly_one_state_change() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let idle = uniform(600);
         mapping
             .update(idle)
@@ -903,7 +966,7 @@ mod tests {
     /// must come up that way.
     #[test]
     fn a_switch_resting_bypassed_at_startup_comes_up_bypassed() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let idle = with_gains(reading(600, 500, 500, 500), 900, 900);
         let params = mapping
             .update(switched(idle, true))
@@ -933,7 +996,7 @@ mod tests {
 
     #[test]
     fn turning_bypass_controlled_pots_still_publishes_latest_targets() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let start = with_gains(reading(600, 500, 500, 500), 500, 500);
         mapping
             .update(start)
@@ -962,7 +1025,7 @@ mod tests {
 
     #[test]
     fn turning_non_bypass_controls_while_bypassed_keeps_the_explicit_level() {
-        let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+        let mut mapping = mapping(Preset::SafeStart.params());
         let start = with_gains(reading(600, 200, 500, 500), 900, 100);
         mapping
             .update(start)
@@ -1049,7 +1112,7 @@ mod tests {
         fn every_published_snapshot_is_valid(
             readings in prop::collection::vec(arbitrary_reading(), 1..64),
         ) {
-            let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+            let mut mapping = mapping(Preset::SafeStart.params());
             for raw in readings {
                 if let Some(params) = mapping.update(raw) {
                     prop_assert!(params.params.validate(SAMPLE_RATE).is_ok());
@@ -1064,7 +1127,7 @@ mod tests {
             start in arbitrary_reading(),
             moves in prop::collection::vec(arbitrary_reading(), 1..64),
         ) {
-            let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+            let mut mapping = mapping(Preset::SafeStart.params());
             mapping.update(switched(start, false));
             // Whether engaging the bypass publishes is not the property: pots
             // already sitting at the values the bypass forces make it a no-op
@@ -1093,7 +1156,7 @@ mod tests {
             input_raw in 0..=POT_POSITION_MAX,
             output_raw in 0..=POT_POSITION_MAX,
         ) {
-            let mut mapping = ControlMapping::new(Preset::SafeStart.params());
+            let mut mapping = mapping(Preset::SafeStart.params());
             let params = mapping
                 .update(with_gains(reading(500, 500, 500, 500), input_raw, output_raw))
                 .expect("the first reading must publish");

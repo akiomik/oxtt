@@ -189,6 +189,7 @@ with the re-check rule kept next to the constants themselves in
   **Confirmed (ADR 0011), with one addition this did not anticipate.** The Bela
   host does all three: layer B is used with *no source change at all* — not one
   constant — layer A is a free function over the block context's analog frame,
+
   and layer C is gone, down to being compiled only under the `jack-host`
   feature so the dependency graph says so too. The read is in `render_pre`
   rather than `render`, because that is the callback holding both the mapping
@@ -203,6 +204,15 @@ with the re-check rule kept next to the constants themselves in
   *n*th block. "Layer B is platform-independent" therefore comes with a duty
   attached: a host that drives it owes it reads at the rate it was calibrated
   for, and that duty is now written down in `docs/contracts.md` §8.
+
+  **Revised again (ADR 0012): "not one constant" did not survive measuring the
+  second converter.** The deadband was calibrated on an MCP3008, and a Gem's
+  converter measured an order of magnitude quieter on the same pots, so the one
+  number was either too wide for one board or far too narrow for the other. It
+  is now supplied by layer A on both hosts and layer B keeps only the rule it
+  has to satisfy. The other two constants named above are unaffected: neither
+  is a measurement of a converter, and the duty in the paragraph above is
+  exactly what keeps them shared.
 
 - A Daisy or Teensy port keeps layer B for the same reason and rewrites A
   against a vendor `no_std` HAL, but also loses the `clap` CLI that supplies

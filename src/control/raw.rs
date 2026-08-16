@@ -178,6 +178,20 @@ pub trait ControlSource {
     /// How this source's hardware read can fail.
     type Error: StdError;
 
+    /// How far a motionless pot's reading wanders on this hardware, in
+    /// [`PotPosition`] steps, as the deadband that has to absorb it.
+    ///
+    /// An associated constant with no default, so that adding a source is
+    /// also being asked what its idle jitter is. There is no portable answer:
+    /// the two surfaces that exist differ by more than an order of magnitude,
+    /// and a value carried over from the other one would be either a deadband
+    /// that chatters or a knob that is needlessly coarse (ADR 0012).
+    ///
+    /// The rule it has to satisfy, and the measurement that establishes it,
+    /// belong to the mapping layer — see
+    /// [`ControlMapping`](crate::control::ControlMapping)'s `deadband_counts`.
+    const DEADBAND_COUNTS: f32;
+
     /// Reads all six pots and the bypass switch as one sample.
     ///
     /// # Errors
@@ -296,6 +310,10 @@ mod tests {
 
     impl ControlSource for FakeSource {
         type Error = Infallible;
+
+        /// The Raspberry Pi's figure: the widest of the real ones, so a
+        /// fake conditioned against it is conditioned conservatively.
+        const DEADBAND_COUNTS: f32 = 8.0;
 
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads = self.reads.saturating_add(1);

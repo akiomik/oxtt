@@ -117,7 +117,7 @@ impl ControlHandle {
             thread::spawn(move || {
                 poll_until_stopped(
                     source,
-                    ControlMapping::new(base),
+                    ControlMapping::new(base, S::DEADBAND_COUNTS),
                     publisher,
                     &stop,
                     &read_failures,
@@ -319,6 +319,10 @@ mod tests {
     impl ControlSource for TurnablePot {
         type Error = Infallible;
 
+        /// The Raspberry Pi's figure: the widest of the real ones, so a
+        /// fake conditioned against it is conditioned conservatively.
+        const DEADBAND_COUNTS: f32 = 8.0;
+
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads.fetch_add(1, Ordering::Release);
             Ok(reading(self.position.load(Ordering::Acquire)))
@@ -345,6 +349,10 @@ mod tests {
 
     impl ControlSource for FlakyAdc {
         type Error = DisconnectedAdc;
+
+        /// The Raspberry Pi's figure: the widest of the real ones, so a
+        /// fake conditioned against it is conditioned conservatively.
+        const DEADBAND_COUNTS: f32 = 8.0;
 
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads.fetch_add(1, Ordering::Release);
