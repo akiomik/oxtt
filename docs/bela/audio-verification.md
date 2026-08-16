@@ -230,6 +230,40 @@ a 102 dBA DAC. The board is about 30 dB behind the interface it is measured
 with, and that gap is the whole of the problem
 ([noise-floor.md](noise-floor.md)).
 
+### The floor `--depth 0` shows is added after the effect — CONFIRMED
+
+Source silent, `--depth 0`, input gain −12 dB, sweeping the output gain. A
+`--depth 0` path is linear, so the output gain scales the converter's
+contribution and leaves anything added after the effect alone:
+
+| Output gain | A-weighted | Rise vs −18 dB | If it were 1:1 |
+| --- | --- | --- | --- |
+| −18 (preset) | −91.31 | 0.00 | 0 |
+| −6 | −91.48 | −0.17 | 12 |
+| +6 | −88.45 | +2.87 | 24 |
+| +18 | −80.84 | +10.47 | 36 |
+| +24 (maximum) | −75.09 | +16.22 | 42 |
+
+Twelve decibels of gain move the floor by 0.17 dB. Fitting the two components
+across all five points (largest residual 0.61 dB) puts the converter path at
+−117.2 dBA at the preset's output gain and everything after the effect at
+−91.2 dBA — **26 dB apart**. [noise-floor.md](noise-floor.md) has what follows
+from that; the short form is that the preset can only move about 3 dB of the
+floor that is audible.
+
+### The per-band upward candidate is noisier than the setting it replaces — FAIL
+
+`noise-floor.md` predicted −88.2 dBA for low 0.800 / mid 0.450 / high 0.150,
+against −88.14 dBA for the global 0.3 it was derived to match. Built into
+`oxtt-bela` and run on the board, source silent, same operating point:
+**−86.03 dBA**, 2.1 dB worse. The released binary was restored afterwards and
+no preset in the repository was changed.
+
+Per band, after subtracting the `--depth 0` floor in power, raising the mid
+band cost 9.1 dB and lowering the high band returned 0.2 dB. The
+reallocation was derived from output figures that are mostly the post-effect
+floor in the low and mid bands, so the headroom it traded away did not exist.
+
 ### The effect raises the noise floor into audibility — CONFIRMED
 
 At the corrected operating point (Syntakt at full output, `--adc-gain-db -12`),
@@ -253,11 +287,12 @@ options are in [noise-floor.md](noise-floor.md).
 - **Round-trip latency.** The reason for choosing this board over a Raspberry Pi
   5 is roughly 1 ms against the Pi's measured 11.4 ms (ADR 0008, ADR 0009), and
   that claim is still the vendor's rather than this project's.
-- **The per-band upward allocation.** [noise-floor.md](noise-floor.md) predicts
-  that spending the same noise budget per band rather than globally buys back
-  most of the low and mid upward compression. The per-band amounts are preset
-  data and are not reachable from the command line, so the prediction has not
-  been listened to.
+- **Whether any per-band upward allocation is worth having.** The candidate in
+  [noise-floor.md](noise-floor.md) has now been measured on the board rather
+  than predicted — see below — and it is 2 dB noisier than the global setting
+  it was derived to match. What has not been established is whether a different
+  allocation buys enough audible compression at the same floor to justify a
+  preset of its own. That is a listening question.
 - **`OttApplication::validate_settings`'s own refusals.** All three — more than
   one render thread, too few analog or digital channels, a crossover pair above
   the Nyquist-relative limit — are unreachable from the shipped command line.

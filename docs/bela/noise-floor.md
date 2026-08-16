@@ -145,6 +145,33 @@ the output stage, not the ADC** — the ADC's contribution is attenuated below i
 by the same −18 dB and never surfaces. That has a consequence for how the
 figures here should be read: *nothing in this document measures the ADC.*
 
+Carrying the same sweep past 0 dB says how far below (2026-08-16, source
+silent, `--depth 0`, input gain −12 dB):
+
+| Output gain | A-weighted |
+| --- | --- |
+| −18 dB (preset) | −91.31 dBA |
+| −6 dB | −91.48 dBA |
+| +6 dB | −88.45 dBA |
+| +18 dB | −80.84 dBA |
+| +24 dB (maximum) | −75.09 dBA |
+
+`--depth 0` is linear, so the output gain scales the converter's contribution
+and leaves everything added after it alone. Fitting
+`P(g) = A·10^(g/10) + B` to those five points — 42 dB of range, largest
+residual 0.61 dB — separates them:
+
+| | A-weighted |
+| --- | --- |
+| The ADC path, at `safe-start`'s −18 dB output gain | **−117.2 dBA** |
+| Everything added after the effect | **−91.2 dBA** |
+
+**Twenty-six decibels apart**, which is why no preset change moves the
+`--depth 0` figure at all. It also puts a floor under the whole exercise: with
+the effect contributing nothing, this board still produces −91.2 dBA, and the
+−88.14 dBA that was judged acceptable is only 3.0 dB above it. **That 3.0 dB
+is the entire budget any preset has to spend.**
+
 With the effect running it is the other way round:
 
 | Output gain | A-weighted |
@@ -248,11 +275,52 @@ Spending the same −88 dBA budget per band instead:
 | Mid | 0.24 | **0.45** | 1.9× |
 | High | 0.24 | **0.15** | 0.6× |
 
-Predicted floor −88.2 dBA, against −88.14 dBA for the global setting. Same
-noise, substantially more upward compression where it is not the thing being
-heard. This is a prediction from the band decomposition and has not been
-listened to — the per-band amounts are preset data and are not reachable from
-the command line.
+Predicted floor −88.2 dBA, against −88.14 dBA for the global setting.
+
+### That prediction was wrong, and the reason matters
+
+**Measured on the board (2026-08-16): −86.03 dBA.** Two decibels worse than the
+setting it was derived to match, not equal to it. The per-band amounts are not
+reachable from the command line, so this was measured by building `oxtt-bela`
+with them, running it, and putting the released binary back afterwards.
+
+The table it was derived from decomposes the *output*, and the output carries a
+floor the effect never touched. Subtracting that floor in power — the
+`--depth 0` run, measured in the same session — leaves what each band's upward
+compression actually generated:
+
+| | Low | Mid | High | Total |
+| --- | --- | --- | --- | --- |
+| `--depth 0` floor | −118.2 | −96.3 | −93.0 | −91.3 |
+| Global 0.3, at the output | −118.0 | −94.4 | −89.3 | −88.1 |
+| Global 0.3, effect only | −130.5 | −98.8 | −91.8 | −91.0 |
+| Per-band candidate, at the output | −117.1 | −88.9 | −89.2 | −86.0 |
+| Per-band candidate, effect only | −123.5 | **−89.7** | **−91.6** | −87.6 |
+
+- Raising the mid band from 0.24 to 0.45 cost **9.1 dB**.
+- Lowering the high band from 0.24 to 0.15 bought back **0.2 dB**.
+
+**The budget the trade was spending was never there.** At global 0.3 the low
+and mid columns of the original table are the floor rather than the effect —
+the effect is 12 dB and 2.5 dB below what those columns report — so the
+headroom they appeared to offer was not the effect's to reallocate. Only the
+high column has the effect above the floor at all, by 1.2 dB, and cutting it
+further returned almost nothing while the mid band's increase spent nine
+decibels.
+
+Two rules follow for anything that tries this again:
+
+- Judge a per-band trade on **each band's effect-generated contribution**,
+  obtained by subtracting the `--depth 0` floor in power. The output figures
+  understate what raising a quiet band costs and overstate what lowering a
+  loud one saves.
+- At the accepted operating point the effect contributes −91.0 dBA against a
+  −91.3 dBA floor it cannot move. Reallocation works on the first number only,
+  so **no allocation can put the total more than about 3 dB below where global
+  0.3 already is.**
+
+None of this has been listened to. It is measured, which the prediction it
+replaces was not.
 
 ## Views
 
@@ -282,6 +350,15 @@ amount of DSP recovers it. Something has to give, and the measurements say the
 cheapest thing to give is high-band upward compression, because that is where
 the noise is and it is not where most of the effect is.
 
+**A per-band preset is worth less than it looked.** The measurement above says
+the total cannot go more than about 3 dB below global 0.3 whatever the
+allocation, because the rest of the floor is not the effect's to move. What a
+per-band preset can still buy is *where* the remaining compression is spent —
+the low band's own contribution is 12 dB below the floor at global 0.3 and
+39 dB below at full, so raising it is close to free in noise terms. Whether
+that is audible enough to be worth a preset variant is the open question, and
+it is a listening question rather than a measurement one.
+
 ## Undecided
 
 - **Whether to add a preset with per-band upward amounts**, and what to call
@@ -292,8 +369,10 @@ the noise is and it is not where most of the effect is.
   clips line level and cannot stand. The right value depends on the source, and
   lowering it costs signal-to-noise one-for-one, so a conservative default is
   not free.
-- **Whether the predicted per-band allocation actually sounds better** than the
-  global 0.3 it is derived from.
+- **Whether a per-band allocation sounds better** than the global 0.3 it would
+  replace. The published candidate is settled on noise — it measures 2 dB
+  worse, not equal — so what is undecided is whether some other allocation
+  buys enough audible compression to be worth having at the same floor.
 - **Whether `riot` is worth designing for this board at all.**
 - **Whether this board is the platform.** This measurement is the reason that
   is still open: it postdates
