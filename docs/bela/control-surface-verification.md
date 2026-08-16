@@ -177,6 +177,7 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
 |---|---|---:|---:|---:|
 | 79.3 s | Depth and Upward pots, full sweep, down and back | **480** | 0 | 0 |
 | 30 s | nothing touched | **1** | 0 | 0 |
+| 59.4 s | the bypass switch, 10 throws, no pot touched | **11** | 0 | 0 |
 
 - **A motionless surface publishes exactly once**, which is the seeding read.
   Over 30 seconds at a 500 Hz read rate that is one publish in about 15 000
@@ -186,6 +187,14 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
   sweep clears the band about `1023 / 3` times; four sweeps therefore land in
   the high hundreds, and 480 is in that range. Nothing else in the run
   contributed.
+- **One throw of the switch publishes exactly once.** Ten throws with no pot
+  touched gave 11 publishes — the seeding read plus one per throw, with no
+  spare. What this measures is the debounce. Reads arrive every 2 ms, an
+  alternate-action contact chatters for longer than that, and every transition
+  the mapping layer believed would be a publish of its own;
+  `BYPASS_DEBOUNCE_READS` requires fifteen consecutive agreeing reads — up to
+  30 ms — before the position changes. Eleven is that working, counted rather
+  than heard, and it is the sharp form of the by-ear result below.
 - **The processor accepted every snapshot** the mapping layer produced
   (`control_rejects=0`), and reading the surface inside `render_pre` cost no
   underruns.
@@ -208,11 +217,6 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
 
 ## 6. Outstanding
 
-- **The switch has no counter-based measurement.** Section 5's by-ear result
-  covers it, but the sharper check — pots untouched, so that
-  `control_publishes` counts switch throws and nothing else, and the expected
-  total is `1 + throws` — has not been captured on the finished wiring. It
-  needs no audio and one 40-second run.
 - **Pulling an input mid-session has not been performed**, for the same reason
   as on the Pi: the breadboard is too dense to disturb safely while the rig is
   running. What it would exercise is the bad-input path rather than an error
@@ -236,5 +240,7 @@ Met:
 - A live session exercising all six pots and the bypass switch, with
   `control_rejects=0` and `underrun_count=0`, and a motionless-surface run
   publishing exactly its seeding read.
+- The switch measured against a counter rather than by ear: ten throws, no pot
+  touched, `1 + 10` publishes.
 
 Outstanding: section 6.
