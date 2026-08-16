@@ -44,6 +44,31 @@ established, so *absolute* dBFS figures do not describe levels inside the
 Bela; ratios between two of them do, and every conclusion below rests on a
 ratio.
 
+**Every figure here is with the source connected and powered, and it has to
+be.** Measured 2026-08-17 at one operating point (`--adc-gain-db -12`,
+`safe-start` at its own upward setting), varying only what is on the input
+jack:
+
+| Input | Floor | Effect's own contribution |
+| --- | --- | --- |
+| Source connected and powered, silent | −77.33 dBA | −77.51 dBA |
+| Source connected, powered **off** | −74.26 dBA | — |
+| **Nothing plugged in** | −73.51 dBA | −73.58 dBA |
+
+**An open input is 3.9 dB noisier than a live one.** A powered source drives
+the input from a low output impedance, which shunts what the input stage would
+otherwise pick up; an unpowered one presents something closer to an open
+circuit, and an empty jack is one. `--depth 0` does not move across the three
+(−91.31 against −91.47), which is the check that this is input-referred rather
+than the board drifting.
+
+Two things follow. Measuring the floor with the input unplugged overstates it,
+so the condition belongs in the method rather than in a footnote. And a pedal
+whose input jack can be empty inherits the same 3.9 dB — the usual answer is a
+switching jack that grounds the input when nothing is in it, which is the same
+reasoning that grounds the unused analog inputs in
+[`control-surface-setup.md`](control-surface-setup.md).
+
 Three pitfalls cost real time and are worth writing down, because anything
 driving `oxtt-bela` over ssh will hit all three:
 
