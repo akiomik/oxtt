@@ -102,9 +102,14 @@ oxtt: input_clipped=0
 2. **`input_clipped` must be 0.** If it is not, lower `--adc-gain-db` until it
    is. Anything above zero makes `input_peak_dbfs` a floor rather than a
    reading, because the converter ran out of range before the signal did.
-3. **Do not raise it above +6 dB** even if there is headroom. Analog gain buys
-   signal-to-noise up to that point and nothing above it — past +6 the input
-   stage's own noise rises with the gain — so more only spends headroom.
+3. **Check whether the last few decibels bought anything.** Analog gain stops
+   paying at some point — with an Elektron Syntakt that was +6 dB, above which
+   the noise rose one for one with the gain and only headroom was spent. Where
+   that point sits may be the board's input stage or the source's own output
+   noise; the two are indistinguishable from the outside, so it is worth
+   finding for a source rather than assuming
+   ([noise-floor.md](noise-floor.md)). Sweep the gain with the source silent
+   and listen, or record and compare.
 4. **Take the same amount out digitally.** With `--adc-gain-db` at +6 rather
    than the −12 that suits no source in particular, move the other two by the
    same 18 dB in the opposite directions:

@@ -178,17 +178,32 @@ silent):
 | +12 | −61.60 dBA | +6.21 | 6 | −0.2 |
 | +16 | −57.22 dBA | +4.38 | 4 | −0.4 |
 
-**Analog gain buys signal-to-noise up to about +6 dB and nothing above it.**
-Past that the noise follows the gain one for one, which is the input stage's
-own noise being amplified along with the signal; more gain only spends
-headroom. The corrected rule:
+**With this source connected, analog gain stopped buying signal-to-noise above
+about +6 dB.** Below it the gain outruns the noise; above it the noise follows
+one for one, so more gain only spends headroom.
 
-> Set `--adc-gain-db` to **+6 dB, or the highest the source allows without
-> clipping, whichever is lower.**
+**What that ceiling belongs to is not established.** Noise that follows the
+gain is noise generated *before* the gain stage, and there are two candidates
+there — the board's own input stage, and the source's output noise. They are
+indistinguishable in this measurement, which was taken with an Elektron
+Syntakt connected and powered. Repeating the sweep with nothing plugged in
+gives a different shape, still buying at +12 dB, but an open input is an
+antenna and those readings drift between runs, so they do not settle it
+either. **A sweep with the input shorted to ground would**: it removes the
+source and the antenna at once and leaves the board's own input-referred
+noise. That has not been done.
+
+So the rule is measured per source rather than asserted:
+
+> Take `--adc-gain-db` as high as the source allows without clipping, and
+> check whether the last few decibels actually bought anything. With the
+> Syntakt they stopped paying at +6 dB.
 
 The clipping ceiling is what `input_peak_dbfs` and `input_clipped` are for, and
 it is source-dependent by 18 dB or more
-([audio-verification.md](audio-verification.md)).
+([audio-verification.md](audio-verification.md)). The **lower** bound is not
+source-dependent: below −12 dB the codec stops responding at all
+([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
 
 ### Nor with the output gain, where it matters
 

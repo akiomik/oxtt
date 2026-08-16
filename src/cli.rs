@@ -147,9 +147,10 @@ pub struct BelaCli {
     /// Not to be confused with `--input-gain`, which is the per-effect-band
     /// gain inside the DSP. This one is the converter's.
     ///
-    /// Set it to +6 dB or the highest the source allows without clipping,
-    /// whichever is lower; `--report-on-exit` says which that is. Below
-    /// -12 dB the codec stops responding.
+    /// Set it as high as the source allows without clipping —
+    /// `--report-on-exit` says where that is — and check whether the last few
+    /// decibels bought anything; with one source they stopped paying at
+    /// +6 dB. Below -12 dB the codec stops responding at all.
     #[arg(long, value_name = "dB")]
     pub adc_gain_db: Option<f32>,
 

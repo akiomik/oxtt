@@ -88,15 +88,17 @@ pub struct RunOptions {
     /// [`RunDiagnostics::input`] is what makes the ceiling findable: nothing
     /// on this board reports clipping otherwise.
     ///
-    /// **Set it to +6 dB, or the highest the source allows without clipping,
-    /// whichever is lower.** The two bounds have different natures. The
-    /// clipping ceiling belongs to the source and moves by 18 dB between one
-    /// piece of material and another on the same instrument. The +6 dB is the
-    /// board's: below it this gain buys signal-to-noise, and above it the
-    /// input stage's own noise rises one for one with the gain, so more
-    /// spends headroom and returns nothing.
+    /// **Set it as high as the source allows without clipping**, and check
+    /// whether the last few decibels bought anything: analog gain stops
+    /// paying once the noise ahead of it dominates, which measured at +6 dB
+    /// with an Elektron Syntakt. Whether that point belongs to the board's
+    /// input stage or to the source is not established — the two look
+    /// identical from here — so it is worth finding per source rather than
+    /// assuming (docs/bela/noise-floor.md).
     ///
-    /// Below -12 dB the codec stops responding altogether
+    /// The clipping ceiling is the source's, and moves by 18 dB between one
+    /// piece of material and another on the same instrument. The lower bound
+    /// is not: below -12 dB the codec stops responding altogether
     /// ([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
     pub adc_gain_db: Option<f32>,
     /// Headphone output level, in dB, applied to the codec after the DSP.
