@@ -90,9 +90,19 @@ The switch is active low against a pull-up so that a broken connection reads as
 killed while the indicator is lit leaves it lit; the next run clears it, which
 is initialisation opening all sixteen channels as inputs again. Both halves are
 measured (`bela-rs` `docs/board-facts.md`, and again here on 2026-08-16).
-`oxtt-bela` does not try to beat this — the last `render_pre` before a stop is
-not guaranteed to run — so a stale lit indicator means "the last run ended
-during clipping", not "the input is clipping now".
+`oxtt-bela` does not try to beat this, so a stale lit indicator means "the last
+run ended during clipping", not "the input is clipping now".
+
+**Putting it out from the callback was tried and does not work.** `bela` 0.7
+made `stop_requested` callable off-device, which removed the reason not to
+check it in `render_pre` — a `cfg` there would have split the callback's
+behaviour between the test build and the board. So the check was added, and
+measured: over a run ended with `SIGINT` while clipping, `render_pre` saw the
+flag **zero times**, and the indicator stayed lit. `Bela_stopRequested` reads a
+`volatile int` rather than an atomic, and the render thread is not one of the
+threads the store is published to; `bela`'s own documentation says as much.
+The check was removed again rather than left in as something that looks like it
+handles the case.
 
 ### `D0` is refused for the indicator, with or without `--controls`
 

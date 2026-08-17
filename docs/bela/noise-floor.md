@@ -231,9 +231,19 @@ So the rule is measured per source rather than asserted:
 
 The clipping ceiling is what `input_peak_dbfs` and `input_clipped` are for, and
 it moves a long way with the material
-([audio-verification.md](audio-verification.md)). The **lower** bound does not:
-below −12 dB the codec stops responding at all
-([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124)).
+([audio-verification.md](audio-verification.md)).
+
+The **lower** bound does not move, and `bela-rs` has since measured it more
+finely than this document did. A negative `--adc-gain-db` is a different
+control from a positive one: libbela pins the preamplifier at 0 dB and
+attenuates in the ADC's input control instead, which on a Gem Stereo has
+**eight steps of 1.5 dB and no ninth**. So −12 dB is the floor, and between 0
+and −12 dB a request is taken *toward zero* to a multiple of 1.5 dB — −1 dB
+attenuates as much as 0 dB. Every such call reports success
+([bela-rs#124](https://github.com/akiomik/bela-rs/issues/124), and
+`bela-rs` `docs/board-facts.md` for the sweep). That also settles a confusion
+this document repeated: libbela's own "approximate below −18 dB" note is about
+the *output* routing, not the input.
 
 ### Nor with the output gain, where it matters
 
