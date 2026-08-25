@@ -366,12 +366,12 @@ fn params_with_pots(base: OttParams, counts: Pots<f32>) -> OttParams {
     let fractions = counts.map(|count| count / f32::from(POT_POSITION_MAX));
 
     let mut params = base;
-    params.global.depth = normalized_or(fractions.depth, base.global.depth);
-    params.global.time = normalized_or(fractions.time, base.global.time);
-    params.global.upward = normalized_or(fractions.upward, base.global.upward);
-    params.global.downward = normalized_or(fractions.downward, base.global.downward);
-    params.global.input_gain_db = gain_db_or(fractions.input_gain, base.global.input_gain_db);
-    params.global.output_gain_db = gain_db_or(fractions.output_gain, base.global.output_gain_db);
+    params.global.depth = normalized_or(fractions.adc0, base.global.depth);
+    params.global.time = normalized_or(fractions.adc1, base.global.time);
+    params.global.upward = normalized_or(fractions.adc2, base.global.upward);
+    params.global.downward = normalized_or(fractions.adc3, base.global.downward);
+    params.global.input_gain_db = gain_db_or(fractions.adc4, base.global.input_gain_db);
+    params.global.output_gain_db = gain_db_or(fractions.adc5, base.global.output_gain_db);
     params
 }
 
@@ -456,12 +456,12 @@ mod tests {
     fn reading(depth: u16, time: u16, upward: u16, downward: u16) -> RawControls {
         RawControls {
             pots: Pots {
-                depth: count(depth),
-                time: count(time),
-                upward: count(upward),
-                downward: count(downward),
-                input_gain: count(GAIN_CENTRE_COUNT),
-                output_gain: count(GAIN_CENTRE_COUNT),
+                adc0: count(depth),
+                adc1: count(time),
+                adc2: count(upward),
+                adc3: count(downward),
+                adc4: count(GAIN_CENTRE_COUNT),
+                adc5: count(GAIN_CENTRE_COUNT),
             },
             bypass_engaged: false,
         }
@@ -471,8 +471,8 @@ mod tests {
     fn with_gains(raw: RawControls, input_gain: u16, output_gain: u16) -> RawControls {
         RawControls {
             pots: Pots {
-                input_gain: count(input_gain),
-                output_gain: count(output_gain),
+                adc4: count(input_gain),
+                adc5: count(output_gain),
                 ..raw.pots
             },
             ..raw
@@ -1089,18 +1089,16 @@ mod tests {
             any::<bool>(),
         )
             .prop_map(
-                |(depth, time, upward, downward, input_gain, output_gain, bypass_engaged)| {
-                    RawControls {
-                        pots: Pots {
-                            depth,
-                            time,
-                            upward,
-                            downward,
-                            input_gain,
-                            output_gain,
-                        },
-                        bypass_engaged,
-                    }
+                |(adc0, adc1, adc2, adc3, adc4, adc5, bypass_engaged)| RawControls {
+                    pots: Pots {
+                        adc0,
+                        adc1,
+                        adc2,
+                        adc3,
+                        adc4,
+                        adc5,
+                    },
+                    bypass_engaged,
                 },
             )
     }

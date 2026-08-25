@@ -67,9 +67,10 @@ pub const DEADBAND_COUNTS: f32 = 3.0;
 
 /// Number of analog channels the control surface occupies, `A0` through `A5`.
 ///
-/// The order is [`Pots`]' field order, which is also the Pi's MCP3008 channel
-/// order: depth, time, upward, downward, input gain, output gain.
-pub const ANALOG_CHANNELS_USED: usize = 6;
+/// [`Pots`]' arity is the same fact, so this reads it off there rather than
+/// stating it a second time. The order is `Pots`' field order, which is also
+/// the Pi's MCP3008 channel order: `A0` to `adc0` through `A5` to `adc5`.
+pub const ANALOG_CHANNELS_USED: usize = Pots::<()>::LEN;
 
 /// Converts one analog reading into a pot position.
 ///
@@ -116,14 +117,14 @@ pub fn pot_position(reading: f32) -> PotPosition {
 pub fn raw_controls(analog_frame: &[f32], bypass_engaged: bool) -> RawControls {
     let mut readings = analog_frame.iter().copied();
     // Field order is channel order, and `Pots` has exactly six fields, so
-    // taking them in sequence is the wiring: A0 to depth, A5 to output gain.
+    // taking them in sequence is the wiring: A0 to `adc0`, A5 to `adc5`.
     let pots = Pots {
-        depth: next_position(&mut readings),
-        time: next_position(&mut readings),
-        upward: next_position(&mut readings),
-        downward: next_position(&mut readings),
-        input_gain: next_position(&mut readings),
-        output_gain: next_position(&mut readings),
+        adc0: next_position(&mut readings),
+        adc1: next_position(&mut readings),
+        adc2: next_position(&mut readings),
+        adc3: next_position(&mut readings),
+        adc4: next_position(&mut readings),
+        adc5: next_position(&mut readings),
     };
     RawControls {
         pots,
@@ -278,15 +279,18 @@ mod tests {
         );
     }
 
+    /// The test every effect owes the physical pot names: with the six
+    /// channels reading distinct rising values, each field must come back
+    /// holding its own channel's reading and no other's ([`Pots`]).
     #[test]
     fn channel_order_is_pot_order() {
         let frame = [0.0, 0.1, 0.2, 0.3, 0.4, POT_SUPPLY_FRACTION];
         let raw = raw_controls(&frame, false);
-        assert_eq!(raw.pots.depth.get(), 0);
-        assert_eq!(raw.pots.output_gain.get(), POT_POSITION_MAX);
-        assert!(raw.pots.time < raw.pots.upward);
-        assert!(raw.pots.upward < raw.pots.downward);
-        assert!(raw.pots.downward < raw.pots.input_gain);
+        assert_eq!(raw.pots.adc0.get(), 0);
+        assert_eq!(raw.pots.adc5.get(), POT_POSITION_MAX);
+        assert!(raw.pots.adc1 < raw.pots.adc2);
+        assert!(raw.pots.adc2 < raw.pots.adc3);
+        assert!(raw.pots.adc3 < raw.pots.adc4);
     }
 
     #[test]
@@ -302,13 +306,13 @@ mod tests {
     #[test]
     fn a_short_frame_fills_the_rest_with_the_quiet_floor() {
         let raw = raw_controls(&[POT_SUPPLY_FRACTION, POT_SUPPLY_FRACTION], false);
-        assert_eq!(raw.pots.depth.get(), POT_POSITION_MAX);
-        assert_eq!(raw.pots.time.get(), POT_POSITION_MAX);
-        assert_eq!(raw.pots.upward, POT_POSITION_FLOOR);
-        assert_eq!(raw.pots.output_gain, POT_POSITION_FLOOR);
+        assert_eq!(raw.pots.adc0.get(), POT_POSITION_MAX);
+        assert_eq!(raw.pots.adc1.get(), POT_POSITION_MAX);
+        assert_eq!(raw.pots.adc2, POT_POSITION_FLOOR);
+        assert_eq!(raw.pots.adc5, POT_POSITION_FLOOR);
 
         let raw = raw_controls(&[], true);
-        assert_eq!(raw.pots.depth, POT_POSITION_FLOOR);
+        assert_eq!(raw.pots.adc0, POT_POSITION_FLOOR);
         assert!(raw.bypass_engaged);
     }
 

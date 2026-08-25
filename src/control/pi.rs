@@ -221,12 +221,12 @@ impl ControlSource for PiControls {
     /// can do to a knob, so they are treated as simultaneous.
     fn read(&mut self) -> Result<RawControls, Self::Error> {
         let pots = Pots {
-            depth: self.read_channel(CHANNEL_DEPTH)?,
-            time: self.read_channel(CHANNEL_TIME)?,
-            upward: self.read_channel(CHANNEL_UPWARD)?,
-            downward: self.read_channel(CHANNEL_DOWNWARD)?,
-            input_gain: self.read_channel(CHANNEL_INPUT_GAIN)?,
-            output_gain: self.read_channel(CHANNEL_OUTPUT_GAIN)?,
+            adc0: self.read_channel(CHANNEL_DEPTH)?,
+            adc1: self.read_channel(CHANNEL_TIME)?,
+            adc2: self.read_channel(CHANNEL_UPWARD)?,
+            adc3: self.read_channel(CHANNEL_DOWNWARD)?,
+            adc4: self.read_channel(CHANNEL_INPUT_GAIN)?,
+            adc5: self.read_channel(CHANNEL_OUTPUT_GAIN)?,
         };
 
         // Active-low against the internal pull-up: the switch shorts the pin

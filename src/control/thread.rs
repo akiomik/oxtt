@@ -283,12 +283,12 @@ mod tests {
         let count = PotPosition::try_new(raw).unwrap();
         RawControls {
             pots: Pots {
-                depth: count,
-                time: count,
-                upward: count,
-                downward: count,
-                input_gain: count,
-                output_gain: count,
+                adc0: count,
+                adc1: count,
+                adc2: count,
+                adc3: count,
+                adc4: count,
+                adc5: count,
             },
             bypass_engaged: false,
         }

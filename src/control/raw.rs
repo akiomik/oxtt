@@ -70,46 +70,61 @@ impl PotPosition {
     }
 }
 
-/// One `T` per potentiometer: depth, time, upward, downward, input gain, output gain.
+/// One `T` per potentiometer, named for the ADC channel it is wired to.
 ///
 /// Named fields rather than `[T; 6]`, for the same reason as
 /// [`Bands<T>`](crate::bands::Bands) (docs/architecture.md): the control
 /// surface has exactly these six pots, so the concept gets one
-/// representation from the ADC channel order through to the mapped
-/// parameters, and field access cannot go out of range the way an index can
+/// representation from the hardware read through to the mapped parameters,
+/// and field access cannot go out of range the way an index can
 /// (`clippy::indexing_slicing` never enters the picture).
 ///
-/// Field order matches the wiring: MCP3008 CH0..CH5. CH0..CH3 are the four
-/// pots `pi-tools` verified against the assembled hardware; CH4 and CH5 are
-/// the two gain pots, wired the same way on the same part.
+/// **The names are the wiring, not the effect.** `adc0` is the pot on
+/// MCP3008 CH0 and on a Gem's `A0`; what that pot *means* is decided once,
+/// where the conditioned travel is assigned to parameters, and nowhere else.
+/// Naming the fields for OTT's macros instead would put the effect's
+/// vocabulary in the one type every effect shares, and would make a
+/// two-effect codebase disagree with itself about what `depth` is.
+///
+/// The cost of the physical names is that a mis-wired assignment is silent —
+/// the Time knob moving Depth still makes sound — so the assignment is the
+/// one place that can be wrong, and each effect owes a test that pins the
+/// channel order down (`bela_host::controls`'s `channel_order_is_pot_order`
+/// is the model).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pots<T> {
-    /// The Depth pot (CH0), the dry/wet mix.
-    pub depth: T,
-    /// The Time pot (CH1), the attack/release multiplier.
-    pub time: T,
-    /// The Upward pot (CH2), the upward-compression multiplier.
-    pub upward: T,
-    /// The Downward pot (CH3), the downward-compression multiplier.
-    pub downward: T,
-    /// The Input Gain pot (CH4), the per-effect-band input gain in dB.
-    pub input_gain: T,
-    /// The Output Gain pot (CH5), the post-sum gain in dB.
-    pub output_gain: T,
+    /// The pot on ADC channel 0.
+    pub adc0: T,
+    /// The pot on ADC channel 1.
+    pub adc1: T,
+    /// The pot on ADC channel 2.
+    pub adc2: T,
+    /// The pot on ADC channel 3.
+    pub adc3: T,
+    /// The pot on ADC channel 4.
+    pub adc4: T,
+    /// The pot on ADC channel 5.
+    pub adc5: T,
 }
 
 impl<T> Pots<T> {
-    /// Applies `f` to every pot, visiting them in ADC channel order: depth,
-    /// time, upward, downward, input gain, output gain.
+    /// How many pots a control surface of this shape has.
+    ///
+    /// The single statement of the arity: a layer A reading six analog
+    /// channels reads this rather than declaring a six of its own.
+    pub const LEN: usize = 6;
+
+    /// Applies `f` to every pot, visiting them in ADC channel order,
+    /// `adc0` through `adc5`.
     #[must_use]
     pub fn map<U>(self, mut f: impl FnMut(T) -> U) -> Pots<U> {
         Pots {
-            depth: f(self.depth),
-            time: f(self.time),
-            upward: f(self.upward),
-            downward: f(self.downward),
-            input_gain: f(self.input_gain),
-            output_gain: f(self.output_gain),
+            adc0: f(self.adc0),
+            adc1: f(self.adc1),
+            adc2: f(self.adc2),
+            adc3: f(self.adc3),
+            adc4: f(self.adc4),
+            adc5: f(self.adc5),
         }
     }
 
@@ -121,12 +136,12 @@ impl<T> Pots<T> {
     #[must_use]
     pub fn zip_with<U, V>(self, other: Pots<U>, mut f: impl FnMut(T, U) -> V) -> Pots<V> {
         Pots {
-            depth: f(self.depth, other.depth),
-            time: f(self.time, other.time),
-            upward: f(self.upward, other.upward),
-            downward: f(self.downward, other.downward),
-            input_gain: f(self.input_gain, other.input_gain),
-            output_gain: f(self.output_gain, other.output_gain),
+            adc0: f(self.adc0, other.adc0),
+            adc1: f(self.adc1, other.adc1),
+            adc2: f(self.adc2, other.adc2),
+            adc3: f(self.adc3, other.adc3),
+            adc4: f(self.adc4, other.adc4),
+            adc5: f(self.adc5, other.adc5),
         }
     }
 }
@@ -218,22 +233,22 @@ mod tests {
     #[test]
     fn map_applies_the_function_to_every_pot() {
         let pots = Pots {
-            depth: 1,
-            time: 2,
-            upward: 3,
-            downward: 4,
-            input_gain: 5,
-            output_gain: 6,
+            adc0: 1,
+            adc1: 2,
+            adc2: 3,
+            adc3: 4,
+            adc4: 5,
+            adc5: 6,
         };
         assert_eq!(
             pots.map(|v| v * 10),
             Pots {
-                depth: 10,
-                time: 20,
-                upward: 30,
-                downward: 40,
-                input_gain: 50,
-                output_gain: 60,
+                adc0: 10,
+                adc1: 20,
+                adc2: 30,
+                adc3: 40,
+                adc4: 50,
+                adc5: 60,
             }
         );
     }
@@ -243,12 +258,12 @@ mod tests {
     #[test]
     fn map_visits_the_pots_in_adc_channel_order() {
         let pots = Pots {
-            depth: "depth",
-            time: "time",
-            upward: "upward",
-            downward: "downward",
-            input_gain: "input_gain",
-            output_gain: "output_gain",
+            adc0: "adc0",
+            adc1: "adc1",
+            adc2: "adc2",
+            adc3: "adc3",
+            adc4: "adc4",
+            adc5: "adc5",
         };
 
         let mut visited = Vec::new();
@@ -256,45 +271,38 @@ mod tests {
 
         assert_eq!(
             visited,
-            [
-                "depth",
-                "time",
-                "upward",
-                "downward",
-                "input_gain",
-                "output_gain"
-            ],
-            "map must visit the pots in MCP3008 channel order"
+            ["adc0", "adc1", "adc2", "adc3", "adc4", "adc5"],
+            "map must visit the pots in ADC channel order"
         );
     }
 
     #[test]
     fn zip_with_pairs_values_by_field() {
         let a = Pots {
-            depth: 1,
-            time: 2,
-            upward: 3,
-            downward: 4,
-            input_gain: 5,
-            output_gain: 6,
+            adc0: 1,
+            adc1: 2,
+            adc2: 3,
+            adc3: 4,
+            adc4: 5,
+            adc5: 6,
         };
         let b = Pots {
-            depth: 10,
-            time: 20,
-            upward: 30,
-            downward: 40,
-            input_gain: 50,
-            output_gain: 60,
+            adc0: 10,
+            adc1: 20,
+            adc2: 30,
+            adc3: 40,
+            adc4: 50,
+            adc5: 60,
         };
         assert_eq!(
             a.zip_with(b, |x, y| x + y),
             Pots {
-                depth: 11,
-                time: 22,
-                upward: 33,
-                downward: 44,
-                input_gain: 55,
-                output_gain: 66,
+                adc0: 11,
+                adc1: 22,
+                adc2: 33,
+                adc3: 44,
+                adc4: 55,
+                adc5: 66,
             }
         );
     }
@@ -325,12 +333,12 @@ mod tests {
     fn a_fake_source_can_stand_in_for_hardware() {
         let reading = RawControls {
             pots: Pots {
-                depth: PotPosition::try_new(1).unwrap(),
-                time: PotPosition::try_new(2).unwrap(),
-                upward: PotPosition::try_new(3).unwrap(),
-                downward: PotPosition::try_new(4).unwrap(),
-                input_gain: PotPosition::try_new(5).unwrap(),
-                output_gain: PotPosition::try_new(6).unwrap(),
+                adc0: PotPosition::try_new(1).unwrap(),
+                adc1: PotPosition::try_new(2).unwrap(),
+                adc2: PotPosition::try_new(3).unwrap(),
+                adc3: PotPosition::try_new(4).unwrap(),
+                adc4: PotPosition::try_new(5).unwrap(),
+                adc5: PotPosition::try_new(6).unwrap(),
             },
             bypass_engaged: true,
         };
