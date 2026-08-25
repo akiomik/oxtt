@@ -30,7 +30,7 @@ main.rs
 
 ```
 bin/oxtt-bela.rs
-  -> cli::BelaCli::parse          CLI parsing (clap); nothing is passed on to libbela
+  -> bela_host::cli::BelaCli::parse  CLI parsing (clap); nothing is passed on to libbela
   -> bela_host::run               builds OttProcessor, then the audio system
        -> bela_host::settings        48 kHz, 16-frame period, 8 analog in, 1 render thread
        -> OttApplication             the BelaApplication libbela drives

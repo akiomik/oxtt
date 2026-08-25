@@ -8,6 +8,7 @@
 //! board, and it is the only thing here behind `cfg(bela_device)`.
 
 pub mod app;
+pub mod cli;
 pub mod controls;
 
 use core::num::NonZeroU32;
@@ -17,6 +18,7 @@ use thiserror::Error;
 use crate::params::ConfigError;
 
 pub use app::{OttApplication, OttRenderState, RunDiagnostics};
+pub use cli::BelaCli;
 pub use controls::{
     ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, TARGET_POLL_HZ, pot_position,
     raw_controls,
