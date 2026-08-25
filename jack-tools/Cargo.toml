@@ -1,11 +1,11 @@
 [package]
 name = "oxtt-jack-tools"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.88.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "JACK development helpers and soak-test tools for oxtt"
-repository = "https://github.com/akiomik/oxtt"
-license = "MIT OR Apache-2.0"
+repository.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
@@ -18,8 +18,10 @@ hound = "3"
 proptest = { workspace = true }
 
 # These are development/soak-test binaries, not the real-time audio path, so
-# they don't carry `oxtt`'s real-time-safety lints (no-panic, no allocation,
-# no indexing). Keep the quality lints that still apply.
+# they don't carry the workspace's real-time-safety lints (no-panic, no
+# allocation, no indexing). Cargo refuses a member that both inherits
+# `[workspace.lints]` and overrides part of it, so this spells out the weaker
+# set in full rather than inheriting.
 [lints.rust]
 missing_docs = "warn"
 

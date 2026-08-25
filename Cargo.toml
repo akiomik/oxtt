@@ -14,14 +14,60 @@ proptest = "1"
 rppal = "0.22"
 thiserror = "2"
 
-[package]
-name = "oxtt"
+# Inherited by every member with `field.workspace = true`, so that the crate
+# split does not multiply the number of places a version bump, an edition
+# change or an MSRV change has to be made. `description` stays per-package —
+# `clippy::cargo` requires one on each and they are not the same crate — and
+# so do `keywords`/`categories`, which only the published crate carries.
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88.0"
-description = "A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT"
 repository = "https://github.com/akiomik/oxtt"
 license = "MIT OR Apache-2.0"
+
+# The real-time set: what a crate on or below the audio callback is held to
+# (docs/contracts.md §6). Inherited with `[lints] workspace = true`.
+#
+# Inheriting is all-or-nothing — Cargo refuses a member that both inherits and
+# overrides — so the development/soak-test tools under `jack-tools/` and
+# `pi-tools/` spell out their own weaker set instead, and say why there.
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+
+absolute_paths = "warn"
+arithmetic_side_effects = "warn"
+cognitive_complexity = "warn"
+disallowed_macros = "warn"
+disallowed_methods = "warn"
+disallowed_types = "warn"
+exit = "warn"
+expect_used = "allow"
+indexing_slicing = "warn"
+missing_assert_message = "warn"
+mod_module_files = "warn"
+multiple_crate_versions = "allow"
+panic = "warn"
+str_to_string = "warn"
+unwrap_used = "warn"
+
+[package]
+name = "oxtt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT"
 keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
 categories = ["multimedia::audio"]
 
@@ -99,30 +145,5 @@ lto = true
 # tables/landing pads since nothing in the real-time path unwinds.
 panic = "abort"
 
-[lints.rust]
-missing_docs = "warn"
-
-[lints.clippy]
-cargo = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-correctness = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-suspicious = { level = "warn", priority = -1 }
-
-absolute_paths = "warn"
-arithmetic_side_effects = "warn"
-cognitive_complexity = "warn"
-disallowed_macros = "warn"
-disallowed_methods = "warn"
-disallowed_types = "warn"
-exit = "warn"
-expect_used = "allow"
-indexing_slicing = "warn"
-missing_assert_message = "warn"
-mod_module_files = "warn"
-multiple_crate_versions = "allow"
-panic = "warn"
-str_to_string = "warn"
-unwrap_used = "warn"
+[lints]
+workspace = true
