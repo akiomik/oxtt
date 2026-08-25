@@ -1,12 +1,12 @@
 # Architecture
 
-This document describes the internal architecture of the `oxtt` DSP engine, its two host adapters, and the physical control surface that drives it: how audio data flows through the system, which component owns which state, and where the real-time / non-real-time boundary lies.
+This document describes the internal architecture of the oxtt DSP engine, its two host adapters, and the physical control surface that drives it: how audio data flows through the system, which component owns which state, and where the real-time / non-real-time boundary lies.
 
-There are two hosts, selected by Cargo feature and never both in one binary: `jack-host` (on by default) runs the DSP under a JACK server, and `bela-host` runs it under Bela's render callbacks on a Bela Gem Stereo (`decisions/0011-bela-gem-stereo-as-the-second-host.md`). Everything below the host adapters is shared, and builds with neither feature enabled.
+There are two hosts, one package each and never both in one binary: `oxtt` runs the DSP under a JACK server, and `oxtt-bela` runs it under Bela's render callbacks on a Bela Gem Stereo (`decisions/0011-bela-gem-stereo-as-the-second-host.md`). A third, `oxtt-render`, needs no audio system at all. Everything below them is shared, and cannot name a host: the packages that hold it do not depend on one.
 
 ## Component Overview
 
-### JACK host (`jack-host`)
+### JACK host (`oxtt`)
 
 ```
 main.rs
@@ -27,13 +27,13 @@ main.rs
        -> Notifications           JACK notification callback (shutdown, sample-rate change)
 ```
 
-### Bela host (`bela-host`)
+### Bela host (`oxtt-bela`)
 
 ```
-bin/oxtt-bela.rs
-  -> bela_host::cli::BelaCli::parse  CLI parsing (clap); nothing is passed on to libbela
-  -> bela_host::run               builds OttProcessor, then the audio system
-       -> bela_host::settings        48 kHz, 16-frame period, 8 analog in, 1 render thread
+oxtt-bela/src/main.rs
+  -> oxtt_bela::cli::BelaCli::parse  CLI parsing (clap); nothing is passed on to libbela
+  -> oxtt_bela::run                 builds OttProcessor, then the audio system
+       -> oxtt_bela::settings        48 kHz, 16-frame period, 8 analog in, 1 render thread
        -> OttApplication             the BelaApplication libbela drives
             validate_settings        refuses a bad configuration *before* Bela_initAudio
             setup                    checks delivered channels, resets to the board's rate
@@ -49,7 +49,7 @@ bin/oxtt-bela.rs
             cleanup                  underruns, elapsed frames, CPU, control counters
 ```
 
-Only `bela_host::run` needs a board. Everything else above it — the application type, the control conversion, and their tests — compiles and runs on a development machine, because `bela`'s device code sits behind a `bela_device` cfg its build script sets only for aarch64 Linux.
+Only `oxtt_bela::run` needs a board. Everything else above it — the application type and its tests — compiles and runs on a development machine, because `bela`'s device code sits behind a `bela_device` cfg its build script sets only for aarch64 Linux. The control conversion is not even in that package: it depends on nothing from libbela, so it is `effectkit_controls::gem`.
 
 ### The crates
 
@@ -81,11 +81,11 @@ binaries flatten the same parameter arguments.
 
 ### What the two share
 
-`OttProcessor` (`crates/oxtt-dsp/src/dsp.rs`) has no dependency on JACK, on libbela, or on any other host-audio API; it operates purely on `f32` samples, and it is a crate of its own so that the boundary is a linkage fact rather than a convention. `jack_host.rs` and `bela_host.rs` register ports and wire callbacks — neither contains DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without an audio system at all, and it is what made the second host an adapter rather than a port.
+`OttProcessor` (`crates/oxtt-dsp/src/dsp.rs`) has no dependency on JACK, on libbela, or on any other host-audio API; it operates purely on `f32` samples, and it is a crate of its own so that the boundary is a linkage fact rather than a convention. `oxtt`'s `jack_host.rs` and `oxtt-bela`'s lib register ports and wire callbacks — neither contains DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without an audio system at all, and it is what made the second host an adapter rather than a port.
 
 The two hosts reach the DSP through different doors for the same reason they exist separately: JACK hands over four per-channel buffers, so it calls `process`; Bela hands over interleaved frames paired with their outputs, so it calls `process_frame` and needs no intermediate buffer. `process` is a loop over `process_frame`, and `contracts.md` section 3 states that the two agree.
 
-The control surface (`crates/oxtt/src/control.rs`) is layered on the same principle, and layer B is split in two. B1, `SixPotBypassConditioner` (`crates/effectkit-controls/src/conditioning.rs`, in `effectkit-controls`), filters jitter, applies the deadband, debounces the switch and normalises onto `PotTravel`; it knows nothing about OTT and is what a second effect on the same panel reuses. B2, `assign` (`crates/oxtt-controls/src/lib.rs`, its own crate so that `oxtt-render` does not acquire a six-pot API transitively), is the one place a pot is given a meaning. Both are pure, allocation-free and panic-free, so they hold themselves to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call them from `render_pre` directly. Neither half owns the base `OttParams`; whoever joins the two does. Layer A is the hardware read — `PiControls` (`crates/effectkit-controls-pi`, reached through the `pi-controls` feature) for the Raspberry Pi, and the free functions in `crates/effectkit-controls/src/gem.rs` for a Bela Gem. Layer C, `ControlHandle` (`crates/oxtt/src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
+The control surface (`crates/oxtt/src/control.rs`) is layered on the same principle, and layer B is split in two. B1, `SixPotBypassConditioner` (`crates/effectkit-controls/src/conditioning.rs`, in `effectkit-controls`), filters jitter, applies the deadband, debounces the switch and normalises onto `PotTravel`; it knows nothing about OTT and is what a second effect on the same panel reuses. B2, `assign` (`crates/oxtt-controls/src/lib.rs`, its own crate so that `oxtt-render` does not acquire a six-pot API transitively), is the one place a pot is given a meaning. Both are pure, allocation-free and panic-free, so they hold themselves to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call them from `render_pre` directly. Neither half owns the base `OttParams`; whoever joins the two does. Layer A is the hardware read — `PiControls` (`crates/effectkit-controls-pi`, reached through the `pi-controls` feature) for the Raspberry Pi, and the free functions in `crates/effectkit-controls/src/gem.rs` for a Bela Gem. Layer C, `ControlHandle` (`crates/oxtt/src/control/thread.rs`), is the polling thread and the lock-free handoff, and lives in the JACK package alone: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
 
 The seam between layer A and layer B is the `RawControls` *value*, not the `ControlSource` trait — the trait is the Raspberry Pi's way of producing one, and the Bela host does not implement it (`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`, revised by ADR 0011). What layer B gains in exchange for being platform-independent is a duty on its callers: its constants are defined per read, so a host owes it reads at the rate they were calibrated for. JACK's poll interval supplies that directly; Bela's `PollDecimator` reads on every *n*th block to reach it.
 
@@ -125,8 +125,8 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 With a control surface attached, two more owners exist, both outside the DSP:
 
 - `SixPotBypassConditioner` (`crates/effectkit-controls/src/conditioning.rs`) holds, per potentiometer, the low-pass filter state and the deadband reference — both in `PotPosition` steps — and, once per conditioner rather than per pot, the debounced switch position. The reference is also exactly what was last published, which is what lets the publish gate compare against it rather than keeping a copy of its own output. `assign` then produces an `OttProcessorUpdate` carrying the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`crates/effectkit-controls/src/raw.rs`) fixes the arity at exactly `adc0`..`adc5`, and names the fields for the wiring rather than for OTT's macros: what each pot means is decided at the assignment step and nowhere else. Named fields rather than an array so that the assignment can name each pot the way the wiring does — that step is the one place a silent mix-up is possible, so it is the one place worth spending a field name on. Under JACK the control thread owns it; under Bela the `OttApplication` does, because there is one control surface rather than one per render thread.
-- `ControlHandle` (`crates/oxtt/src/control/thread.rs`), under `jack-host` only, owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `OttProcessorUpdate` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side. The Bela host has no counterpart: `render_pre` writes into the render states directly.
-- `OttApplication` (`crates/oxtt/src/bela_host/app.rs`), under `bela-host` only, owns the processor prototype every render state is copied from, the mapping layer, the read divisor `setup` chose, and the publish/rejection counters `cleanup` reports. Each `OttRenderState` owns exactly one `OttProcessor` and nothing else — no scratch buffers, because Bela's paired input/output view is walked a frame at a time.
+- `ControlHandle` (`crates/oxtt/src/control/thread.rs`), in the JACK package only, owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `OttProcessorUpdate` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side. The Bela host has no counterpart: `render_pre` writes into the render states directly.
+- `OttApplication` (`crates/oxtt-bela/src/app.rs`), in the Bela package only, owns the processor prototype every render state is copied from, the conditioning state, the read divisor `setup` chose, and the publish/rejection counters `cleanup` reports. Each `OttRenderState` owns exactly one `OttProcessor` and nothing else — no scratch buffers, because Bela's paired input/output view is walked a frame at a time.
 
 Neither of those owns any DSP state. Both the control surface and the CLI reach `OttProcessor` through the same `apply_update` seam: one atomic update carrying the parameters and the explicit bypass level together.
 

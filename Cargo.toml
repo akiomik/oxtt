@@ -10,9 +10,11 @@ default-members = [
     "crates/effectkit-controls",
     "crates/oxtt",
     "crates/oxtt-args",
+    "crates/oxtt-bela",
     "crates/oxtt-controls",
     "crates/oxtt-dsp",
     "crates/oxtt-jack-tools",
+    "crates/oxtt-render",
 ]
 resolver = "3"
 

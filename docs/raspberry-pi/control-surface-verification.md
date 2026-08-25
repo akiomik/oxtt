@@ -46,7 +46,7 @@ The control surface is behind the `pi-controls` Cargo feature, which is off by
 default. On the Pi, in the repository:
 
 ```sh
-cargo build --release --locked --features pi-controls
+cargo build --release --locked -p oxtt --features pi-controls
 ./target/release/oxtt --help
 ```
 

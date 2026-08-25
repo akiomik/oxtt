@@ -440,7 +440,7 @@ by default (`docs/development.md`, "The `pi-controls` feature"). On the Pi, in
 the repository:
 
 ```sh
-cargo build --release --locked --features pi-controls
+cargo build --release --locked -p oxtt --features pi-controls
 ./target/release/oxtt --help
 ```
 

@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use oxtt::render::{RenderOptions, render};
 use oxtt_args::ParamsArgs;
 use oxtt_dsp::params::OttParams;
+use oxtt_render::{RenderOptions, render};
 
 /// Renders a stereo 32-bit float WAV through oxtt and matches integrated loudness.
 #[derive(Parser, Debug)]

@@ -452,19 +452,13 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "oxtt"
 version = "0.1.0"
 dependencies = [
- "bela",
  "clap",
- "ebur128",
- "effectkit",
  "effectkit-controls",
  "effectkit-controls-pi",
- "hound",
  "jack",
- "no-panic",
  "oxtt-args",
  "oxtt-controls",
  "oxtt-dsp",
- "proptest",
  "signal-hook",
  "thiserror",
  "triple_buffer",
@@ -476,6 +470,20 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "oxtt-dsp",
+]
+
+[[package]]
+name = "oxtt-bela"
+version = "0.1.0"
+dependencies = [
+ "bela",
+ "clap",
+ "effectkit",
+ "effectkit-controls",
+ "oxtt-args",
+ "oxtt-controls",
+ "oxtt-dsp",
+ "thiserror",
 ]
 
 [[package]]
@@ -506,6 +514,19 @@ version = "0.1.0"
 dependencies = [
  "hound",
  "jack",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "oxtt-render"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "ebur128",
+ "hound",
+ "oxtt-args",
+ "oxtt-dsp",
  "proptest",
  "thiserror",
 ]

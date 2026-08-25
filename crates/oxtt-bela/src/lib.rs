@@ -1,7 +1,7 @@
 //! Bela audio-system setup and lifecycle (docs/architecture.md,
 //! docs/contracts.md §6, §9; ADR 0011).
 //!
-//! The counterpart of [`jack_host`](crate::jack_host): it builds the settings,
+//! The counterpart of `oxtt`'s JACK host: it builds the settings,
 //! brings the audio system up, sets the codec levels, waits, and reports. The
 //! processing itself is in [`app`], which is deliberately free of libbela so
 //! that it compiles and tests on a development machine — only [`run`] needs a

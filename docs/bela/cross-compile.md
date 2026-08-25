@@ -209,18 +209,18 @@ neither `libbela` nor a sysroot, and it is the only way to compile the half of
 the host behind `cfg(bela_device)`:
 
 ```sh
-cargo clippy -p oxtt --no-default-features --features bela-host \
+cargo clippy -p oxtt-bela \
   --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
 ```
 
-CI runs exactly this. Everything *not* behind that cfg — the application type,
-the control conversion, and their tests — is ordinary code that builds and runs
-on the development machine, because `bela`'s device code is behind a
+CI runs exactly this. Everything *not* behind that cfg — the application type
+and its tests — is ordinary code that builds and runs on the development
+machine, because `bela`'s device code is behind a
 `bela_device` cfg its build script sets only for aarch64 Linux:
 
 ```sh
-cargo clippy -p oxtt --no-default-features --features bela-host --all-targets -- -D warnings
-cargo test  -p oxtt --no-default-features --features bela-host --all-targets
+cargo clippy -p oxtt-bela --all-targets -- -D warnings
+cargo test  -p oxtt-bela --all-targets
 ```
 
 What cannot be checked off the board is the panic-free proof

@@ -55,4 +55,6 @@ fi
 # the reason in the header comment.
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=cortex-a76"
 
-exec cargo build --release --locked "${FEATURES[@]}" "$@"
+# `-p oxtt`: this builds the JACK binary, and `--features` needs a package
+# selector in a virtual workspace anyway.
+exec cargo build --release --locked -p oxtt "${FEATURES[@]}" "$@"

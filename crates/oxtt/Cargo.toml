@@ -6,78 +6,37 @@ rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
 description = "A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT"
-# Cargo looks for a README beside the manifest, which stopped being the
-# repository's when this package moved under `crates/`. Named explicitly so
-# that `clippy::cargo_common_metadata` stays satisfied.
 readme = "../../README.md"
-# The binaries are the product; the crate is not something to depend on. This
-# also keeps `clippy::cargo_common_metadata` from asking for the `keywords` and
+# The binary is the product; the crate is not something to depend on. This also
+# keeps `clippy::cargo_common_metadata` from asking for the `keywords` and
 # `categories` that belong to `effectkit`, the one crate here meant for
 # crates.io.
 publish = false
 
 [features]
-default = ["jack-host"]
-
-# The JACK host: the `oxtt` binary, plus the control surface's transport layer
-# (`control::thread`), which only a JACK build needs — Bela reads its controls
-# inside the audio callback and has nothing to carry across a thread boundary
-# (ADR 0010, ADR 0011). `signal-hook` and `triple_buffer` belong to it for the
-# same reason.
-jack-host = ["dep:jack", "dep:signal-hook", "dep:triple_buffer"]
-
-# The Bela host: the `oxtt-bela` binary, cross-compiled for a Bela Gem Stereo
-# (ADR 0011, docs/bela/cross-compile.md). Unlike `pi-controls` this builds on
-# any platform: `bela`'s device code is behind a `bela_device` cfg its build
-# script only sets for aarch64 Linux, so the application type, the control
-# conversion and their tests compile and run on a development machine.
-bela-host = ["dep:bela"]
-
 # The Raspberry Pi control surface (SPI ADC + GPIO). Off by default because
 # `effectkit-controls-pi` depends on Linux-only `rppal` and fails to compile on
-# macOS, where the DSP core and its tests are developed; only a build targeting
-# the Pi itself enables this. It is a control surface for the JACK host, not a
-# host of its own.
+# macOS, where the DSP is developed; only a build targeting the Pi itself
+# enables this.
+#
+# The last feature in the workspace, and the only real one: it is a genuine
+# platform gate, not a stand-in for a crate boundary. The hosts used to be
+# features too, and are now packages.
 pi-controls = ["dep:effectkit-controls-pi"]
 
 [dependencies]
-bela = { version = "0.7", optional = true }
 clap = { version = "4", features = ["derive"] }
-ebur128 = "0.1.10"
-effectkit = { path = "../effectkit" }
 effectkit-controls = { path = "../effectkit-controls" }
 effectkit-controls-pi = { path = "../effectkit-controls-pi", optional = true }
+jack = { workspace = true }
 oxtt-args = { path = "../oxtt-args" }
 oxtt-controls = { path = "../oxtt-controls" }
 oxtt-dsp = { path = "../oxtt-dsp" }
-hound = "3.5.1"
-jack = { workspace = true, optional = true }
-signal-hook = { version = "0.4", optional = true }
+signal-hook = "0.4"
 thiserror = { workspace = true }
-# Hands whole `OttParams` snapshots from the control thread to the audio
+# Hands whole `OttProcessorUpdate` values from the control thread to the audio
 # callback without a lock or an allocation (docs/contracts.md §6).
-triple_buffer = { version = "9", optional = true }
-
-# `oxtt` (JACK) and `oxtt-bela` link different audio systems that exist on
-# different machines, so each binary is tied to its host's feature rather than
-# being cfg'd out from the inside. `oxtt-render` needs neither.
-[[bin]]
-name = "oxtt"
-path = "src/main.rs"
-required-features = ["jack-host"]
-
-[[bin]]
-name = "oxtt-bela"
-path = "src/bin/oxtt-bela.rs"
-required-features = ["bela-host"]
-
-[[bin]]
-name = "oxtt-render"
-path = "src/bin/oxtt-render.rs"
-
-[dev-dependencies]
-no-panic = "0.1"
-proptest = { workspace = true }
+triple_buffer = "9"
 
 [lints]
 workspace = true

@@ -24,8 +24,8 @@
 //! without a lock (docs/contracts.md §6). On a Bela the controls are read
 //! inside the audio callback, which then runs B1 and B2 *directly* and skips
 //! layer C entirely — possible only because both obey the same prohibitions as
-//! the callback (ADR 0011). Layer C is therefore compiled only under the
-//! `jack-host` feature.
+//! the callback (ADR 0011). That is why layer C lives in this package rather
+//! than a shared one: `oxtt-bela` has no use for it.
 //!
 //! It has not been generalised into `effectkit-controls` along with B1 because
 //! it has one user. A transport layer worth sharing would take the assignment
@@ -36,8 +36,6 @@
 //! The Raspberry Pi's layer A is reached through the `pi-controls` feature,
 //! because its `rppal` dependency is Linux-only.
 
-#[cfg(feature = "jack-host")]
 mod thread;
 
-#[cfg(feature = "jack-host")]
 pub use thread::ControlHandle;

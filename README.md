@@ -10,8 +10,8 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 
 `oxtt` runs under two hosts, selected by Cargo feature:
 
-- **JACK** (`jack-host`, on by default) — the `oxtt` binary. Verified on a Raspberry Pi 5 with a class-compliant USB audio interface, and the way the DSP is developed and tested on a desktop.
-- **Bela Gem Stereo** (`bela-host`) — the `oxtt-bela` binary, cross-compiled and copied to the board. [ADR 0011](docs/decisions/0011-bela-gem-stereo-as-the-second-host.md) adds this host for the reasons ADR 0009 left on the table: roughly 1 ms round-trip latency, fanless, and full Linux, so the DSP runs unchanged. It runs on the board at 48 kHz with no underruns and about 19% of one core. It has also been listened to, which is how the board's converter noise floor turned up: the presets are calibrated for a studio interface, and on this board's converters upward compression makes that audible ([`docs/bela/noise-floor.md`](docs/bela/noise-floor.md)). **ADR 0011 adds the host; it does not settle that this is the platform** — that waits on presets calibrated for these converters. See [`docs/bela/audio-verification.md`](docs/bela/audio-verification.md) for exactly what is and is not established.
+- **JACK** (the `oxtt` package) — the `oxtt` binary. Verified on a Raspberry Pi 5 with a class-compliant USB audio interface, and the way the DSP is developed and tested on a desktop.
+- **Bela Gem Stereo** (the `oxtt-bela` package) — the `oxtt-bela` binary, cross-compiled and copied to the board. [ADR 0011](docs/decisions/0011-bela-gem-stereo-as-the-second-host.md) adds this host for the reasons ADR 0009 left on the table: roughly 1 ms round-trip latency, fanless, and full Linux, so the DSP runs unchanged. It runs on the board at 48 kHz with no underruns and about 19% of one core. It has also been listened to, which is how the board's converter noise floor turned up: the presets are calibrated for a studio interface, and on this board's converters upward compression makes that audible ([`docs/bela/noise-floor.md`](docs/bela/noise-floor.md)). **ADR 0011 adds the host; it does not settle that this is the platform** — that waits on presets calibrated for these converters. See [`docs/bela/audio-verification.md`](docs/bela/audio-verification.md) for exactly what is and is not established.
 
 Either host can drive six potentiometers and a latching bypass switch instead of the CLI (`--controls`): the pots drive depth/time/upward/downward and the input/output gains, and the switch bypasses the effect. Both surfaces have been verified on real hardware — the Raspberry Pi's in [`docs/raspberry-pi/control-surface-verification.md`](docs/raspberry-pi/control-surface-verification.md), the Bela's in [`docs/bela/control-surface-verification.md`](docs/bela/control-surface-verification.md).
 
@@ -33,17 +33,17 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 ## Build
 
 ```sh
-cargo build --release
+cargo build --release -p oxtt
 ```
 
-That is the JACK host, which is the default. The Bela host is a cross-compile, so it has a script:
+That is the JACK host. `cargo build --release` on its own builds every package that can be built here, which is usually what you want while working; naming one is faster. The Bela host is a cross-compile, so it has a script:
 
 ```sh
 BELA_SYSROOT=~/bela-sysroot scripts/bela-build.sh
 scripts/bela-deploy.sh -- --preset safe-start
 ```
 
-The Raspberry Pi control surface is behind the optional `pi-controls` Cargo feature, off by default because it depends on `rppal` (Linux-only). Build it on the Pi:
+The Raspberry Pi control surface is behind the `oxtt` package's optional `pi-controls` feature, off by default because it depends on `rppal` (Linux-only). Build it on the Pi:
 
 ```sh
 scripts/pi-build.sh --controls
@@ -54,23 +54,23 @@ See [`docs/development.md`](docs/development.md) for local setup details, includ
 ## Run
 
 ```sh
-cargo run --release -- --preset safe-start
+cargo run --release -p oxtt -- --preset safe-start
 ```
 
 `oxtt` connects to the JACK server under the client name `oxtt` and registers four ports (`input_l`, `input_r`, `output_l`, `output_r`) without auto-connecting them — connect them with `jack_connect`, a GUI patchbay, or the bundled `list_ports`/`connect_ports` helpers in the `oxtt-jack-tools` crate.
 
-Run `cargo run --release -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
+Run `cargo run --release -p oxtt -- --help` for the full list of CLI options (gain, depth, time, upward/downward amount, crossover frequencies) and their valid ranges.
 
 **Note:** the `default` and `riot` presets are intentionally strong and can exceed 0 dBFS. Start with `safe-start` and a low monitor level.
 
 ## Offline preset comparison
 
-`oxtt-render` is a separate binary in the `oxtt` crate. It runs the same DSP
+`oxtt-render` is a separate binary, in a package of its own. It runs the same DSP
 without starting JACK, measures EBU R128 integrated loudness, and writes a
 loudness-matched render for preset comparison:
 
 ```sh
-cargo run --release --bin oxtt-render -- \
+cargo run --release -p oxtt-render -- \
   --input drums.wav --output renders/riot.wav --raw-output renders/riot-raw.wav \
   --preset riot
 ```

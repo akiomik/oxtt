@@ -68,7 +68,7 @@ fi
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=cortex-a53"
 # Naming the compiler driver directly, with no wrapper script in the path:
 # `bela-sys` publishes the sysroot arguments as `links` metadata, `bela`
-# relays them, and oxtt's own build.rs turns them into link arguments.
+# relays them, and `oxtt-bela`'s own build.rs turns them into link arguments.
 # Cargo also exports this as RUSTC_LINKER, which is how `bela-sys` finds the
 # matching C++ compiler for its MIDI shim.
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$BELA_LINKER"
@@ -78,7 +78,5 @@ exec cargo build \
   --release \
   --locked \
   --target "$TARGET" \
-  --no-default-features \
-  --features bela-host \
-  --bin oxtt-bela \
+  -p oxtt-bela \
   "$@"

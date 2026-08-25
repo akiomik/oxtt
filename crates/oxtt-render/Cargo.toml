@@ -1,0 +1,24 @@
+[package]
+name = "oxtt-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Renders a WAV through oxtt offline, loudness-matched, for preset comparisons"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ebur128 = "0.1.10"
+hound = "3.5.1"
+oxtt-args = { path = "../oxtt-args" }
+oxtt-dsp = { path = "../oxtt-dsp" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

@@ -14,7 +14,7 @@ use oxtt_args::ParamsArgs;
 
 /// Command-line arguments for the Bela host.
 ///
-/// A separate parser from [`Cli`](crate::cli::Cli) rather than shared flags, because the two
+/// A separate parser from `oxtt`'s own `Cli` rather than shared flags, because the two
 /// hosts differ in more than they share: JACK reports xruns and Bela reports
 /// underruns, JACK is told its block size and sample rate by the server while
 /// Bela is asked for them, and only Bela has codec levels.

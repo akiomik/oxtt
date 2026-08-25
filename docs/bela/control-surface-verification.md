@@ -47,7 +47,7 @@ BELA_SYSROOT=... scripts/bela-build.sh
 scripts/bela-deploy.sh -- --controls --preset safe-start --adc-gain-db -12 --report-on-exit
 ```
 
-`--controls` exists in every `bela-host` build rather than behind a feature of
+`--controls` exists in every `oxtt-bela` build rather than behind a feature of
 its own, and is opt-in, so the same binary still runs the audio verification
 on a board with nothing wired to its headers.
 
@@ -287,7 +287,7 @@ The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes
 
 Met:
 
-- A cross-compiled `bela-host` build running on the board with `--controls`.
+- A cross-compiled `oxtt-bela` build running on the board with `--controls`.
 - Every analog channel confirmed to sweep its full range, to move alone, and
   to sit where its pot is; both unused inputs confirmed at ground.
 - Idle jitter measured at full and mid travel, ~1.3 million readings per

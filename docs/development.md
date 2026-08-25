@@ -4,27 +4,33 @@
 
 - Rust, edition 2024 (rustc >= 1.88).
 - A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary. Not required to build the crate or run `cargo test`.
-- For the Bela host only: a cross toolchain and a sysroot from the board — see [`bela/cross-compile.md`](bela/cross-compile.md). Not required to build, lint or test the Bela host's portable half, which is almost all of it.
+- For the Bela host only: a cross toolchain and a sysroot from the board — see [`bela/cross-compile.md`](bela/cross-compile.md). Not required to build, lint or test `oxtt-bela`'s portable half, which is almost all of it.
 
-## Hosts and features
+## Hosts and packages
 
-There are two host adapters, one per feature, and they are never both in one binary:
+There are three binaries, one package each, and they are never combined:
 
-| Feature | Binary | What it needs |
+| Package | Binary | What it needs |
 | --- | --- | --- |
-| `jack-host` (default) | `oxtt` | a JACK server to run; `libjack` headers to build |
-| `bela-host` | `oxtt-bela` | a Bela Gem Stereo to run; nothing extra to build or test off-device |
-| `pi-controls` | — | a Raspberry Pi; `rppal`, which is Linux-only |
+| `oxtt` | `oxtt` | a JACK server to run; `libjack` headers to build |
+| `oxtt-bela` | `oxtt-bela` | a Bela Gem Stereo to run; nothing extra to build or test off-device |
+| `oxtt-render` | `oxtt-render` | nothing; it reads and writes files |
 
-`pi-controls` is a control surface for the JACK host, not a host of its own.
+Everything below them — the DSP, the parameters, the presets, the control
+surface — is in packages of its own and cannot name a host at all. That used
+to be a Cargo feature and a CI job asserting it stayed true; it is now a
+linkage fact, which is what kept adding a second host to writing an adapter
+rather than unpicking the first one.
 
-Everything below the adapters — the DSP, the parameters, the presets, the control surface's mapping layer — builds with **neither** host feature enabled, and CI asserts that:
+One feature is left in the workspace:
 
-```sh
-cargo clippy -p oxtt --no-default-features --all-targets -- -D warnings
-```
+| Feature | On | What it needs |
+| --- | --- | --- |
+| `pi-controls` | `oxtt` | a Raspberry Pi; `rppal`, which is Linux-only |
 
-This matters more than it looks: it is what kept adding a second host to writing an adapter rather than unpicking the first one.
+It is a genuine platform gate rather than a stand-in for a crate boundary: it
+adds the `--controls` flag and the `effectkit-controls-pi` dependency to the
+JACK binary. It is a control surface for that host, not a host of its own.
 
 ## Build
 
@@ -33,9 +39,13 @@ cargo build
 cargo build --release
 ```
 
+Without a package selector these build the workspace's `default-members`,
+which is everything that compiles on the machine you are on. Add `-p oxtt`,
+`-p oxtt-bela` or `-p oxtt-render` for one binary.
+
 The repository's `rust-toolchain.toml` pins the development toolchain and is
 selected automatically by `rustup` while the current directory is inside the
-repository. `Cargo.toml`'s `rust-version` has a different purpose: it declares
+repository. `[workspace.package]`'s `rust-version`, which every package inherits, has a different purpose: it declares
 the minimum supported Rust version used by the MSRV CI job. Do not replace the
 pinned development toolchain with the MSRV just to build a release binary.
 The toolchain uses the `minimal` profile to avoid downloading local Rust
@@ -125,22 +135,24 @@ and any command that enables `pi-controls`. **`--workspace` is a Linux and CI
 command**, not one to reach for on a development machine.
 
 Without a package selector, `cargo build`/`cargo test`/`cargo clippy` are safe
-anywhere: the workspace's `default-members` leaves `effectkit-pi-tools` out. Add
-`-p effectkit-pi-tools` on Linux when that crate is what is being changed.
+anywhere: the workspace's `default-members` leaves the two Raspberry Pi crates
+out. Name them on Linux when they are what is being changed.
 
-The feature-gated module can still be type-checked from macOS by
-cross-compiling. Nothing links, so no Linux linker or sysroot is needed:
+They can still be type-checked from macOS by cross-compiling. Nothing links, so
+no Linux linker or sysroot is needed:
 
 ```sh
 rustup target add aarch64-unknown-linux-gnu
-PKG_CONFIG_ALLOW_CROSS=1 cargo clippy -p oxtt --features pi-controls --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
+cargo clippy -p effectkit-controls-pi -p effectkit-pi-tools --all-targets \
+  --target aarch64-unknown-linux-gnu -- -D warnings
 ```
 
-`PKG_CONFIG_ALLOW_CROSS=1` is required because `jack-sys`'s build script
-otherwise refuses to run `pkg-config` for a foreign target. Since `cargo
-check`/`cargo clippy` never link, that is sufficient to type-check and lint
-`crates/effectkit-controls-pi/src/lib.rs` without a Pi in reach — it is not a way to produce a
-runnable binary (see the next section).
+Since `cargo check`/`cargo clippy` never link, that is enough to type-check and
+lint `crates/effectkit-controls-pi/src/lib.rs` without a Pi in reach — it is
+not a way to produce a runnable binary (see the next section). The `oxtt`
+binary that *uses* it cannot be checked the same way from macOS, because
+`jack-sys` runs `pkg-config` for the target and there is no Linux JACK to point
+it at; CI's `pi-controls` job covers that combination natively.
 
 CI covers the feature natively on Linux in the `pi-controls` job, which lints,
 tests, and builds it on an `ubuntu-latest` runner.
@@ -149,28 +161,23 @@ tests, and builds it on an `ubuntu-latest` runner.
 
 The Bela host is the opposite case: it needs no extra anything to work on. The
 `bela` crate puts its device code behind a `bela_device` cfg its build script
-sets only for aarch64 Linux, so on macOS — and on an ordinary CI runner — the
-application type, the control conversion and their tests are ordinary code:
-
-```sh
-cargo clippy -p oxtt --no-default-features --features bela-host --all-targets -- -D warnings
-cargo test  -p oxtt --no-default-features --features bela-host --all-targets
-```
+sets only for aarch64 Linux, so on macOS — and on an ordinary CI runner —
+`oxtt-bela` is an ordinary workspace member and its application type and tests
+are ordinary code, covered by the same commands as everything else.
 
 The half behind that cfg is compiled by cross-*checking*, which links nothing
 and so needs neither `libbela` nor a sysroot:
 
 ```sh
 rustup target add aarch64-unknown-linux-gnu
-cargo clippy -p oxtt --no-default-features --features bela-host --all-targets \
-  --target aarch64-unknown-linux-gnu -- -D warnings
+cargo clippy -p oxtt-bela --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
 ```
 
 Producing a runnable binary *is* a real cross-compile, and that is
 [`bela/cross-compile.md`](bela/cross-compile.md).
 
-CI runs all three: `bela-host` for the portable half, `bela-device` for the
-cfg'd half, and `no-host` for the shared code with neither host enabled.
+CI runs one job for it, `bela-device`, covering the cfg'd half. The portable
+half needs no job of its own: it is a package like any other.
 
 ### Why macOS cross-compilation is not the baseline for the Pi
 
@@ -234,8 +241,9 @@ The suite is organized by module and none of it requires a running JACK server:
 - `crates/effectkit-controls/src/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)), and `gem.rs`'s analog-reading-to-pot-position conversion, the board's own measured deadband and the read decimator
 - `crates/oxtt-controls/src/lib.rs` — the pot-to-parameter assignment, and the conditioning/assignment pair driven end to end
 - `crates/effectkit-controls-pi/src/lib.rs` — the MCP3008 command/response encoding (Linux only)
-- `crates/oxtt/src/control/thread.rs` — only under `--features jack-host`: the control thread and its handoff
-- `crates/oxtt/src/bela_host/` — only under `--features bela-host`: the settings the board is asked for, and the exit report's wording
+- `crates/oxtt/src/control/thread.rs` — the control thread and its handoff
+- `crates/oxtt-bela/src/` — the settings the board is asked for, and the exit report's wording
+- `crates/oxtt-render/src/lib.rs` — the offline renderer's WAV handling and loudness matching
 
 See [contracts.md](contracts.md) for the guarantees those tests protect.
 

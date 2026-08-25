@@ -1,0 +1,23 @@
+[package]
+name = "oxtt-bela"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "oxtt on a Bela Gem Stereo: the same 3-band compressor under Bela's render callback"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+bela = "0.7"
+clap = { version = "4", features = ["derive"] }
+effectkit = { path = "../effectkit" }
+effectkit-controls = { path = "../effectkit-controls" }
+oxtt-args = { path = "../oxtt-args" }
+oxtt-controls = { path = "../oxtt-controls" }
+oxtt-dsp = { path = "../oxtt-dsp" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
