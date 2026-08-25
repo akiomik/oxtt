@@ -3,6 +3,7 @@
 pub mod compressor;
 pub mod crossover;
 pub mod envelope;
+pub mod filter;
 pub mod smooth;
 
 use thiserror::Error;
