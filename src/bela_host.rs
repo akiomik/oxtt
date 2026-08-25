@@ -19,10 +19,7 @@ use crate::params::ConfigError;
 
 pub use app::{OttApplication, OttRenderState, RunDiagnostics};
 pub use cli::BelaCli;
-pub use controls::{
-    ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, TARGET_POLL_HZ, pot_position,
-    raw_controls,
-};
+pub use controls::{ANALOG_CHANNELS_USED, PollDecimator, pot_position, raw_controls};
 
 /// Audio sample rate oxtt asks a Bela for.
 ///
@@ -30,8 +27,9 @@ pub use controls::{
 /// Raspberry Pi host was measured at, so the two platforms are comparable
 /// (ADR 0008). And it makes the control-surface read divisor exact: 48000/16
 /// is 3000 blocks a second, which divides by 6 to precisely
-/// [`TARGET_POLL_HZ`], so the mapping layer's constants keep the timings they
-/// were calibrated with (see [`PollDecimator`]).
+/// the 500 Hz this board's conditioning is nominally read at, so its measured
+/// constants keep the timings they were calibrated with (see
+/// [`PollDecimator`]).
 ///
 /// A Gem Stereo was measured running every rate from 8 kHz to 106 kHz, with
 /// 108 kHz and above aborting the process from inside the codec (bela-rs
@@ -247,6 +245,7 @@ pub use device::run;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::control::surfaces::GEM;
 
     /// The reason 48 kHz is not the board's 44.1 kHz default: at the default
     /// period it divides exactly onto the rate the mapping layer's constants
@@ -266,7 +265,10 @@ mod tests {
             reason = "the point of the test is that it is exact"
         )]
         {
-            assert_eq!(decimator.effective_hz(sample_rate, frames), TARGET_POLL_HZ);
+            assert_eq!(
+                decimator.effective_hz(sample_rate, frames),
+                GEM.nominal_poll_hz()
+            );
         }
     }
 

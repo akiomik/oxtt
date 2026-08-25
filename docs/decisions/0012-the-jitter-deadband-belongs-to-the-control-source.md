@@ -11,6 +11,31 @@ the sentence in
 B's deadband is no longer a shared constant. Everything else about the
 three-layer split stands, including the duty ADR 0011 attached to it.
 
+### Amended: the deadband travels with the three constants it was measured beside
+
+The decision below stands unchanged — the deadband is the source's, with no
+default — but it is no longer carried on its own. The filter coefficient, the
+switch debounce and the read rate came out of the *same* measurement session
+as the deadband, and the rule that ties them together
+(`deadband_counts >= σ` of the raw jitter, because the filter's noise gain at
+0.2 is exactly 1/3) had no owner while they lived in three different places:
+a trait associated constant, two free constants inside layer B, and a fourth
+beside the Bela reading code.
+
+They are now one value object, `ConditioningConfig`, with private fields and
+validated components. The names in this ADR map onto it as follows:
+
+| Then | Now |
+|---|---|
+| `ControlSource::DEADBAND_COUNTS` | `ControlSource::CONDITIONING`, a whole `ConditioningConfig` |
+| `bela_host::controls::DEADBAND_COUNTS` | `control::surfaces::GEM` |
+| `FILTER_COEFFICIENT`, `BYPASS_DEBOUNCE_READS` (layer B) | fields of each surface's config |
+| `DEFAULT_POLL_INTERVAL` (layer C) | derived from `CONDITIONING.nominal_poll_hz()` |
+
+There is still no `Default`: that was this ADR's point and it is why the
+constant has no default value, only a construction boundary that keeps an
+invalid one from existing.
+
 ## Context
 
 ADR 0010 put the jitter filter and the hysteresis deadband in layer B, shared

@@ -149,9 +149,9 @@ are checked against.
 
 ### What it says about the shipped constants
 
-- `FILTER_COEFFICIENT = 0.2` has a noise gain of exactly 1/3, so a raw σ of
-  6.39 arrives at the deadband as σ ≈ 2.13 counts.
-- `PiControls::DEADBAND_COUNTS = 8.0` is therefore roughly 3.8σ of what
+- `PiControls::CONDITIONING`'s `filter_coefficient = 0.2` has a noise gain of
+  exactly 1/3, so a raw σ of 6.39 arrives at the deadband as σ ≈ 2.13 counts.
+- Its `deadband_counts = 8.0` is therefore roughly 3.8σ of what
   actually reaches it — enough margin that a motionless pot is quiet, while 8
   counts is only ≈ 0.8% of travel and leaves roughly 128 distinct positions
   across a full sweep.
@@ -227,7 +227,7 @@ them as verification of the current phase-coherent crossfade.
   crossover reconstruction and leaves the latent effect targets current.
 - **A switch resting bypassed at startup comes up bypassed.** Confirmed.
 - **One throw of the switch produces exactly one state change.** Confirmed;
-  `BYPASS_DEBOUNCE_READS = 15` needed no adjustment.
+  `PiControls::CONDITIONING`'s `debounce_reads = 15` needed no adjustment.
 - **No zipper noise, stepping, or other artefact** while turning any of the
   six pots — confirmed by ear.
 - **No audible drift, chatter, or parameter movement** from a motionless pot —
@@ -306,7 +306,7 @@ Met:
   switch positions.
 - Idle jitter measured at both full travel and mid travel, 300 readings per
   channel per position, with worst-case σ recorded and checked against
-  `DEADBAND_COUNTS`.
+  `PiControls::CONDITIONING`'s `deadband_counts`.
 - A sustained live JACK session at 48 kHz `128×3` exercising every pot and the
   bypass switch, ending in `oxtt: xrun_count=0` and
   `oxtt: control_read_failures=0`. Its bypass observations apply only to the

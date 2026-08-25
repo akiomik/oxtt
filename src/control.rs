@@ -28,16 +28,21 @@
 //! `pi-controls` feature — deliberately not linked here, because `rppal` is
 //! Linux-only and this module has to document itself on any platform.
 
+mod conditioning;
 mod mapping;
 #[cfg(feature = "pi-controls")]
 mod pi;
 mod raw;
+pub mod surfaces;
 #[cfg(feature = "jack-host")]
 mod thread;
 
+pub use conditioning::{
+    ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, PollHz,
+};
 pub use mapping::ControlMapping;
 #[cfg(feature = "pi-controls")]
 pub use pi::{PiControlError, PiControls};
 pub use raw::{ControlSource, POT_POSITION_MAX, PotPosition, Pots, RawControls};
 #[cfg(feature = "jack-host")]
-pub use thread::{ControlHandle, DEFAULT_POLL_INTERVAL};
+pub use thread::ControlHandle;

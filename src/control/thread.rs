@@ -35,28 +35,31 @@ use crate::params::{ControlSnapshot, OttParams};
 use super::mapping::ControlMapping;
 use super::raw::ControlSource;
 
-/// How long the control thread waits between hardware reads.
+/// The interval a nonsensical nominal poll rate falls back to.
 ///
-/// 2 ms is 500 Hz. The audio callback at 128 frames / 48 kHz runs at about
-/// 375 Hz, so polling faster than that cannot make a knob turn feel any more
-/// immediate — the callback would simply find the same snapshot twice — while
-/// polling much slower would let the callback outrun the control surface and
-/// make a fast turn arrive in visible steps. 500 Hz sits just above the
-/// callback rate, which costs six MCP3008 conversions per 2 ms (a few
-/// hundred microseconds of SPI on the Pi's bus, on a thread that has nothing
-/// else to do) and leaves headroom for a smaller JACK buffer.
+/// Unreachable from any surface that exists: [`PollHz`] is finite and
+/// positive, and only a rate below about 5e-20 Hz makes `1 / rate` overflow a
+/// `Duration`. A second is slow enough to be obviously wrong in use, and
+/// unlike saturating to `Duration::MAX` it still lets the thread notice the
+/// stop flag.
+const FALLBACK_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The interval between reads implied by a surface's nominal poll rate.
 ///
-/// This is also the effective time constant of [`ControlMapping`]'s filter,
-/// which is defined per read rather than per millisecond: at 500 Hz its
-/// 5-read step response is 10 ms.
-pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(2);
+/// The rate is the surface's, because the filter coefficient and the debounce
+/// it was measured alongside are defined per *read* — quoting an interval
+/// separately would be the same decision written down twice
+/// ([`ConditioningConfig::nominal_poll_hz`]).
+fn poll_interval_for(nominal_poll_hz: f32) -> Duration {
+    Duration::try_from_secs_f32(1.0 / nominal_poll_hz).unwrap_or(FALLBACK_POLL_INTERVAL)
+}
 
 /// How many read failures pass between two stderr reports.
 ///
 /// A disconnected ADC fails on *every* poll, so an unthrottled report would
 /// emit 500 lines a second and bury whatever else the terminal is showing.
 /// The first failure is always reported, because that is the one that
-/// diagnoses the problem; after that, at [`DEFAULT_POLL_INTERVAL`], this
+/// diagnoses the problem; after that, at the Raspberry Pi's 500 Hz, this
 /// works out to one line every 10 seconds — enough to show the fault is
 /// ongoing, quiet enough to leave the terminal usable. The exact total is
 /// reported once at shutdown from [`ControlHandle::stop_and_join`], the same
@@ -82,7 +85,7 @@ pub struct ControlHandle {
 }
 
 impl ControlHandle {
-    /// Starts a control thread polling `source` every `poll_interval`.
+    /// Starts a control thread polling `source`.
     ///
     /// `base` is the CLI parameter set. It seeds both ends with an explicitly
     /// disengaged bypass level, so a callback that reads before the first
@@ -90,8 +93,13 @@ impl ControlHandle {
     /// with. [`ControlMapping`] overlays the six pot-driven fields from the
     /// first reading onward.
     ///
-    /// [`DEFAULT_POLL_INTERVAL`] is the interval to pass unless a caller has
-    /// a specific reason not to.
+    /// `poll_interval` is `None` for the rate the source's own conditioning
+    /// was measured at, which is what a run wants. It is an override rather
+    /// than a parameter because the interval is not free: the filter
+    /// coefficient and the debounce are defined per read, so changing it
+    /// changes both time constants
+    /// ([`ConditioningConfig::nominal_poll_hz`]). Tests pass a faster one to
+    /// finish quickly, where neither constant is what is under test.
     #[must_use]
     // `thread::spawn` and the `thread::sleep` in the poll loop are the two
     // things this layer exists to do, on a thread that is not the audio
@@ -101,8 +109,10 @@ impl ControlHandle {
     pub fn spawn<S: ControlSource + Send + 'static>(
         source: S,
         base: OttParams,
-        poll_interval: Duration,
+        poll_interval: Option<Duration>,
     ) -> Self {
+        let poll_interval =
+            poll_interval.unwrap_or_else(|| poll_interval_for(S::CONDITIONING.nominal_poll_hz()));
         let initial = ControlSnapshot {
             params: base,
             bypass_engaged: false,
@@ -117,7 +127,7 @@ impl ControlHandle {
             thread::spawn(move || {
                 poll_until_stopped(
                     source,
-                    ControlMapping::new(base, S::DEADBAND_COUNTS),
+                    ControlMapping::new(base, S::CONDITIONING),
                     publisher,
                     &stop,
                     &read_failures,
@@ -249,6 +259,8 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+    use crate::control::ConditioningConfig;
+    use crate::control::surfaces::GEM;
     use crate::control::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
     use crate::dsp::OttProcessor;
     use crate::params::Preset;
@@ -256,9 +268,9 @@ mod tests {
     /// Long enough that a loaded CI machine cannot hit it by being slow, short
     /// enough that a genuinely stuck thread fails the run rather than hanging it.
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
-    /// Faster than [`DEFAULT_POLL_INTERVAL`] so the tests below finish quickly;
-    /// nothing under test depends on the interval's value.
-    const TEST_POLL_INTERVAL: Duration = Duration::from_millis(1);
+    /// Faster than either real surface's nominal rate so the tests below
+    /// finish quickly; nothing under test depends on the interval's value.
+    const TEST_POLL_INTERVAL: Option<Duration> = Some(Duration::from_millis(1));
     /// What "promptly" means for a stop that should cost one poll interval.
     const STOP_BUDGET: Duration = Duration::from_millis(500);
     const SAMPLE_RATE: f32 = 48_000.0;
@@ -319,9 +331,9 @@ mod tests {
     impl ControlSource for TurnablePot {
         type Error = Infallible;
 
-        /// The Raspberry Pi's figure: the widest of the real ones, so a
-        /// fake conditioned against it is conditioned conservatively.
-        const DEADBAND_COUNTS: f32 = 8.0;
+        /// The Bela Gem's, because it is a measured surface and this fake is
+        /// not; the tests here drive the interval themselves.
+        const CONDITIONING: ConditioningConfig = GEM;
 
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads.fetch_add(1, Ordering::Release);
@@ -350,9 +362,9 @@ mod tests {
     impl ControlSource for FlakyAdc {
         type Error = DisconnectedAdc;
 
-        /// The Raspberry Pi's figure: the widest of the real ones, so a
-        /// fake conditioned against it is conditioned conservatively.
-        const DEADBAND_COUNTS: f32 = 8.0;
+        /// The Bela Gem's, because it is a measured surface and this fake is
+        /// not; the tests here drive the interval themselves.
+        const CONDITIONING: ConditioningConfig = GEM;
 
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads.fetch_add(1, Ordering::Release);

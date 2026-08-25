@@ -40,6 +40,9 @@ use rppal::spi::Error as SpiError;
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use thiserror::Error;
 
+use super::conditioning::{
+    ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, PollHz,
+};
 use super::raw::{ControlSource, PotPosition, PotPositionError, Pots, RawControls};
 
 /// GPIO pin (BCM numbering) the bypass switch is wired to.
@@ -56,9 +59,9 @@ const BYPASS_GPIO: u8 = 17;
 /// Deliberately well under the MCP3008's ~1.35–2 MHz ceiling at 3.3 V
 /// (datasheet): breadboard jumpers pick up noise readily at higher clock
 /// rates, and there is nothing to buy by going faster. Six conversions are 18
-/// bytes, about 300 µs at this rate, against a
-/// [`DEFAULT_POLL_INTERVAL`](super::DEFAULT_POLL_INTERVAL) of 2 ms on a thread
-/// that has nothing else to do.
+/// bytes, about 300 µs at this rate, against the 2 ms between reads that
+/// [`PiControls::CONDITIONING`](ControlSource::CONDITIONING)'s 500 Hz implies,
+/// on a thread that has nothing else to do.
 const SPI_CLOCK_HZ: u32 = 500_000;
 
 /// The MCP3008 samples on the rising edge with the clock idling low, which is
@@ -201,17 +204,85 @@ impl PiControls {
 impl ControlSource for PiControls {
     type Error = PiControlError;
 
-    /// Eight counts, from a worst-case raw σ of 6.39 measured across all six
-    /// channels at both full and mid travel
-    /// (`docs/raspberry-pi/control-surface-verification.md`).
+    /// The assembled breadboard's measured behaviour, all four values from
+    /// the same session (`docs/raspberry-pi/control-surface-verification.md`).
     ///
-    /// The mapping layer's rule is `DEADBAND_COUNTS >= σ` of the raw jitter,
-    /// so 8.0 ≥ 6.39 holds with room to spare — but not much: this is the
-    /// noisier of the two surfaces by a wide margin, and the figure has no
+    /// **`deadband_counts = 8.0`** — from a worst-case raw σ of 6.39 measured
+    /// across all six channels at both full and mid travel.
+    /// [`ConditioningConfig`]'s rule is `deadband_counts >= σ` of the raw
+    /// jitter, so 8.0 ≥ 6.39 holds with room to spare — but not much: this is
+    /// the noisier of the two surfaces by a wide margin, and the figure has no
     /// slack for a quieter one to inherit. It is 0.8% of travel, roughly 128
     /// distinct positions across a sweep, and `8 / 1023 * 48` ≈ 0.375 dB on
     /// the two gain pots.
-    const DEADBAND_COUNTS: f32 = 8.0;
+    ///
+    /// **`filter_coefficient = 0.2`** — idle jitter measured with `pi-tools`
+    /// over 300 readings per position on all six channels has a standard
+    /// deviation of 5.30–6.39 counts out of 1023 with the pots at full travel
+    /// and 2.98–4.19 counts at mid travel. The worst case is therefore σ ≈
+    /// 6.4, at the end stop rather than at mid scale — the opposite of what a
+    /// divider's source impedance alone would predict, which is why it was
+    /// measured rather than assumed.
+    ///
+    /// At 0.2 the filter attenuates white noise by exactly
+    /// `sqrt(a / (2 - a))` = 1/3, taking that worst case down to σ ≈ 2.1
+    /// counts, while reaching 63% of a step in 5 reads and 90% in 11, so a
+    /// deliberate knob turn still tracks the hand that makes it.
+    ///
+    /// The value is intentionally not lower. Conditioning only has to reject
+    /// jitter: every parameter it publishes is re-smoothed per sample by the
+    /// DSP with a 20 ms time constant (docs/architecture.md), so zipper noise
+    /// is already handled downstream and there is nothing to gain from extra
+    /// lag here.
+    ///
+    /// **`debounce_reads = 15`** — counted in reads rather than milliseconds
+    /// because conditioning has no clock. At the 500 Hz below, fifteen reads
+    /// means the contact has to hold its new position for 28 ms after the
+    /// first read that sees it.
+    ///
+    /// That is three times the eight milliseconds the previous momentary push
+    /// switch was given, because the part changed. An alternate-action or
+    /// slide switch is moved by a hand travelling the whole throw rather than
+    /// by a spring snapping over centre, so the wiper can make and break
+    /// repeatedly for as long as the movement lasts — tens of milliseconds,
+    /// not the single digits a snap-action contact bounces for. Twenty-eight
+    /// milliseconds is chosen to sit above that, not read off a datasheet.
+    ///
+    /// The cost is latency: a position change is acted on at the fifteenth
+    /// read, so up to 30 ms (fifteen poll intervals — fourteen of debounce
+    /// plus up to one interval of sampling delay) passes between the switch
+    /// reaching its new position and the parameters following. That is still
+    /// below the ~50 ms at which a foot- or finger-operated switch starts to
+    /// feel late, and the DSP's 20 ms smoothing dominates what is actually
+    /// heard anyway (docs/architecture.md).
+    ///
+    /// This was sized from the switch class rather than an oscilloscope, and
+    /// has since been confirmed on hardware: a live JACK session exercising
+    /// the latching switch repeatedly produced exactly one state change per
+    /// throw with no adjustment needed. The failure it guards against is
+    /// visible in use: too small and a single throw publishes twice.
+    ///
+    /// **`nominal_poll_hz = 500.0`** — the rate the three above were measured
+    /// and sized at, and the one the control thread derives its sleep from.
+    /// 2 ms is 500 Hz. The audio callback at 128 frames / 48 kHz runs at about
+    /// 375 Hz, so polling faster than that cannot make a knob turn feel any
+    /// more immediate — the callback would simply find the same snapshot twice
+    /// — while polling much slower would let the callback outrun the control
+    /// surface and make a fast turn arrive in visible steps. 500 Hz sits just
+    /// above the callback rate, which costs six MCP3008 conversions per 2 ms
+    /// (a few hundred microseconds of SPI on the Pi's bus, on a thread that
+    /// has nothing else to do) and leaves headroom for a smaller JACK buffer.
+    ///
+    /// Raising it shortens the debounce latency and weakens the debounce in
+    /// exact proportion, and shortens the filter's time constant the same way.
+    /// That is the trade to re-make together, which is why the four are one
+    /// value.
+    const CONDITIONING: ConditioningConfig = ConditioningConfig::new(
+        FilterCoefficient::new_const(0.2),
+        DeadbandCounts::new_const(8.0),
+        DebounceReads::new_const(15),
+        PollHz::new_const(500.0),
+    );
 
     /// Reads the six channels and the switch as one sample.
     ///

@@ -13,28 +13,8 @@
 
 use crate::params::{ControlSnapshot, IoGain, NormalizedF32, OttParams};
 
+use super::conditioning::ConditioningConfig;
 use super::raw::{POT_POSITION_MAX, Pots, RawControls};
-
-/// One-pole low-pass coefficient applied to each pot's raw count, per read.
-///
-/// Idle jitter on the assembled hardware, measured with `pi-tools` over 300
-/// readings per position on all six channels, has a standard deviation of
-/// 5.30–6.39 counts out of 1023 with the pots at full travel and 2.98–4.19
-/// counts at mid travel. The worst case is therefore σ ≈ 6.4, at the end
-/// stop rather than at mid scale — the opposite of what a divider's source
-/// impedance alone would predict, which is why it was measured rather than
-/// assumed.
-///
-/// At 0.2 the filter attenuates white noise by exactly
-/// `sqrt(a / (2 - a))` = 1/3, taking that worst case down to σ ≈ 2.1 counts,
-/// while reaching 63% of a step in 5 reads and 90% in 11, so a deliberate
-/// knob turn still tracks the hand that makes it.
-///
-/// The value is intentionally not lower. This layer only has to reject
-/// jitter: every parameter it publishes is re-smoothed per sample by the DSP
-/// with a 20 ms time constant (docs/architecture.md), so zipper noise is
-/// already handled downstream and there is nothing to gain from extra lag here.
-const FILTER_COEFFICIENT: f32 = 0.2;
 
 /// The dB value the gain pots produce at their lower stop.
 ///
@@ -55,43 +35,6 @@ const GAIN_MIN_DB: f32 = -24.0;
 /// "unchanged" at.
 const GAIN_SPAN_DB: f32 = 48.0;
 
-/// How many consecutive identical readings the bypass switch's position must
-/// survive before it is believed.
-///
-/// Counted in reads rather than milliseconds for the same reason as
-/// [`FILTER_COEFFICIENT`]: this layer has no clock. At the
-/// [`DEFAULT_POLL_INTERVAL`](crate::control::DEFAULT_POLL_INTERVAL) of 2 ms
-/// (500 Hz), fifteen reads means the contact has to hold its new position for
-/// 28 ms after the first read that sees it.
-///
-/// That is three times the eight milliseconds the previous momentary push
-/// switch was given, because the part changed. An alternate-action or slide
-/// switch is moved by a hand travelling the whole throw rather than by a
-/// spring snapping over centre, so the wiper can make and break repeatedly for
-/// as long as the movement lasts — tens of milliseconds, not the single digits
-/// a snap-action contact bounces for. Twenty-eight milliseconds is chosen to
-/// sit above that, not read off a datasheet.
-///
-/// The cost is latency: a position change is acted on at the fifteenth read,
-/// so up to 30 ms (fifteen poll intervals — fourteen of debounce plus up to
-/// one interval of sampling delay) passes between the switch reaching its new
-/// position and the parameters following. That is still below the ~50 ms at
-/// which a foot- or finger-operated switch starts to feel late, and the DSP's
-/// 20 ms smoothing dominates what is actually heard anyway
-/// (docs/architecture.md).
-///
-/// This was sized from the switch class rather than an oscilloscope, and has
-/// since been confirmed on hardware: a live JACK session exercising the
-/// latching switch repeatedly produced exactly one state change per throw
-/// with no adjustment needed
-/// (`docs/raspberry-pi/control-surface-verification.md`). The failure it
-/// guards against is visible in use: too small and a single throw publishes
-/// twice.
-///
-/// Raising the poll rate shortens the latency and weakens the debounce in
-/// exact proportion, which is the trade to re-make if the interval changes.
-const BYPASS_DEBOUNCE_READS: u8 = 15;
-
 /// The debounced bypass switch.
 ///
 /// The panel part is a mechanically *latching* (alternate-action) switch, so
@@ -100,7 +43,7 @@ const BYPASS_DEBOUNCE_READS: u8 = 15;
 /// does is therefore debounce — a slide or alternate-action contact makes and
 /// breaks intermittently for as long as the hand is moving it, and each of
 /// those intermediate makes would otherwise publish (see
-/// [`BYPASS_DEBOUNCE_READS`]).
+/// [`ConditioningConfig::debounce_reads`]).
 ///
 /// That the switch and the software agree by construction is the point of the
 /// part change, not a side effect of it. With the old momentary switch the
@@ -118,9 +61,9 @@ const BYPASS_DEBOUNCE_READS: u8 = 15;
 /// payload remains live in the latent effect branch, ready for disengage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BypassSwitch {
-    /// The switch position currently believed: the last one to survive
-    /// [`BYPASS_DEBOUNCE_READS`] consecutive readings. This is the bypass
-    /// state, not an input to one.
+    /// The switch position currently believed: the last one to survive the
+    /// surface's [`debounce_reads`](ConditioningConfig::debounce_reads)
+    /// consecutive readings. This is the bypass state, not an input to one.
     engaged: bool,
     /// How many consecutive readings have disagreed with `engaged`.
     disagreements: u8,
@@ -144,7 +87,7 @@ impl BypassSwitch {
     }
 
     /// Feeds one reading in, adopting its position once the debounce believes it.
-    const fn update(&mut self, engaged: bool) {
+    const fn update(&mut self, engaged: bool, debounce_reads: u8) {
         if engaged == self.engaged {
             self.disagreements = 0;
             return;
@@ -155,7 +98,7 @@ impl BypassSwitch {
         // and saturating keeps that a property of the arithmetic rather than a
         // claim about the flow — which is what `update`'s no-panic proof needs.
         self.disagreements = self.disagreements.saturating_add(1);
-        if self.disagreements < BYPASS_DEBOUNCE_READS {
+        if self.disagreements < debounce_reads {
             return;
         }
 
@@ -185,8 +128,9 @@ struct Conditioned {
     /// Low-pass filter state, in ADC counts.
     filtered: Pots<f32>,
     /// The deadband reference: the filtered values as of the last time a pot
-    /// cleared [`DEADBAND_COUNTS`], in ADC counts, and always the real pot
-    /// positions — never the bypassed ones.
+    /// cleared the surface's
+    /// [`deadband_counts`](ConditioningConfig::deadband_counts), in ADC
+    /// counts, and always the real pot positions — never the bypassed ones.
     reference: Pots<f32>,
     /// The most recent published snapshot.
     published: ControlSnapshot,
@@ -209,51 +153,29 @@ struct Conditioned {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ControlMapping {
     base: OttParams,
-    /// Hysteresis deadband against the deadband reference, in ADC counts.
+    /// How the surface being read is conditioned: the jitter filter, the
+    /// deadband, the switch debounce, and the rate they were measured at.
     ///
-    /// Supplied by the caller rather than fixed here, because it is not a
-    /// property of this layer: it is how much a *motionless pot on a
-    /// particular converter* wanders, which is measured per control surface
-    /// and differs by more than an order of magnitude between the two that
-    /// exist (ADR 0012). Each layer A declares its own —
-    /// [`ControlSource::DEADBAND_COUNTS`](crate::control::ControlSource::DEADBAND_COUNTS)
-    /// on the Raspberry Pi, `bela_host::controls::DEADBAND_COUNTS` on a Gem.
-    ///
-    /// What stays here is the rule the value has to satisfy, because that is
-    /// what this layer's filter makes true whatever the hardware: since
-    /// [`FILTER_COEFFICIENT`]'s noise gain is exactly 1/3, keeping three sigma
-    /// of margin reduces to `deadband_counts >= σ` of the *raw* idle jitter.
-    /// That is the form to re-check against when the pots, the wiring or the
-    /// converter change, and it is the form both hosts' figures are justified
-    /// in (`docs/raspberry-pi/control-surface-verification.md`,
-    /// `docs/bela/control-surface-verification.md`).
-    ///
-    /// As a fraction of travel the band is `deadband_counts / 1023`, and on
-    /// the two gain pots it lands on a dB figure, since [`GAIN_SPAN_DB`] is
-    /// spread linearly across the same travel: `deadband_counts / 1023 * 48`.
-    /// Both hosts' values put that well under the roughly 1 dB step a listener
-    /// picks out on programme material, so the coarsest move the deadband can
-    /// force is finer than the ear resolves — and the DSP smooths even that
-    /// over 20 ms.
-    ///
-    /// It is hysteresis, not quantization: once a move clears the band, the
-    /// published value jumps all the way to the filtered value, so repeated
-    /// small moves in one direction cannot accumulate an offset.
-    deadband_counts: f32,
+    /// Supplied by the caller rather than fixed here, because none of it is a
+    /// property of this layer — it is how a *particular converter and a
+    /// particular switch* behave, and the two surfaces that exist differ by
+    /// more than an order of magnitude in the deadband alone (ADR 0012).
+    /// [`ConditioningConfig`] owns the rule the four values satisfy together.
+    conditioning: ConditioningConfig,
     state: Option<Conditioned>,
 }
 
 impl ControlMapping {
     /// Creates a mapping over the CLI-supplied parameter set.
     ///
-    /// `deadband_counts` is the idle jitter the control surface being read was
-    /// measured to have; see the field of the same name for what it has to
-    /// satisfy and where each host's figure comes from.
+    /// `conditioning` is the measured behaviour of the control surface being
+    /// read: `PiControls::CONDITIONING` on a Raspberry Pi,
+    /// [`surfaces::GEM`](crate::control::surfaces::GEM) on a Bela Gem.
     #[must_use]
-    pub const fn new(base: OttParams, deadband_counts: f32) -> Self {
+    pub const fn new(base: OttParams, conditioning: ConditioningConfig) -> Self {
         Self {
             base,
-            deadband_counts,
+            conditioning,
             state: None,
         }
     }
@@ -261,9 +183,9 @@ impl ControlMapping {
     /// Conditions one reading and returns the parameters to publish, if any.
     ///
     /// Returns `Some` only when the snapshot this would publish differs from
-    /// the one it published last: `FILTER_COEFFICIENT` first low-passes the
-    /// raw counts, then `DEADBAND_COUNTS` compares the result against the
-    /// deadband reference, then the reference is converted into an
+    /// the one it published last: the surface's `filter_coefficient` first
+    /// low-passes the raw counts, then its `deadband_counts` compares the
+    /// result against the deadband reference, then the reference is converted into an
     /// [`OttParams`] and paired with the debounced bypass level. A motionless
     /// pot and an untouched switch therefore yield `None` forever, which is
     /// what keeps the transport layer from being handed a fresh snapshot on
@@ -292,7 +214,7 @@ impl ControlMapping {
         // `Copy` and neither changes, so the conversion takes them by value
         // rather than re-borrowing `self` in the middle of the match.
         let base = self.base;
-        let deadband_counts = self.deadband_counts;
+        let conditioning = self.conditioning;
 
         let published = match self.state.as_mut() {
             None => {
@@ -317,8 +239,9 @@ impl ControlMapping {
                 // `(1 - a) * filtered + a * raw`: written this way the result
                 // stays inside the span of the two inputs even after rounding,
                 // which is what keeps the normalized value below in `0.0..=1.0`.
+                let filter_coefficient = conditioning.filter_coefficient();
                 state.filtered = state.filtered.zip_with(counts, |filtered, raw| {
-                    FILTER_COEFFICIENT.mul_add(raw - filtered, filtered)
+                    filter_coefficient.mul_add(raw - filtered, filtered)
                 });
 
                 // The deadband tracks the pots in their own units, so it is
@@ -329,14 +252,16 @@ impl ControlMapping {
                     state
                         .filtered
                         .zip_with(state.reference, |filtered, reference| {
-                            if (filtered - reference).abs() >= deadband_counts {
+                            if (filtered - reference).abs() >= conditioning.deadband_counts() {
                                 filtered
                             } else {
                                 reference
                             }
                         });
 
-                state.bypass.update(raw.bypass_engaged);
+                state
+                    .bypass
+                    .update(raw.bypass_engaged, conditioning.debounce_reads());
 
                 let next = ControlSnapshot {
                     params: params_with_pots(base, state.reference),
@@ -421,13 +346,14 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::control::PotPosition;
+    use crate::control::{DeadbandCounts, DebounceReads, FilterCoefficient, PollHz, PotPosition};
     use crate::params::Preset;
 
     const PROPERTY_CASES: u32 = 128;
     const SAMPLE_RATE: f32 = 48_000.0;
     /// Long enough for the filter to converge on a held position and for the
-    /// deadband to have taken it, at `FILTER_COEFFICIENT`'s 11-read 90% point.
+    /// deadband to have taken it, at the 11-read 90% point of the filter
+    /// coefficient below.
     const HELD_READS: usize = 100;
     /// The closest a 10-bit count gets to the centre of a pot's rotation, which
     /// is 511.5. Where the gain pots sit for the tests that are not about them.
@@ -441,13 +367,31 @@ mod tests {
     /// against this one.
     const DEADBAND_COUNTS: f32 = 8.0;
 
+    /// How many reads a switch position must survive here.
+    ///
+    /// Both real surfaces use the same figure, so the tests name it once
+    /// rather than reaching into whichever config they happen to build.
+    const DEBOUNCE_READS: u8 = 15;
+
+    /// The Raspberry Pi's conditioning, spelled out rather than imported: the
+    /// real one is behind the `pi-controls` feature, which the builds that run
+    /// these tests do not enable.
+    fn conditioning(deadband_counts: f32) -> ConditioningConfig {
+        ConditioningConfig::new(
+            FilterCoefficient::new_const(0.2),
+            DeadbandCounts::try_new(deadband_counts).unwrap(),
+            DebounceReads::new_const(DEBOUNCE_READS),
+            PollHz::new_const(500.0),
+        )
+    }
+
     fn count(raw: u16) -> PotPosition {
         PotPosition::try_new(raw).unwrap()
     }
 
     /// A mapping over `base`, conditioning at [`DEADBAND_COUNTS`].
     fn mapping(base: OttParams) -> ControlMapping {
-        ControlMapping::new(base, DEADBAND_COUNTS)
+        ControlMapping::new(base, conditioning(DEADBAND_COUNTS))
     }
 
     /// A reading of the four effect pots, with both gain pots parked at the
@@ -523,10 +467,10 @@ mod tests {
         last
     }
 
-    /// Feeds a switch position in exactly [`BYPASS_DEBOUNCE_READS`] times,
+    /// Feeds a switch position in exactly [`DEBOUNCE_READS`] times,
     /// which is the shortest run the debounce believes.
     fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<ControlSnapshot> {
-        feed(mapping, raw, usize::from(BYPASS_DEBOUNCE_READS))
+        feed(mapping, raw, usize::from(DEBOUNCE_READS))
     }
 
     #[test]
@@ -594,8 +538,12 @@ mod tests {
         let held = 500;
         let moved = held + STEP;
 
-        let mut wide = ControlMapping::new(Preset::SafeStart.params(), DEADBAND_COUNTS);
-        let mut narrow = ControlMapping::new(Preset::SafeStart.params(), NARROW_DEADBAND_COUNTS);
+        let mut wide =
+            ControlMapping::new(Preset::SafeStart.params(), conditioning(DEADBAND_COUNTS));
+        let mut narrow = ControlMapping::new(
+            Preset::SafeStart.params(),
+            conditioning(NARROW_DEADBAND_COUNTS),
+        );
         assert!(
             wide.update(uniform(held)).is_some() && narrow.update(uniform(held)).is_some(),
             "the first reading must publish on both"
@@ -775,7 +723,7 @@ mod tests {
 
     /// Both gain pots read from their own channel and write their own field.
     ///
-    /// The tolerance is the deadband: `DEADBAND_COUNTS` is hysteresis, so a
+    /// The tolerance is the deadband: it is hysteresis, so a
     /// settled value can sit up to eight counts (≈ 0.375 dB) short of the pot.
     #[test]
     fn turning_a_gain_pot_publishes_and_moves_only_its_own_field() {
@@ -850,10 +798,10 @@ mod tests {
             .expect("the first reading must publish");
 
         // The change is acted on at exactly the debounce count, no earlier.
-        for read in 1..BYPASS_DEBOUNCE_READS {
+        for read in 1..DEBOUNCE_READS {
             assert!(
                 mapping.update(switched(idle, true)).is_none(),
-                "engaged reading {read} of {BYPASS_DEBOUNCE_READS} must not be believed yet"
+                "engaged reading {read} of {DEBOUNCE_READS} must not be believed yet"
             );
         }
         let params = mapping
@@ -929,12 +877,12 @@ mod tests {
 
         // A hand moving an alternate-action switch: the wiper makes and breaks
         // repeatedly while it travels, and no run of identical readings reaches
-        // `BYPASS_DEBOUNCE_READS` until it comes to rest in the new position.
+        // `DEBOUNCE_READS` until it comes to rest in the new position.
         let bounce = [true, false, true, false, true, true, false, true];
         let levels = bounce
             .iter()
             .copied()
-            .chain([true; BYPASS_DEBOUNCE_READS as usize]);
+            .chain([true; DEBOUNCE_READS as usize]);
 
         let mut publishes = 0_u32;
         let mut last = None;

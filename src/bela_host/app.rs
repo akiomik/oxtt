@@ -13,8 +13,9 @@ use bela::{
     SetupContext, ThreadInfo,
 };
 
-use super::controls::{ANALOG_CHANNELS_USED, DEADBAND_COUNTS, PollDecimator, raw_controls};
+use super::controls::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
 use crate::control::ControlMapping;
+use crate::control::surfaces::GEM;
 use crate::dsp::OttProcessor;
 use crate::metering::{ClipIndicator, InputMeter};
 use crate::params::OttParams;
@@ -129,11 +130,11 @@ impl OttApplication {
             // Seeded with the same parameters the processor starts from, so
             // the fields no pot drives keep their command-line values and the
             // six that are pot-driven become the hardware's from its first
-            // reading onward (`ControlMapping::new`). The deadband is this
-            // board's own measured figure rather than the mapping layer's, of
-            // which there no longer is one (ADR 0012).
+            // reading onward (`ControlMapping::new`). The conditioning is
+            // this board's own measured figures rather than the mapping
+            // layer's, of which there no longer are any (ADR 0012).
             mapping: if controls {
-                Some(ControlMapping::new(params, DEADBAND_COUNTS))
+                Some(ControlMapping::new(params, GEM))
             } else {
                 None
             },

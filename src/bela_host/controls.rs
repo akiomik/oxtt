@@ -14,6 +14,7 @@
 //! (bela-rs#113), so the three lines that touch one live in
 //! [`super::app`] and everything with a decision in it lives here.
 
+use crate::control::surfaces::GEM;
 use crate::control::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
 
 /// The reading a pot wired across the 3.3 V rail produces at its upper stop.
@@ -40,30 +41,6 @@ const POT_SUPPLY_FRACTION: f32 = 3.3 / 4.096;
 /// Raspberry Pi wiring, where the unused ADC channels are tied to ground for
 /// the same reason (`src/control/pi.rs`).
 const POT_POSITION_FLOOR: PotPosition = PotPosition::new_const(0);
-
-/// How far a motionless pot's reading wanders on this board, in
-/// [`PotPosition`] steps, as the deadband that has to absorb it.
-///
-/// The Gem's converter is far quieter than the Raspberry Pi's MCP3008 on the
-/// same pots: measured over 60 seconds at each of full and mid travel, no
-/// channel's reading spanned more than **2.5 counts** end to end, against a
-/// raw σ of 6.39 on the Pi (`docs/bela/control-surface-verification.md`,
-/// `docs/raspberry-pi/control-surface-verification.md`).
-///
-/// Three counts is chosen against that measured span rather than against an
-/// estimated σ, and it is the stronger statement of the two: the whole
-/// excursion ever observed fits inside the band, so a motionless pot is
-/// silent rather than merely quiet. The mapping layer's rule —
-/// `deadband >= σ` of the raw jitter — is satisfied many times over by the
-/// same figure.
-///
-/// The Pi's eight counts would also have been silent here, which is exactly
-/// why it is not used: it would spend the board's quieter converter on
-/// nothing. Three counts is 0.29% of travel, roughly 341 distinct positions
-/// across a sweep against the Pi's 128, and `3 / 1023 * 48` ≈ 0.141 dB on the
-/// two gain pots — a quarter of the Pi's step and still far under what the
-/// DSP's 20 ms smoothing lets through as an audible move (ADR 0012).
-pub const DEADBAND_COUNTS: f32 = 3.0;
 
 /// Number of analog channels the control surface occupies, `A0` through `A5`.
 ///
@@ -141,9 +118,10 @@ fn next_position(readings: &mut impl Iterator<Item = f32>) -> PotPosition {
 ///
 /// The mapping layer has no clock: its filter coefficient is defined per
 /// *read*, and its debounce counts reads, so the caller's read rate is what
-/// turns those constants into times (`src/control/mapping.rs`). They were
-/// calibrated against the Raspberry Pi's 500 Hz polling, and Bela's callback
-/// runs far faster than that — 3000 blocks a second at 48 kHz with a period
+/// turns those constants into times (`src/control/mapping.rs`). This board's
+/// figures say what rate they mean —
+/// [`GEM.nominal_poll_hz()`](crate::control::surfaces::GEM) is 500 Hz — and
+/// Bela's callback runs far faster than that — 3000 blocks a second at 48 kHz with a period
 /// of 16 — which would shrink the bypass debounce from 28 ms to 5 ms, below
 /// the make/break time of the latching switch it exists to ride out.
 ///
@@ -162,14 +140,6 @@ pub struct PollDecimator {
     counter: u32,
 }
 
-/// The read rate the mapping layer's constants were calibrated against.
-///
-/// `DEFAULT_POLL_INTERVAL` on the Raspberry Pi is 2 ms, and the deadband,
-/// filter coefficient and debounce count in `src/control/mapping.rs` are all
-/// justified against jitter measured at that rate
-/// (docs/raspberry-pi/control-surface-verification.md).
-pub const TARGET_POLL_HZ: f32 = 500.0;
-
 impl PollDecimator {
     /// Reads on every block: the divisor before the block shape is known.
     ///
@@ -184,9 +154,9 @@ impl PollDecimator {
 
     /// Chooses a divisor from the block rate the audio system reports.
     ///
-    /// Never divides by less than one, so a host slower than
-    /// [`TARGET_POLL_HZ`] reads on every block rather than being asked to
-    /// read more often than it is called.
+    /// Never divides by less than one, so a host slower than the surface's
+    /// nominal poll rate reads on every block rather than being asked to read
+    /// more often than it is called.
     #[must_use]
     pub fn for_block_rate(sample_rate: f32, frames_per_block: usize) -> Self {
         #[expect(
@@ -194,7 +164,7 @@ impl PollDecimator {
             reason = "a block is thousands of frames at most; f32 is exact well past that"
         )]
         let blocks_per_second = sample_rate / frames_per_block.max(1) as f32;
-        let ratio = (blocks_per_second / TARGET_POLL_HZ).round();
+        let ratio = (blocks_per_second / GEM.nominal_poll_hz()).round();
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
@@ -228,9 +198,10 @@ impl PollDecimator {
 
     /// The read rate this divisor actually produces, for the host to report.
     ///
-    /// Worth printing because it is only exactly [`TARGET_POLL_HZ`] at some
-    /// period sizes; at others the debounce and filter time constants scale
-    /// with the difference.
+    /// Worth printing because it is only exactly
+    /// [`GEM.nominal_poll_hz()`](crate::control::surfaces::GEM) at some period
+    /// sizes; at others the debounce and filter time constants scale with the
+    /// difference.
     #[must_use]
     pub fn effective_hz(self, sample_rate: f32, frames_per_block: usize) -> f32 {
         #[expect(clippy::cast_precision_loss, reason = "same bounds as for_block_rate")]
@@ -330,7 +301,7 @@ mod tests {
     fn forty_eight_kilohertz_at_the_default_period_divides_exactly() {
         let decimator = PollDecimator::for_block_rate(48_000.0, 16);
         assert_eq!(decimator.every(), 6);
-        assert_eq!(decimator.effective_hz(48_000.0, 16), TARGET_POLL_HZ);
+        assert_eq!(decimator.effective_hz(48_000.0, 16), GEM.nominal_poll_hz());
     }
 
     #[test]

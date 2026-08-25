@@ -10,6 +10,8 @@ use core::error::Error as StdError;
 
 use nutype::nutype;
 
+use super::conditioning::ConditioningConfig;
+
 /// The position of a pot at its upper stop.
 ///
 /// The scale is 1024 steps because that is what the Raspberry Pi's MCP3008
@@ -72,12 +74,16 @@ impl PotPosition {
 
 /// One `T` per potentiometer, named for the ADC channel it is wired to.
 ///
-/// Named fields rather than `[T; 6]`, for the same reason as
-/// [`Bands<T>`](crate::bands::Bands) (docs/architecture.md): the control
-/// surface has exactly these six pots, so the concept gets one
-/// representation from the hardware read through to the mapped parameters,
-/// and field access cannot go out of range the way an index can
-/// (`clippy::indexing_slicing` never enters the picture).
+/// Named fields rather than `[T; 6]` for one reason only: **at the place the
+/// assignment is written, each pot can be named the same way the wiring names
+/// it.** An array would work everywhere else — `iter().zip()` keeps
+/// `clippy::indexing_slicing` out of the picture just as well — but it would
+/// turn the six lines that decide what each knob does into six indices, which
+/// is the one place in this codebase where a silent mix-up is possible.
+///
+/// The arity is fixed at six because both surfaces that exist have six pots.
+/// A third with a different count gets its own type rather than making this
+/// one generic over length.
 ///
 /// **The names are the wiring, not the effect.** `adc0` is the pot on
 /// MCP3008 CH0 and on a Gem's `A0`; what that pot *means* is decided once,
@@ -193,19 +199,19 @@ pub trait ControlSource {
     /// How this source's hardware read can fail.
     type Error: StdError;
 
-    /// How far a motionless pot's reading wanders on this hardware, in
-    /// [`PotPosition`] steps, as the deadband that has to absorb it.
+    /// How this source's readings are conditioned: the jitter filter, the
+    /// deadband, the switch debounce and the rate they were all measured at.
     ///
     /// An associated constant with no default, so that adding a source is
     /// also being asked what its idle jitter is. There is no portable answer:
-    /// the two surfaces that exist differ by more than an order of magnitude,
-    /// and a value carried over from the other one would be either a deadband
-    /// that chatters or a knob that is needlessly coarse (ADR 0012).
+    /// the two surfaces that exist differ by more than an order of magnitude
+    /// in the deadband alone, and a value carried over from the other one
+    /// would be either a deadband that chatters or a knob that is needlessly
+    /// coarse (ADR 0012).
     ///
-    /// The rule it has to satisfy, and the measurement that establishes it,
-    /// belong to the mapping layer — see
-    /// [`ControlMapping`](crate::control::ControlMapping)'s `deadband_counts`.
-    const DEADBAND_COUNTS: f32;
+    /// The rule the four values have to satisfy together lives on
+    /// [`ConditioningConfig`].
+    const CONDITIONING: ConditioningConfig;
 
     /// Reads all six pots and the bypass switch as one sample.
     ///
@@ -221,6 +227,7 @@ mod tests {
     use core::convert::Infallible;
 
     use super::*;
+    use crate::control::surfaces::GEM;
 
     #[test]
     fn pot_position_accepts_the_full_scale_and_rejects_above_it() {
@@ -319,9 +326,10 @@ mod tests {
     impl ControlSource for FakeSource {
         type Error = Infallible;
 
-        /// The Raspberry Pi's figure: the widest of the real ones, so a
-        /// fake conditioned against it is conditioned conservatively.
-        const DEADBAND_COUNTS: f32 = 8.0;
+        /// The Bela Gem's, because it is a measured surface and this fake is
+        /// not; which of the two it borrows makes no difference to what is
+        /// under test here.
+        const CONDITIONING: ConditioningConfig = GEM;
 
         fn read(&mut self) -> Result<RawControls, Self::Error> {
             self.reads = self.reads.saturating_add(1);

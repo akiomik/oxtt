@@ -150,8 +150,8 @@ Two things are worth recording against the Pi's numbers.
 ### What it says about the deadband
 
 The whole observed excursion — over 60 seconds, at two positions, on six
-channels — is under one third of `DEADBAND_COUNTS` as the Raspberry Pi
-declares it. Eight counts here would be silent with an enormous margin, and
+channels — is under one third of the `deadband_counts` the Raspberry Pi
+declares in `PiControls::CONDITIONING`. Eight counts here would be silent with an enormous margin, and
 that margin is spent on nothing: as a fraction of travel it is 0.8% and about
 128 distinct positions across a sweep.
 
@@ -193,7 +193,7 @@ Runs are `oxtt-bela --controls --preset safe-start --adc-gain-db -12
   spare. What this measures is the debounce. Reads arrive every 2 ms, an
   alternate-action contact chatters for longer than that, and every transition
   the mapping layer believed would be a publish of its own;
-  `BYPASS_DEBOUNCE_READS` requires fifteen consecutive agreeing reads — up to
+  `surfaces::GEM`'s `debounce_reads` requires fifteen consecutive agreeing reads — up to
   30 ms — before the position changes. Eleven is that working, counted rather
   than heard, and it is the sharp form of the by-ear result below.
 - **The processor accepted every snapshot** the mapping layer produced

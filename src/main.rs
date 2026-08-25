@@ -10,7 +10,7 @@ use clap::Parser;
 use oxtt::{cli::Cli, jack_host, params::OttParams};
 
 #[cfg(feature = "pi-controls")]
-use oxtt::control::{ControlHandle, DEFAULT_POLL_INTERVAL, PiControlError, PiControls};
+use oxtt::control::{ControlHandle, PiControlError, PiControls};
 
 /// Starts the Raspberry Pi control surface if `--controls` asked for it.
 ///
@@ -30,11 +30,9 @@ fn spawn_control_surface(
     // default; the four pot-driven fields are the hardware's from the first
     // successful read onward.
     let source = PiControls::new()?;
-    Ok(Some(ControlHandle::spawn(
-        source,
-        params,
-        DEFAULT_POLL_INTERVAL,
-    )))
+    // `None` for the rate `PiControls::CONDITIONING` was measured at, which
+    // is the one the filter and the debounce mean.
+    Ok(Some(ControlHandle::spawn(source, params, None)))
 }
 
 fn main() -> ExitCode {
