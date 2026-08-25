@@ -3,17 +3,17 @@
 //! The only place in this program where a pot is given a meaning. Everything
 //! before it — the read, the jitter filter, the deadband, the debounce, the
 //! normalisation onto [`PotTravel`] — is effect-independent and shared
-//! (`crate::control::conditioning`); everything after it is the DSP.
+//! (`effectkit_controls`); everything after it is the DSP.
 //!
 //! **This is the one file where a wiring mistake is silent.** The pots are
 //! named for their ADC channels, so swapping two of the six lines below still
 //! compiles, still validates and still makes sound — it just moves the wrong
-//! knob. `bela_host::controls`'s `channel_order_is_pot_order` is the test that
-//! pins the other end of that chain down.
+//! knob. `effectkit_controls::gem`'s `channel_order_is_pot_order` is the test
+//! that pins the other end of that chain down.
 
 use crate::params::{IoGain, NormalizedF32, OttParams, OttProcessorUpdate};
 
-use super::conditioning::{ConditionedControls, PotTravel};
+use effectkit_controls::{ConditionedControls, PotTravel};
 
 /// The dB value the gain pots produce at their lower stop.
 ///
@@ -53,7 +53,7 @@ const GAIN_SPAN_DB: f32 = 48.0;
 ///
 /// A pure function of its two arguments, and free of panics and allocation.
 /// Both are required by
-/// [`SixPotBypassConditioner::update`](super::conditioning::SixPotBypassConditioner::update):
+/// [`SixPotBypassConditioner::update`](effectkit_controls::SixPotBypassConditioner::update):
 /// the first because its publish gate assumes equal inputs assign equal
 /// outputs, the second because on a Bela this runs inside the audio callback
 /// (docs/contracts.md §6).
@@ -125,12 +125,11 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::control::conditioning::{ConditioningConfig, SixPotBypassConditioner};
-    use crate::control::{
-        DeadbandCounts, DebounceReads, FilterCoefficient, POT_POSITION_MAX, PollHz, PotPosition,
-        Pots, RawControls,
-    };
     use crate::params::Preset;
+    use effectkit_controls::{
+        ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, POT_POSITION_MAX,
+        PollHz, PotPosition, Pots, RawControls, SixPotBypassConditioner,
+    };
 
     const PROPERTY_CASES: u32 = 128;
     const SAMPLE_RATE: f32 = 48_000.0;
@@ -337,7 +336,7 @@ mod tests {
     fn the_width_of_the_deadband_is_the_callers() {
         /// A move too small for the Pi's band and large enough for the Gem's.
         const STEP: u16 = 5;
-        /// The Bela Gem Stereo's measured figure (`src/bela_host/controls.rs`).
+        /// The Bela Gem Stereo's measured figure (`effectkit_controls::surfaces::GEM`).
         const NARROW_DEADBAND_COUNTS: f32 = 3.0;
         let held = 500;
         let moved = held + STEP;

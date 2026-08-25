@@ -210,7 +210,7 @@ switch), so this is a mapping to keep rather than to re-derive.
    no short. Do this last, after everything is inserted, and before power.
 3. Across the switch: continuity in one resting position, open in the other, and
    it **stays** in whichever one you left it in. That is the part working
-   correctly — the bypass logic in `crates/oxtt/src/control/conditioning.rs` takes the switch's
+   correctly — the bypass logic in `crates/effectkit-controls/src/conditioning.rs` takes the switch's
    resting position as the bypass state itself. A switch that is only continuous
    while you hold it and springs back open is a momentary one, which is the
    wrong part; one that reads the same in both positions is a wiring fault or a

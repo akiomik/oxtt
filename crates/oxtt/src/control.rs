@@ -1,14 +1,16 @@
-//! The physical control surface: six potentiometers and a latching bypass switch.
+//! oxtt's end of the physical control surface.
 //!
-//! Split into layers, so that the ones with behaviour worth testing are shared
-//! by every platform:
+//! The surface itself — six potentiometers, a latching bypass switch, and the
+//! conditioning that turns a hardware read into usable travel — belongs to
+//! [`effectkit_controls`] and knows nothing about this effect. What is left
+//! here is the part that does:
 //!
-//! | Layer | Responsibility | Scope |
+//! | Layer | Responsibility | Where |
 //! |---|---|---|
-//! | A: raw read | produce a [`RawControls`] value | platform-specific (Raspberry Pi SPI/GPIO, Bela analog/digital inputs) |
-//! | B1: conditioning | jitter filter, deadband, switch debounce, normalisation onto [`PotTravel`] → [`ConditionedControls`] | shared by every effect |
-//! | B2: assignment | what each pot *does*: [`ConditionedControls`] → [`OttProcessorUpdate`](crate::params::OttProcessorUpdate) | this effect only |
-//! | C: transport | control thread plus a `triple_buffer` handoff into the audio callback | Raspberry Pi only |
+//! | A: raw read | produce a `RawControls` value | `effectkit_controls::gem`, or [`PiControls`] (module `pi`) |
+//! | B1: conditioning | jitter filter, deadband, debounce, normalisation | `effectkit_controls::SixPotBypassConditioner` |
+//! | **B2: assignment** | **what each pot *does*** | [`assign`], here |
+//! | **C: transport** | **control thread plus a `triple_buffer` handoff into the audio callback** | [`ControlHandle`], here, JACK only |
 //!
 //! **B1 and B2 are separate because only B1 generalises.** A second effect on
 //! the same six pots and the same switch wants the identical filter, deadband
@@ -16,41 +18,31 @@
 //! leaves neither half owning the base parameters, so whoever joins the two
 //! owns them: the control thread under JACK, `OttApplication` under Bela.
 //!
-//! [`SixPotBypassConditioner`] is pure: no I/O, no threads, no clock, no
-//! allocation, and no panic. That is the entire reason for the split. On a
-//! Raspberry Pi the audio callback cannot read SPI itself, so layer C exists
-//! to move a finished `OttProcessorUpdate` across the thread boundary without a
-//! lock (docs/contracts.md §6). On a Bela the controls are read inside its own
-//! real-time callback, which then drives B1 and B2 *directly* and skips layer C
-//! entirely — which is only possible because both obey the same prohibitions
-//! as the audio callback in docs/contracts.md §6 (ADR 0011). Layer C is
-//! therefore compiled only under the `jack-host` feature.
+//! Layer C exists because on a Raspberry Pi the audio callback cannot read SPI
+//! itself, so a finished `OttProcessorUpdate` has to cross a thread boundary
+//! without a lock (docs/contracts.md §6). On a Bela the controls are read
+//! inside the audio callback, which then runs B1 and B2 *directly* and skips
+//! layer C entirely — possible only because both obey the same prohibitions as
+//! the callback (ADR 0011). Layer C is therefore compiled only under the
+//! `jack-host` feature.
 //!
-//! The seam between layer A and layer B is the [`RawControls`] *value*, not a
-//! trait. [`ControlSource`] is the Raspberry Pi's shape for producing one —
-//! hardware owned by the implementation, polled from a thread, able to fail —
-//! and the Bela host matches none of those, so it builds a `RawControls`
-//! directly (`crate::bela_host`). The one `ControlSource` implementation that
-//! talks to hardware is `PiControls` (module `pi`), compiled only under the
-//! `pi-controls` feature — deliberately not linked here, because `rppal` is
-//! Linux-only and this module has to document itself on any platform.
+//! It has not been generalised into `effectkit-controls` along with B1 because
+//! it has one user. A transport layer worth sharing would take the assignment
+//! as a type parameter or a closure, and there is no second implementation to
+//! check that guess against — hyperglare is Bela-only, so one is not coming
+//! from there either.
+//!
+//! [`PiControls`] (module `pi`) is compiled only under the `pi-controls`
+//! feature, because `rppal` is Linux-only.
 
 mod assign;
-pub(crate) mod conditioning;
 #[cfg(feature = "pi-controls")]
 mod pi;
-mod raw;
-pub mod surfaces;
 #[cfg(feature = "jack-host")]
 mod thread;
 
 pub use assign::assign;
-pub use conditioning::{ConditionedControls, PotTravel, SixPotBypassConditioner};
-pub use conditioning::{
-    ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, PollHz,
-};
 #[cfg(feature = "pi-controls")]
 pub use pi::{PiControlError, PiControls};
-pub use raw::{ControlSource, POT_POSITION_MAX, PotPosition, Pots, RawControls};
 #[cfg(feature = "jack-host")]
 pub use thread::ControlHandle;

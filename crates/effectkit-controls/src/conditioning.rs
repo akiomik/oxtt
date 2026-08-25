@@ -1,5 +1,5 @@
 //! What layer B needs to know about the surface it is conditioning (see
-//! [`crate::control`] for the layering).
+//! [`crate`] for the layering).
 //!
 //! [`SixPotBypassConditioner`] is the whole of it: jitter filter, hysteresis
 //! deadband, switch debounce, and normalisation onto [`PotTravel`]. What comes
@@ -50,7 +50,7 @@ impl FilterCoefficient {
     }
 }
 
-/// A hysteresis deadband width, in [`PotPosition`](super::PotPosition) steps.
+/// A hysteresis deadband width, in [`PotPosition`](crate::PotPosition) steps.
 ///
 /// Zero is admitted: a surface quiet enough to need no deadband is a
 /// legitimate configuration, and refusing it would be this type inventing a
@@ -169,9 +169,9 @@ impl PollHz {
 ///
 /// ADR 0012 decided the deadband is the surface's, not this layer's. A
 /// `Default::default()` would be a way back to a figure nobody measured. Each
-/// layer A supplies its own: a [`ControlSource`](super::ControlSource) through
+/// layer A supplies its own: a [`ControlSource`](crate::ControlSource) through
 /// its `CONDITIONING` constant, a layer A that is not a `ControlSource`
-/// through a named constant in [`surfaces`](super::surfaces).
+/// through a named constant in [`surfaces`](crate::surfaces).
 ///
 /// [`ConditioningConfig::new`] is not a second way in — it is the construction
 /// boundary that keeps the four values in range. The named constants are the
@@ -181,9 +181,9 @@ impl PollHz {
 ///
 /// The deadband is applied before normalisation, so counts is the unit it is
 /// meaningful in. That makes this type depend on the converter scale
-/// [`POT_POSITION_MAX`](super::POT_POSITION_MAX) fixes, which the seam out of
+/// [`POT_POSITION_MAX`](crate::POT_POSITION_MAX) fixes, which the seam out of
 /// layer B deliberately does not
-/// ([`PotTravel`](super::PotTravel) is a fraction of travel). The asymmetry is
+/// ([`PotTravel`](crate::PotTravel) is a fraction of travel). The asymmetry is
 /// intended: a deadband quoted as a fraction would have to be converted back
 /// before it could be compared against anything.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -221,7 +221,7 @@ impl ConditioningConfig {
     }
 
     /// The hysteresis band a filtered reading must clear to be taken
-    /// seriously, in [`PotPosition`](super::PotPosition) steps.
+    /// seriously, in [`PotPosition`](crate::PotPosition) steps.
     ///
     /// Hysteresis, not quantisation: once a move clears the band the value
     /// jumps all the way, so repeated small moves in one direction cannot
@@ -304,7 +304,7 @@ impl PotTravel {
         }
     }
 
-    /// Converts a position on [`PotPosition`](super::PotPosition)'s scale into
+    /// Converts a position on [`PotPosition`](crate::PotPosition)'s scale into
     /// a fraction of travel, saturating at both ends.
     ///
     /// Takes no full-scale argument. Passing one would add a correspondence
@@ -575,8 +575,8 @@ impl SixPotBypassConditioner {
 #[allow(clippy::unwrap_used, clippy::float_cmp)]
 mod tests {
     use super::*;
-    use crate::control::PotPosition;
-    use crate::control::surfaces::GEM;
+    use crate::raw::PotPosition;
+    use crate::surfaces::GEM;
 
     #[test]
     fn a_filter_coefficient_spans_the_open_zero_to_one_range() {

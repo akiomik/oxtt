@@ -13,12 +13,13 @@ use bela::{
     SetupContext, ThreadInfo,
 };
 
-use super::controls::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
-use crate::control::surfaces::GEM;
-use crate::control::{SixPotBypassConditioner, assign};
+use crate::control::assign;
 use crate::dsp::OttProcessor;
 use crate::params::OttParams;
 use effectkit::metering::{ClipIndicator, InputMeter};
+use effectkit_controls::SixPotBypassConditioner;
+use effectkit_controls::gem::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
+use effectkit_controls::surfaces::GEM;
 
 /// Analog frame the control surface is read from.
 ///

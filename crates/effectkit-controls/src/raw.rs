@@ -1,5 +1,5 @@
 //! Layer A of the control surface: what a hardware read produces, and the
-//! trait that produces it (see [`crate::control`] for the layering).
+//! trait that produces it (see [`crate`] for the layering).
 //!
 //! Nothing here touches hardware. The Raspberry Pi implementation (SPI to the
 //! MCP3008, GPIO for the bypass switch) belongs behind the `pi-controls`
@@ -26,7 +26,7 @@ pub const POT_POSITION_MAX: u16 = 1023;
 ///
 /// A quantised position rather than one converter's output: the Pi's
 /// MCP3008 produces this scale directly, and a platform reading its pots
-/// some other way maps onto it (`src/bela_host/controls.rs`). What travels
+/// some other way maps onto it (`crate::gem`). What travels
 /// through the mapping layer is where the pot is, not how it was measured.
 ///
 /// Only the ceiling needs a validator; `u16` already excludes negative
@@ -95,7 +95,7 @@ impl PotPosition {
 /// The cost of the physical names is that a mis-wired assignment is silent —
 /// the Time knob moving Depth still makes sound — so the assignment is the
 /// one place that can be wrong, and each effect owes a test that pins the
-/// channel order down (`bela_host::controls`'s `channel_order_is_pot_order`
+/// channel order down ([`gem`](crate::gem)'s `channel_order_is_pot_order`
 /// is the model).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pots<T> {
@@ -169,7 +169,7 @@ pub struct RawControls {
     /// electrical level is still inverted by the reading layer: this field is
     /// the switch's logical position, not its pin level. Debouncing that
     /// position is not part of this field's meaning — see
-    /// [`SixPotBypassConditioner::update`](crate::control::SixPotBypassConditioner::update).
+    /// [`SixPotBypassConditioner::update`](crate::SixPotBypassConditioner::update).
     pub bypass_engaged: bool,
 }
 
@@ -183,7 +183,7 @@ pub struct RawControls {
 /// every platform. The Bela host reads its pots out of the block context it
 /// is handed, so it has no `self` to own them and nothing to fail; it builds
 /// a [`RawControls`] directly instead of implementing this trait (see
-/// `src/bela_host/controls.rs` and ADR 0010).
+/// [`gem`](crate::gem) and ADR 0010).
 ///
 /// What both platforms share is the *value*: [`RawControls`] is the seam
 /// between the hardware read and the mapping layer, and that is where the
@@ -227,7 +227,7 @@ mod tests {
     use core::convert::Infallible;
 
     use super::*;
-    use crate::control::surfaces::GEM;
+    use crate::surfaces::GEM;
 
     #[test]
     fn pot_position_accepts_the_full_scale_and_rejects_above_it() {

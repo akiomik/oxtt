@@ -40,10 +40,10 @@ use rppal::spi::Error as SpiError;
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use thiserror::Error;
 
-use super::conditioning::{
-    ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, PollHz,
+use effectkit_controls::{
+    ConditioningConfig, ControlSource, DeadbandCounts, DebounceReads, FilterCoefficient, PollHz,
+    PotPosition, PotPositionError, Pots, RawControls,
 };
-use super::raw::{ControlSource, PotPosition, PotPositionError, Pots, RawControls};
 
 /// GPIO pin (BCM numbering) the bypass switch is wired to.
 ///

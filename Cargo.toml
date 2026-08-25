@@ -5,7 +5,12 @@ members = ["crates/*"]
 # unconditionally and `rppal` is Linux-only, so leaving it in would break the
 # no-selector commands on the macOS machine the DSP is developed on. Building
 # it is a `-p oxtt-pi-tools` or a Linux `--workspace` away.
-default-members = ["crates/effectkit", "crates/oxtt", "crates/oxtt-jack-tools"]
+default-members = [
+    "crates/effectkit",
+    "crates/effectkit-controls",
+    "crates/oxtt",
+    "crates/oxtt-jack-tools",
+]
 resolver = "3"
 
 [workspace.dependencies]

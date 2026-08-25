@@ -1,0 +1,24 @@
+[package]
+name = "effectkit-controls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "A six-potentiometer, latching-bypass control surface: what a hardware read produces, and how it is conditioned"
+readme = "../../README.md"
+# Not published. The types here fix one panel's contract — a 10-bit pot scale,
+# six channels in ADC order, one latching switch, and a Gem's converter ratio —
+# and a second panel has not existed yet to say which of those are general.
+# Revisit when one does; see `effectkit`'s crate documentation.
+publish = false
+
+[dependencies]
+nutype = "0.7.0"
+
+[dev-dependencies]
+no-panic = "0.1"
+proptest = { workspace = true }
+
+[lints]
+workspace = true

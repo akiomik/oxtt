@@ -1,8 +1,13 @@
-//! Layer A for the Bela host: turning one frame of analog readings and one
+//! Layer A for a Bela Gem Stereo: turning one frame of analog readings and one
 //! switch level into a [`RawControls`] (docs/architecture.md, ADR 0011).
 //!
+//! Named for the board, not for the shape of the data, because the board is in
+//! here: `POT_SUPPLY_FRACTION` is the ratio between the ADS8166's 4.096 V
+//! reference and the 3.3 V rail the pots are wired across. A general name
+//! would promise more than the code does.
+//!
 //! Everything here is a free function over plain values rather than a
-//! [`ControlSource`](crate::control::ControlSource) implementation. That trait
+//! [`ControlSource`](crate::ControlSource) implementation. That trait
 //! describes the Raspberry Pi's arrangement — hardware owned by the reader,
 //! polled from a thread, able to fail — and none of the three is true here:
 //! the samples arrive in the block context, `render_pre` already has them, and
@@ -12,10 +17,10 @@
 //! Keeping the conversion out of the context also keeps it testable: `bela`
 //! offers no supported way to build a `BlockContext` on a development machine
 //! (bela-rs#113), so the three lines that touch one live in
-//! [`super::app`] and everything with a decision in it lives here.
+//! `oxtt`'s Bela application and everything with a decision in it lives here.
 
-use crate::control::surfaces::GEM;
-use crate::control::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
+use crate::raw::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
+use crate::surfaces::GEM;
 
 /// The reading a pot wired across the 3.3 V rail produces at its upper stop.
 ///
@@ -120,7 +125,7 @@ fn next_position(readings: &mut impl Iterator<Item = f32>) -> PotPosition {
 /// *read*, and its debounce counts reads, so the caller's read rate is what
 /// turns those constants into times (`src/control/conditioning.rs`). This board's
 /// figures say what rate they mean —
-/// [`GEM.nominal_poll_hz()`](crate::control::surfaces::GEM) is 500 Hz — and
+/// [`GEM.nominal_poll_hz()`](crate::surfaces::GEM) is 500 Hz — and
 /// Bela's callback runs far faster than that — 3000 blocks a second at 48 kHz with a period
 /// of 16 — which would shrink the bypass debounce from 28 ms to 5 ms, below
 /// the make/break time of the latching switch it exists to ride out.
@@ -199,7 +204,7 @@ impl PollDecimator {
     /// The read rate this divisor actually produces, for the host to report.
     ///
     /// Worth printing because it is only exactly
-    /// [`GEM.nominal_poll_hz()`](crate::control::surfaces::GEM) at some period
+    /// [`GEM.nominal_poll_hz()`](crate::surfaces::GEM) at some period
     /// sizes; at others the debounce and filter time constants scale with the
     /// difference.
     #[must_use]
@@ -272,7 +277,8 @@ mod tests {
     }
 
     /// A board configured with fewer analog inputs than the surface needs is
-    /// refused before the audio system exists (`super::app`), so this is the
+    /// refused before the audio system exists (the host's application type),
+    /// so this is the
     /// belt to that braces: whatever reaches here still cannot panic.
     #[test]
     fn a_short_frame_fills_the_rest_with_the_quiet_floor() {

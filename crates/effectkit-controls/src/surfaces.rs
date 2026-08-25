@@ -4,7 +4,7 @@
 //! A [`ControlSource`](super::ControlSource) carries its own settings on the
 //! trait, next to the code that reads the hardware. A layer A that is a set of
 //! free functions instead — the Bela host's, which is handed its samples and
-//! cannot fail (`src/bela_host/controls.rs`) — has no trait to put them on,
+//! cannot fail (`crate::gem`) — has no trait to put them on,
 //! and gets a named constant here.
 //!
 //! **The rule for where a `ConditioningConfig` lives is "beside the layer A it
@@ -45,7 +45,7 @@ use super::conditioning::{
 /// The filter and the debounce are defined per read, so they carry over
 /// exactly as long as the read rate does, which is what the nominal 500 Hz
 /// here says: the Bela host divides its block rate down to land on or near it
-/// rather than reading on every block (`bela_host::controls::PollDecimator`).
+/// rather than reading on every block ([`gem::PollDecimator`](crate::gem::PollDecimator)).
 pub const GEM: ConditioningConfig = ConditioningConfig::new(
     FilterCoefficient::new_const(0.2),
     DeadbandCounts::new_const(3.0),

@@ -27,8 +27,8 @@ validated components. The names in this ADR map onto it as follows:
 
 | Then | Now |
 |---|---|
-| `ControlSource::DEADBAND_COUNTS` | `ControlSource::CONDITIONING`, a whole `ConditioningConfig` |
-| `bela_host::controls::DEADBAND_COUNTS` | `control::surfaces::GEM` |
+| `ControlSource::DEADBAND_COUNTS` | `effectkit_controls::ControlSource::CONDITIONING`, a whole `ConditioningConfig` |
+| `bela_host::controls::DEADBAND_COUNTS` | `effectkit_controls::surfaces::GEM` |
 | `FILTER_COEFFICIENT`, `BYPASS_DEBOUNCE_READS` (layer B) | fields of each surface's config |
 | `DEFAULT_POLL_INTERVAL` (layer C) | derived from `CONDITIONING.nominal_poll_hz()` |
 

@@ -21,7 +21,7 @@ Two things are deliberately *not* verified here. The audio path itself is
 covered by [`usb-audio-verification.md`](usb-audio-verification.md) and its
 `128×3` baseline is reused unchanged; the pure conditioning logic (filter,
 deadband, debounce, explicit bypass-level transport) is covered by the unit and property tests
-in `crates/oxtt/src/control/conditioning.rs` and needs no hardware. What this document verifies
+in `crates/effectkit-controls/src/conditioning.rs` and needs no hardware. What this document verifies
 is the part that only real hardware can show: what the assembled surface
 actually reads, and whether the whole chain from a knob to the audio callback
 behaves as `docs/contracts.md` §8 says it must.

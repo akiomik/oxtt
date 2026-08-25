@@ -6,10 +6,14 @@
 //! processing itself is in [`app`], which is deliberately free of libbela so
 //! that it compiles and tests on a development machine — only [`run`] needs a
 //! board, and it is the only thing here behind `cfg(bela_device)`.
+//!
+//! Reading the board's analog and digital inputs is not here either: that is
+//! layer A of the control surface and it depends on nothing from libbela, so
+//! it lives in [`effectkit_controls::gem`] where a second effect on the same
+//! board can use it.
 
 pub mod app;
 pub mod cli;
-pub mod controls;
 
 use core::num::NonZeroU32;
 
@@ -19,7 +23,6 @@ use crate::params::ConfigError;
 
 pub use app::{OttApplication, OttRenderState, RunDiagnostics};
 pub use cli::BelaCli;
-pub use controls::{ANALOG_CHANNELS_USED, PollDecimator, pot_position, raw_controls};
 
 /// Audio sample rate oxtt asks a Bela for.
 ///
@@ -245,7 +248,8 @@ pub use device::run;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::surfaces::GEM;
+    use effectkit_controls::gem::PollDecimator;
+    use effectkit_controls::surfaces::GEM;
 
     /// The reason 48 kHz is not the board's 44.1 kHz default: at the default
     /// period it divides exactly onto the rate the mapping layer's constants

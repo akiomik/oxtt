@@ -39,8 +39,7 @@ use triple_buffer::{Input, Output, TripleBuffer};
 use crate::params::{OttParams, OttProcessorUpdate};
 
 use super::assign::assign;
-use super::conditioning::SixPotBypassConditioner;
-use super::raw::ControlSource;
+use effectkit_controls::{ControlSource, SixPotBypassConditioner};
 
 /// The interval a nonsensical nominal poll rate falls back to.
 ///
@@ -268,11 +267,12 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::control::ConditioningConfig;
-    use crate::control::surfaces::GEM;
-    use crate::control::{POT_POSITION_MAX, PotPosition, Pots, RawControls};
     use crate::dsp::OttProcessor;
     use crate::params::Preset;
+    use effectkit_controls::surfaces::GEM;
+    use effectkit_controls::{
+        ConditioningConfig, POT_POSITION_MAX, PotPosition, Pots, RawControls,
+    };
 
     /// Long enough that a loaded CI machine cannot hit it by being slow, short
     /// enough that a genuinely stuck thread fails the run rather than hanging it.

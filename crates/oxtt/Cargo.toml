@@ -44,6 +44,7 @@ bela = { version = "0.7", optional = true }
 clap = { version = "4", features = ["derive"] }
 ebur128 = "0.1.10"
 effectkit = { path = "../effectkit" }
+effectkit-controls = { path = "../effectkit-controls" }
 hound = "3.5.1"
 jack = { workspace = true, optional = true }
 nutype = "0.7.0"
