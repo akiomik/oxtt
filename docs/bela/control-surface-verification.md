@@ -23,7 +23,7 @@ What is deliberately *not* verified here: the audio path itself, covered by
 [`audio-verification.md`](audio-verification.md); the board's noise floor,
 covered by [`noise-floor.md`](noise-floor.md); and the conditioning logic
 (filter, deadband, debounce, explicit bypass level), covered by the unit and
-property tests in `src/control/mapping.rs` and `src/bela_host/controls.rs`,
+property tests in `src/control/assign.rs` and `src/bela_host/controls.rs`,
 which need no hardware.
 
 ## 1. Hardware under test

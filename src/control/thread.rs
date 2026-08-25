@@ -4,8 +4,14 @@
 //! An MCP3008 read is SPI traffic — a blocking `ioctl` — so it cannot happen
 //! inside `AudioProcessHandler::process` (docs/contracts.md §6). This layer is
 //! the seam that keeps it out: a plain OS thread polls the [`ControlSource`],
-//! drives [`ControlMapping`], and hands finished [`OttProcessorUpdate`] values to
-//! the callback through a `triple_buffer`.
+//! conditions and assigns what it reads, and hands finished
+//! [`OttProcessorUpdate`] values to the callback through a `triple_buffer`.
+//!
+//! This is also where the two halves of layer B are composed. Conditioning
+//! ([`SixPotBypassConditioner`], shared by every effect) and assignment
+//! ([`assign`], this effect's) are separate so that a second effect can reuse
+//! the first, which leaves the base parameters owned by whoever joins them —
+//! here, and by `OttApplication` on a Bela.
 //!
 //! The triple buffer is what makes the *reading* side legal, which is the side
 //! that matters. `Output::update` is a single `AcqRel` swap plus an index
@@ -32,7 +38,8 @@ use triple_buffer::{Input, Output, TripleBuffer};
 
 use crate::params::{OttParams, OttProcessorUpdate};
 
-use super::mapping::ControlMapping;
+use super::assign::assign;
+use super::conditioning::SixPotBypassConditioner;
 use super::raw::ControlSource;
 
 /// The interval a nonsensical nominal poll rate falls back to.
@@ -90,8 +97,8 @@ impl ControlHandle {
     /// `base` is the CLI parameter set. It seeds both ends with an explicitly
     /// disengaged bypass level, so a callback that reads before the first
     /// successful poll sees exactly the parameters the processor was built
-    /// with. [`ControlMapping`] overlays the six pot-driven fields from the
-    /// first reading onward.
+    /// with. The six pot-driven fields become the hardware's from the first
+    /// reading onward.
     ///
     /// `poll_interval` is `None` for the rate the source's own conditioning
     /// was measured at, which is what a run wants. It is an override rather
@@ -127,7 +134,8 @@ impl ControlHandle {
             thread::spawn(move || {
                 poll_until_stopped(
                     source,
-                    ControlMapping::new(base, S::CONDITIONING),
+                    base,
+                    SixPotBypassConditioner::new(S::CONDITIONING),
                     publisher,
                     &stop,
                     &read_failures,
@@ -199,7 +207,8 @@ impl ControlHandle {
 #[allow(clippy::disallowed_methods)] // `thread::sleep`; see `ControlHandle::spawn`.
 fn poll_until_stopped<S: ControlSource>(
     mut source: S,
-    mut mapping: ControlMapping,
+    base: OttParams,
+    mut conditioner: SixPotBypassConditioner,
     mut publisher: Input<OttProcessorUpdate>,
     stop: &AtomicBool,
     read_failures: &AtomicU64,
@@ -211,8 +220,8 @@ fn poll_until_stopped<S: ControlSource>(
             // nothing new for the callback to apply and the buffer is left
             // holding the last published snapshot.
             Ok(raw) => {
-                if let Some(params) = mapping.update(raw) {
-                    publisher.write(params);
+                if let Some(controls) = conditioner.update(raw) {
+                    publisher.write(assign(base, controls));
                 }
             }
             Err(error) => {
@@ -452,7 +461,7 @@ mod tests {
             );
 
             // Let the thread poll many more times; a still pot must fall in
-            // `ControlMapping`'s deadband every time and publish nothing.
+            // the conditioner's deadband every time and publish nothing.
             let polled_by_now = reads.load(Ordering::Acquire).saturating_add(50);
             wait_until("the thread to poll 50 more times", || {
                 reads.load(Ordering::Acquire) >= polled_by_now

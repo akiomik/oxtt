@@ -21,7 +21,7 @@ Two things are deliberately *not* verified here. The audio path itself is
 covered by [`usb-audio-verification.md`](usb-audio-verification.md) and its
 `128×3` baseline is reused unchanged; the pure conditioning logic (filter,
 deadband, debounce, explicit bypass-level transport) is covered by the unit and property tests
-in `src/control/mapping.rs` and needs no hardware. What this document verifies
+in `src/control/conditioning.rs` and needs no hardware. What this document verifies
 is the part that only real hardware can show: what the assembled surface
 actually reads, and whether the whole chain from a knob to the audio callback
 behaves as `docs/contracts.md` §8 says it must.
@@ -157,7 +157,7 @@ are checked against.
   across a full sweep.
 
 Because the noise gain is exactly 1/3, keeping three sigma of margin reduces
-to `deadband >= σ` of the *raw* jitter. `src/control/mapping.rs` records that
+to `deadband >= σ` of the *raw* jitter. `ConditioningConfig` records that
 as the form to re-check against if the pots, the wiring, or the ADC change,
 and carries the derivation; it is not repeated here. Against this measurement,
 8.0 ≥ 6.39 holds with room to spare.
@@ -173,7 +173,7 @@ move.
 
 All six channels are the same part in the same divider on the same converter,
 so this measurement judges all of them, gain pots included. On the two gain
-pots the deadband also lands on a dB figure: `src/control/mapping.rs` works it
+pots the deadband also lands on a dB figure: `src/control/assign.rs` works it
 out as `8 / 1023 * 48` ≈ 0.375 dB across the pots' 48 dB span, which is well
 under the roughly 1 dB step a listener picks out on programme material.
 

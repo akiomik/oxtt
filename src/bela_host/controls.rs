@@ -74,7 +74,7 @@ pub fn pot_position(reading: f32) -> PotPosition {
     // Unreachable in practice — the clamp guarantees the range — so this
     // falls back rather than unwrapping: it runs inside the audio callback,
     // where a panic aborts the process (docs/contracts.md §6). The same
-    // pattern as `normalized_or` in `src/control/mapping.rs`.
+    // pattern as `PotTravel::from_counts` in `src/control/conditioning.rs`.
     PotPosition::try_new(position).unwrap_or(POT_POSITION_FLOOR)
 }
 
@@ -118,7 +118,7 @@ fn next_position(readings: &mut impl Iterator<Item = f32>) -> PotPosition {
 ///
 /// The mapping layer has no clock: its filter coefficient is defined per
 /// *read*, and its debounce counts reads, so the caller's read rate is what
-/// turns those constants into times (`src/control/mapping.rs`). This board's
+/// turns those constants into times (`src/control/conditioning.rs`). This board's
 /// figures say what rate they mean —
 /// [`GEM.nominal_poll_hz()`](crate::control::surfaces::GEM) is 500 Hz — and
 /// Bela's callback runs far faster than that — 3000 blocks a second at 48 kHz with a period

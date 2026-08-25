@@ -306,7 +306,7 @@ impl ControlSource for PiControls {
         // until a hand moves the switch back. `RawControls::bypass_engaged` is
         // the switch's logical position, so the level is inverted here and
         // nowhere else. Every poll reads the raw level; debouncing it belongs
-        // to `ControlMapping`, which has no hardware to know about.
+        // to the conditioning layer, which has no hardware to know about.
         let bypass_engaged = self.bypass.read() == Level::Low;
 
         Ok(RawControls {

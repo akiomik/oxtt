@@ -203,7 +203,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-Separately, `cargo test --release` also proves `OttProcessor::process`/`process_frame`/`reset` and `ControlMapping::update` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+Separately, `cargo test --release` also proves `OttProcessor::process`/`process_frame`/`reset`/`apply_update`, `SixPotBypassConditioner::update` and `control::assign` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
 
 The suite is organized by module and none of it requires a running JACK server:
 
@@ -214,7 +214,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `src/dsp/smooth.rs` — parameter-smoothing tests
-- `src/control/` — control-surface conditioning (jitter filter, deadband, explicit bypass level), including that the deadband's width is the caller's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)), and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
+- `src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
 - `src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording
 
 See [contracts.md](contracts.md) for the guarantees those tests protect.

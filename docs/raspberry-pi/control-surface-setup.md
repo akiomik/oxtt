@@ -77,7 +77,7 @@ Generic parts; no specific vendor part number is assumed.
 
 ### Why the pots must be linear taper
 
-`src/control/mapping.rs` converts a raw count to a normalized parameter with a
+`src/control/assign.rs` converts a pot's travel to a normalized parameter with a
 plain `raw / 1023` and no curve fitting, and `oxtt-pi-tools` displays the same
 scale. That mapping is only correct for a linear-taper pot. A log/audio-taper
 pot will still read 0–1023 end to end and will still look fine in
@@ -210,7 +210,7 @@ switch), so this is a mapping to keep rather than to re-derive.
    no short. Do this last, after everything is inserted, and before power.
 3. Across the switch: continuity in one resting position, open in the other, and
    it **stays** in whichever one you left it in. That is the part working
-   correctly — the bypass logic in `src/control/mapping.rs` takes the switch's
+   correctly — the bypass logic in `src/control/conditioning.rs` takes the switch's
    resting position as the bypass state itself. A switch that is only continuous
    while you hold it and springs back open is a momentary one, which is the
    wrong part; one that reads the same in both positions is a wiring fault or a
@@ -408,7 +408,7 @@ Depth=991 (0.969) Time=1023 (1.000) Upward=1017 (0.994) Downward=1002 (0.980) In
 
 The four dynamics channels are shown as the normalized `0.000..=1.000` the
 effect acts on; the two gain channels are shown in dB, on the same
-`-24..+24` map `src/control/mapping.rs` uses, so a centred gain pot reads
+`-24..+24` map `src/control/assign.rs` uses, so a centred gain pot reads
 approximately `+0.0 dB`.
 
 If it fails to start, the error says which device: an SPI error sends you back

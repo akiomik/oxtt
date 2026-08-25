@@ -13,7 +13,8 @@ main.rs
   -> cli::Cli::parse              CLI parsing (clap), presets, per-field validation
   -> control::ControlHandle::spawn  control thread (--controls, `pi-controls` builds only)
        -> control::PiControls        layer A: six MCP3008 pots on SPI0/CE0, latching bypass switch on GPIO17
-       -> control::ControlMapping    layer B: jitter filter, deadband -> OttProcessorUpdate
+       -> SixPotBypassConditioner    layer B1: jitter filter, deadband, debounce
+       -> control::assign            layer B2: travel -> OttProcessorUpdate
        -> triple_buffer::Input       layer C: publishes snapshots toward the audio callback
   -> jack_host::run               JACK client lifecycle, port registration
        -> AudioProcessHandler     audio callback (real-time thread)
@@ -40,7 +41,8 @@ bin/oxtt-bela.rs
             render_pre               layer A + layer B + the handoff, all in one callback
                  -> controls::PollDecimator     read on every nth block (~500 Hz)
                  -> controls::raw_controls      layer A: A0-A5 pots, D0 bypass switch
-                 -> control::ControlMapping     layer B: unchanged, shared with JACK
+                 -> SixPotBypassConditioner     layer B1: shared with JACK, and with any effect
+                 -> control::assign             layer B2: unchanged, shared with JACK
                  -> OttProcessor::apply_update           straight into each render state
             render                   RenderContext::audio_io -> frames()
                  -> dsp::OttProcessor::process_frame     (same DSP as above)
@@ -55,7 +57,7 @@ Only `bela_host::run` needs a board. Everything else above it — the applicatio
 
 The two hosts reach the DSP through different doors for the same reason they exist separately: JACK hands over four per-channel buffers, so it calls `process`; Bela hands over interleaved frames paired with their outputs, so it calls `process_frame` and needs no intermediate buffer. `process` is a loop over `process_frame`, and `contracts.md` section 3 states that the two agree.
 
-The control surface (`src/control.rs`) is layered on the same principle. Layer B, `ControlMapping` (`src/control/mapping.rs`), turns raw pot positions into a complete `OttParams` and is pure, allocation-free and panic-free, so it holds itself to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call it from `render_pre` directly. Layer A is the hardware read — `PiControls` (`src/control/pi.rs`) behind the `pi-controls` feature for the Raspberry Pi, and the free functions in `src/bela_host/controls.rs` for Bela. Layer C, `ControlHandle` (`src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
+The control surface (`src/control.rs`) is layered on the same principle, and layer B is split in two. B1, `SixPotBypassConditioner` (`src/control/conditioning.rs`), filters jitter, applies the deadband, debounces the switch and normalises onto `PotTravel`; it knows nothing about OTT and is what a second effect on the same panel reuses. B2, `assign` (`src/control/assign.rs`), is the one place a pot is given a meaning. Both are pure, allocation-free and panic-free, so they hold themselves to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call them from `render_pre` directly. Neither half owns the base `OttParams`; whoever joins the two does. Layer A is the hardware read — `PiControls` (`src/control/pi.rs`) behind the `pi-controls` feature for the Raspberry Pi, and the free functions in `src/bela_host/controls.rs` for Bela. Layer C, `ControlHandle` (`src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
 
 The seam between layer A and layer B is the `RawControls` *value*, not the `ControlSource` trait — the trait is the Raspberry Pi's way of producing one, and the Bela host does not implement it (`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`, revised by ADR 0011). What layer B gains in exchange for being platform-independent is a duty on its callers: its constants are defined per read, so a host owes it reads at the rate they were calibrated for. JACK's poll interval supplies that directly; Bela's `PollDecimator` reads on every *n*th block to reach it.
 
@@ -94,7 +96,7 @@ There is no intermediate buffer sized to the host's callback buffer. Processing 
 
 With a control surface attached, two more owners exist, both outside the DSP:
 
-- `ControlMapping` (`src/control/mapping.rs`) holds the CLI-supplied base `OttParams` plus, per potentiometer, the low-pass filter state and the deadband reference — both in `PotPosition` steps — and, once per mapping rather than per pot, the last published `OttProcessorUpdate` and the debounced switch position. The snapshot contains the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `adc0`..`adc5`, and names the fields for the wiring rather than for OTT's macros: what each pot means is decided at the assignment step and nowhere else. Named fields rather than an array so that the assignment can name each pot the way the wiring does — that step is the one place a silent mix-up is possible, so it is the one place worth spending a field name on. Under JACK the control thread owns it; under Bela the `OttApplication` does, because there is one control surface rather than one per render thread.
+- `SixPotBypassConditioner` (`src/control/conditioning.rs`) holds, per potentiometer, the low-pass filter state and the deadband reference — both in `PotPosition` steps — and, once per conditioner rather than per pot, the debounced switch position. The reference is also exactly what was last published, which is what lets the publish gate compare against it rather than keeping a copy of its own output. `assign` then produces an `OttProcessorUpdate` carrying the complete current pot parameters and an explicit bypass level; it does not replace a coincidental parameter triple with bypass values. `Pots<T>` (`src/control/raw.rs`) fixes the arity at exactly `adc0`..`adc5`, and names the fields for the wiring rather than for OTT's macros: what each pot means is decided at the assignment step and nowhere else. Named fields rather than an array so that the assignment can name each pot the way the wiring does — that step is the one place a silent mix-up is possible, so it is the one place worth spending a field name on. Under JACK the control thread owns it; under Bela the `OttApplication` does, because there is one control surface rather than one per render thread.
 - `ControlHandle` (`src/control/thread.rs`), under `jack-host` only, owns the thread itself, its stop flag, its read-failure counter, and the writing end of the `triple_buffer`; the audio callback owns the reading end, which `ControlHandle::take_output` can hand out exactly once. The buffer's three slots are allocated when it is built and `OttProcessorUpdate` is `Copy` with no `Drop`, so publishing a snapshot allocates and frees nothing on either side. The Bela host has no counterpart: `render_pre` writes into the render states directly.
 - `OttApplication` (`src/bela_host/app.rs`), under `bela-host` only, owns the processor prototype every render state is copied from, the mapping layer, the read divisor `setup` chose, and the publish/rejection counters `cleanup` reports. Each `OttRenderState` owns exactly one `OttProcessor` and nothing else — no scratch buffers, because Bela's paired input/output view is walked a frame at a time.
 
@@ -111,7 +113,7 @@ main.rs: Cli::parse, Client::new,        |  AudioProcessHandler::process
   OttProcessor::new, activate_async      |    - swap pending_sample_rate (Atomic)
                                          |    - take newest control snapshot
 control thread: ControlSource::read      |      (triple_buffer::Output::update)
-  (blocking SPI/GPIO), ControlMapping,   |    - OttProcessor::process
+  (blocking SPI/GPIO), condition+assign,  |    - OttProcessor::process
   publish (triple_buffer::Input::write)  |      (no alloc, no lock, no I/O)
 signal_hook: SIGINT/SIGTERM -> Atomic    |
 main loop: poll shutdown flag, sleep     |  Notifications::sample_rate / shutdown / xrun
@@ -126,7 +128,7 @@ non-real-time                            |  real-time (Bela audio thread)
 oxtt-bela: BelaCli::parse,               |  render_pre
   OttProcessor::new, Bela::new           |    - PollDecimator::tick
 validate_settings (before initAudio)     |    - read analog frame + D0
-setup, create_render_state               |    - raw_controls, ControlMapping::update
+setup, create_render_state               |    - raw_controls, condition, assign
   (allocation allowed; no audio yet)     |    - apply_update into each state
                                          |      (no alloc, no lock, no I/O)
 until_stopped: signal handlers, sleep    |
@@ -147,4 +149,4 @@ Under Bela there is no queue to cross, because there is no boundary between the 
 
 `OttProcessor::apply_update` only updates smoothing *targets*; it never snaps `current` to `target`. Only `OttProcessor::new` and `OttProcessor::reset` (invoked on a JACK sample-rate change) snap all state immediately, which avoids an audible startup fade while still guaranteeing smooth, click-free transitions for any later parameter change. It applies every parameter target to the latent effect branch and independently retargets one 20 ms bypass-mix smoother. The effect and bypass branches are built from one raw-input crossover split: the bypass branch is the unscaled three-band sum, while the effect branch applies input gain after that split and output gain after dynamics. Thus both crossfade endpoints share crossover phase history; the DSP never crossfades the reconstruction against raw input. A reversal simply follows the newest mix target. Reset preserves the latest explicit bypass level and snaps the mix to its corresponding endpoint. See `contracts.md` (section 2) for the exact pre/postconditions.
 
-A control update enters through `apply_update`: the callback applies its complete parameter payload and explicit bypass level strictly after any pending sample-rate reset in the same cycle. `ControlMapping` seeds itself from its first reading rather than fading in from zero, for the same reason `OttProcessor::new` snaps its smoothers to their targets: there is no earlier state to have moved away from.
+A control update enters through `apply_update`: the callback applies its complete parameter payload and explicit bypass level strictly after any pending sample-rate reset in the same cycle. `SixPotBypassConditioner` seeds itself from its first reading rather than fading in from zero, for the same reason `OttProcessor::new` snaps its smoothers to their targets: there is no earlier state to have moved away from.

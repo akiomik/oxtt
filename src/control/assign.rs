@@ -1,20 +1,19 @@
-//! Layer B of the control surface: raw counts to a complete [`OttParams`]
-//! (see [`crate::control`] for the layering).
+//! Layer B2 for oxtt: what each pot on the control surface does.
 //!
-//! Everything here is pure — no I/O, no threads, no clock — and, more
-//! importantly, allocation-free and panic-free, because a Bela port drives
-//! this module directly from its real-time `render()` callback with no
-//! transport layer in between (ADR 0009). It therefore holds itself to the
-//! same prohibitions as the audio callback in docs/contracts.md §6.
+//! The only place in this program where a pot is given a meaning. Everything
+//! before it — the read, the jitter filter, the deadband, the debounce, the
+//! normalisation onto [`PotTravel`] — is effect-independent and shared
+//! (`crate::control::conditioning`); everything after it is the DSP.
 //!
-//! Having no clock is deliberate: the filter below is defined per *read*, not
-//! per millisecond, so this layer needs to know neither the poll interval nor
-//! the sample rate. The caller's poll rate sets the effective time constant.
+//! **This is the one file where a wiring mistake is silent.** The pots are
+//! named for their ADC channels, so swapping two of the six lines below still
+//! compiles, still validates and still makes sound — it just moves the wrong
+//! knob. `bela_host::controls`'s `channel_order_is_pot_order` is the test that
+//! pins the other end of that chain down.
 
 use crate::params::{IoGain, NormalizedF32, OttParams, OttProcessorUpdate};
 
-use super::conditioning::ConditioningConfig;
-use super::raw::{POT_POSITION_MAX, Pots, RawControls};
+use super::conditioning::{ConditionedControls, PotTravel};
 
 /// The dB value the gain pots produce at their lower stop.
 ///
@@ -35,110 +34,7 @@ const GAIN_MIN_DB: f32 = -24.0;
 /// "unchanged" at.
 const GAIN_SPAN_DB: f32 = 48.0;
 
-/// The debounced bypass switch.
-///
-/// The panel part is a mechanically *latching* (alternate-action) switch, so
-/// its position **is** the bypass state: there is nothing to toggle and no
-/// edge to detect, only a level to believe or disbelieve. Everything this type
-/// does is therefore debounce — a slide or alternate-action contact makes and
-/// breaks intermittently for as long as the hand is moving it, and each of
-/// those intermediate makes would otherwise publish (see
-/// [`ConditioningConfig::debounce_reads`]).
-///
-/// That the switch and the software agree by construction is the point of the
-/// part change, not a side effect of it. With the old momentary switch the
-/// panel could not be reconciled with the software state by looking at it, so
-/// the startup state had to be invented — the first reading was declared a
-/// baseline and the run came up un-bypassed however the switch sat. A latching
-/// switch makes the two the same object, so a switch resting in the bypassed
-/// position at startup comes up bypassed.
-///
-/// What an engaged bypass does is an *effect* bypass: the DSP crossfades to
-/// the unity sum of the same raw-input crossover bands that feed the latent
-/// effect. It is not a raw dry signal, because the raw input and the
-/// reconstructed signal do not share a phase response and crossfading between
-/// them would comb-filter (ADR 0004, docs/contracts.md §4). The complete pot
-/// payload remains live in the latent effect branch, ready for disengage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BypassSwitch {
-    /// The switch position currently believed: the last one to survive the
-    /// surface's [`debounce_reads`](ConditioningConfig::debounce_reads)
-    /// consecutive readings. This is the bypass state, not an input to one.
-    engaged: bool,
-    /// How many consecutive readings have disagreed with `engaged`.
-    disagreements: u8,
-}
-
-impl BypassSwitch {
-    /// Seeds the switch from the very first reading, taking its position at
-    /// face value.
-    ///
-    /// There is no earlier position for the first reading to differ from, so
-    /// there is nothing to debounce it against and no reason to distrust it —
-    /// the same reasoning as the filter seeding itself from the first reading
-    /// instead of fading in from zero. A switch already resting in the
-    /// bypassed position therefore comes up bypassed, which is simply what the
-    /// panel says.
-    const fn seeded(engaged: bool) -> Self {
-        Self {
-            engaged,
-            disagreements: 0,
-        }
-    }
-
-    /// Feeds one reading in, adopting its position once the debounce believes it.
-    const fn update(&mut self, engaged: bool, debounce_reads: u8) {
-        if engaged == self.engaged {
-            self.disagreements = 0;
-            return;
-        }
-
-        // `saturating_add` rather than `+`: the counter is reset the moment it
-        // reaches a threshold far below `u8::MAX`, so overflow is unreachable,
-        // and saturating keeps that a property of the arithmetic rather than a
-        // claim about the flow — which is what `update`'s no-panic proof needs.
-        self.disagreements = self.disagreements.saturating_add(1);
-        if self.disagreements < debounce_reads {
-            return;
-        }
-
-        self.engaged = engaged;
-        self.disagreements = 0;
-    }
-}
-
-/// The conditioning and switch state, absent until the first
-/// [`ControlMapping::update`].
-///
-/// `reference` and `published` are deliberately two fields, in two different
-/// domains, rather than one. The deadband is hysteresis in the ADC's own
-/// units against where the *pots* were last taken seriously, so `reference`
-/// has to stay in counts and has to keep tracking the real pots even while
-/// bypassed, so disengaging cannot restore stale positions. The publish
-/// decision, in contrast, has to be made against what the caller was actually
-/// last handed, which is a finished [`OttProcessorUpdate`]. Pot movements publish
-/// their current values even while bypass is engaged.
-///
-/// Comparing whole snapshots rather than counts also includes switch-only
-/// changes. The gate's job is "is this different from what I last handed out",
-/// and [`OttProcessorUpdate`] is `Copy` and `PartialEq`, so asking it directly
-/// costs a struct compare and needs no third representation of the same state.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Conditioned {
-    /// Low-pass filter state, in ADC counts.
-    filtered: Pots<f32>,
-    /// The deadband reference: the filtered values as of the last time a pot
-    /// cleared the surface's
-    /// [`deadband_counts`](ConditioningConfig::deadband_counts), in ADC
-    /// counts, and always the real pot positions — never the bypassed ones.
-    reference: Pots<f32>,
-    /// The most recent published snapshot.
-    published: OttProcessorUpdate,
-    /// The debounced bypass switch.
-    bypass: BypassSwitch,
-}
-
-/// Turns raw control-surface readings into complete [`OttParams`] (layer B).
+/// Assigns the conditioned control surface onto the base parameters.
 ///
 /// The six pot-driven fields (`global.depth`, `global.time`, `global.upward`,
 /// `global.downward`, `global.input_gain_db`, `global.output_gain_db`) are
@@ -147,188 +43,71 @@ struct Conditioned {
 /// of the base parameters — the crossover pair, all per-band values — is
 /// passed through unchanged, since no pot is wired to it.
 ///
-/// The bypass switch is carried as an explicit, debounced level beside the
-/// complete pot snapshot. The DSP, rather than this conditioning layer,
-/// crossfades its phase-coherent effect and guaranteed-unity bypass branches.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ControlMapping {
-    base: OttParams,
-    /// How the surface being read is conditioned: the jitter filter, the
-    /// deadband, the switch debounce, and the rate they were measured at.
-    ///
-    /// Supplied by the caller rather than fixed here, because none of it is a
-    /// property of this layer — it is how a *particular converter and a
-    /// particular switch* behave, and the two surfaces that exist differ by
-    /// more than an order of magnitude in the deadband alone (ADR 0012).
-    /// [`ConditioningConfig`] owns the rule the four values satisfy together.
-    conditioning: ConditioningConfig,
-    state: Option<Conditioned>,
-}
-
-impl ControlMapping {
-    /// Creates a mapping over the CLI-supplied parameter set.
-    ///
-    /// `conditioning` is the measured behaviour of the control surface being
-    /// read: `PiControls::CONDITIONING` on a Raspberry Pi,
-    /// [`surfaces::GEM`](crate::control::surfaces::GEM) on a Bela Gem.
-    #[must_use]
-    pub const fn new(base: OttParams, conditioning: ConditioningConfig) -> Self {
-        Self {
-            base,
-            conditioning,
-            state: None,
-        }
-    }
-
-    /// Conditions one reading and returns the parameters to publish, if any.
-    ///
-    /// Returns `Some` only when the snapshot this would publish differs from
-    /// the one it published last: the surface's `filter_coefficient` first
-    /// low-passes the raw counts, then its `deadband_counts` compares the
-    /// result against the deadband reference, then the reference is converted into an
-    /// [`OttParams`] and paired with the debounced bypass level. A motionless
-    /// pot and an untouched switch therefore yield `None` forever, which is
-    /// what keeps the transport layer from being handed a fresh snapshot on
-    /// every poll for no reason.
-    ///
-    /// The very first call seeds the filter from the reading itself and
-    /// publishes immediately, rather than starting from zero and fading in —
-    /// the same reasoning as `OttProcessor::new` snapping its smoothers to
-    /// their targets (docs/contracts.md §2). It seeds the switch the same way,
-    /// by believing where it is resting (see [`BypassSwitch::seeded`]), so a
-    /// run that starts with the switch in the bypassed position comes up
-    /// bypassed.
-    ///
-    /// [`RawControls::bypass_engaged`] drives [`BypassSwitch`]: once debounced,
-    /// the switch's position is the explicit effect-bypass request. The DSP
-    /// owns the resulting phase-coherent branch crossfade (ADR 0004,
-    /// docs/contracts.md §4, §8).
-    // Proves this function can never panic, the same way `OttProcessor::process`
-    // does (docs/contracts.md §6), checked by `cargo test --release`. It matters
-    // here for the same reason: on Bela this runs inside the real-time callback.
-    // The tests below already call it, so no proof-only test is needed.
-    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-    pub fn update(&mut self, raw: RawControls) -> Option<OttProcessorUpdate> {
-        let counts = raw.pots.map(|count| f32::from(count.get()));
-        // Copied out before `self.state` is borrowed mutably below: both are
-        // `Copy` and neither changes, so the conversion takes them by value
-        // rather than re-borrowing `self` in the middle of the match.
-        let base = self.base;
-        let conditioning = self.conditioning;
-
-        let published = match self.state.as_mut() {
-            None => {
-                let bypass = BypassSwitch::seeded(raw.bypass_engaged);
-                // Unlike the old momentary latch, this is *not* a no-op on a
-                // freshly seeded switch: a switch resting in the bypassed
-                // position bypasses from the very first snapshot.
-                let published = OttProcessorUpdate {
-                    params: params_with_pots(base, counts),
-                    bypass_engaged: bypass.engaged,
-                };
-                self.state = Some(Conditioned {
-                    filtered: counts,
-                    reference: counts,
-                    published,
-                    bypass,
-                });
-                published
-            }
-            Some(state) => {
-                // `filtered + a * (raw - filtered)` rather than the equivalent
-                // `(1 - a) * filtered + a * raw`: written this way the result
-                // stays inside the span of the two inputs even after rounding,
-                // which is what keeps the normalized value below in `0.0..=1.0`.
-                let filter_coefficient = conditioning.filter_coefficient();
-                state.filtered = state.filtered.zip_with(counts, |filtered, raw| {
-                    filter_coefficient.mul_add(raw - filtered, filtered)
-                });
-
-                // The deadband tracks the pots in their own units, so it is
-                // compared against `reference` and never against what was
-                // published: while bypassed the true pot positions still
-                // travel in the snapshot, and the DSP performs the transition.
-                state.reference =
-                    state
-                        .filtered
-                        .zip_with(state.reference, |filtered, reference| {
-                            if (filtered - reference).abs() >= conditioning.deadband_counts() {
-                                filtered
-                            } else {
-                                reference
-                            }
-                        });
-
-                state
-                    .bypass
-                    .update(raw.bypass_engaged, conditioning.debounce_reads());
-
-                let next = OttProcessorUpdate {
-                    params: params_with_pots(base, state.reference),
-                    bypass_engaged: state.bypass.engaged,
-                };
-                if next == state.published {
-                    return None;
-                }
-                state.published = next;
-                next
-            }
-        };
-
-        Some(published)
-    }
-}
-
-/// Overlays the six pot-driven fields onto the base parameters.
+/// The bypass switch is carried through as an explicit level rather than being
+/// folded into the parameters. The DSP crossfades its phase-coherent effect
+/// and guaranteed-unity bypass branches; a control layer must never express
+/// "bypassed" as a coincidental `depth = 0` and two zeroed gains
+/// (docs/contracts.md §8).
 ///
-/// A free function rather than a method so that [`ControlMapping::update`] can
-/// call it while holding a mutable borrow of its own conditioning state;
-/// `base` is `Copy` and never mutated, so passing it by value costs nothing.
+/// # Contract
 ///
-/// `counts` is filter state, bounded by the raw counts that produced it, so
-/// every fraction below is finite and within `0.0..=1.0`.
-fn params_with_pots(base: OttParams, counts: Pots<f32>) -> OttParams {
-    let fractions = counts.map(|count| count / f32::from(POT_POSITION_MAX));
+/// A pure function of its two arguments, and free of panics and allocation.
+/// Both are required by
+/// [`SixPotBypassConditioner::update`](super::conditioning::SixPotBypassConditioner::update):
+/// the first because its publish gate assumes equal inputs assign equal
+/// outputs, the second because on a Bela this runs inside the audio callback
+/// (docs/contracts.md §6).
+// Proves the second half of that contract, checked by `cargo test --release`
+// the same way `OttProcessor::process` is. The tests below already call it, so
+// no proof-only test is needed.
+#[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+#[must_use]
+pub fn assign(base: OttParams, controls: ConditionedControls) -> OttProcessorUpdate {
+    let pots = controls.pots;
 
     let mut params = base;
-    params.global.depth = normalized_or(fractions.adc0, base.global.depth);
-    params.global.time = normalized_or(fractions.adc1, base.global.time);
-    params.global.upward = normalized_or(fractions.adc2, base.global.upward);
-    params.global.downward = normalized_or(fractions.adc3, base.global.downward);
-    params.global.input_gain_db = gain_db_or(fractions.adc4, base.global.input_gain_db);
-    params.global.output_gain_db = gain_db_or(fractions.adc5, base.global.output_gain_db);
-    params
+    params.global.depth = normalized_or(pots.adc0, base.global.depth);
+    params.global.time = normalized_or(pots.adc1, base.global.time);
+    params.global.upward = normalized_or(pots.adc2, base.global.upward);
+    params.global.downward = normalized_or(pots.adc3, base.global.downward);
+    params.global.input_gain_db = gain_db_or(pots.adc4, base.global.input_gain_db);
+    params.global.output_gain_db = gain_db_or(pots.adc5, base.global.output_gain_db);
+
+    OttProcessorUpdate {
+        params,
+        bypass_engaged: controls.bypass_engaged,
+    }
 }
 
-/// Turns a pot's fraction of travel into a [`NormalizedF32`].
+/// Turns a pot's travel into a [`NormalizedF32`].
 ///
-/// The identity map, since a fraction of travel and a `NormalizedF32` are the
+/// The identity map, since [`PotTravel`] and a `NormalizedF32` are the
 /// same `0.0..=1.0` quantity; the function exists to place the fallback below
 /// beside its gain counterpart rather than to compute anything.
 ///
-/// `fraction` is within `0.0..=1.0` by construction, so `NormalizedF32`
+/// `travel` is within `0.0..=1.0` by its type, so `NormalizedF32`
 /// construction cannot fail. The error arm is unreachable; it falls back to
 /// the base value rather than unwrapping, because this runs on Bela's
 /// real-time callback path, where a panic is prohibited (docs/contracts.md §6).
-fn normalized_or(fraction: f32, base: NormalizedF32) -> NormalizedF32 {
-    NormalizedF32::try_new(fraction).unwrap_or(base)
+fn normalized_or(travel: PotTravel, base: NormalizedF32) -> NormalizedF32 {
+    NormalizedF32::try_new(travel.get()).unwrap_or(base)
 }
 
-/// Turns a gain pot's fraction of travel into an [`IoGain`], linearly across
+/// Turns a gain pot's travel into an [`IoGain`], linearly across
 /// the whole of that type's range.
 ///
-/// `mul_add` rather than `fraction * GAIN_SPAN_DB + GAIN_MIN_DB` for the same
+/// `mul_add` rather than `travel * GAIN_SPAN_DB + GAIN_MIN_DB` for the same
 /// reason the filter uses it: one rounding instead of two, which is what keeps
 /// the two stops landing on exactly -24 dB and exactly +24 dB rather than a
 /// few ulps outside them.
 ///
-/// `fraction` is within `0.0..=1.0` by construction, so the result is within
+/// `travel` is within `0.0..=1.0` by its type, so the result is within
 /// `[GAIN_MIN_DB, GAIN_MIN_DB + GAIN_SPAN_DB]`, which is `IoGain`'s range
 /// exactly, and construction cannot fail. The error arm is unreachable for the
 /// same reason as [`normalized_or`]'s, and is handled the same way rather than
 /// unwrapped (docs/contracts.md §6).
-fn gain_db_or(fraction: f32, base: IoGain) -> IoGain {
-    IoGain::try_new(fraction.mul_add(GAIN_SPAN_DB, GAIN_MIN_DB)).unwrap_or(base)
+fn gain_db_or(travel: PotTravel, base: IoGain) -> IoGain {
+    IoGain::try_new(travel.get().mul_add(GAIN_SPAN_DB, GAIN_MIN_DB)).unwrap_or(base)
 }
 
 #[cfg(test)]
@@ -346,7 +125,11 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::control::{DeadbandCounts, DebounceReads, FilterCoefficient, PollHz, PotPosition};
+    use crate::control::conditioning::{ConditioningConfig, SixPotBypassConditioner};
+    use crate::control::{
+        DeadbandCounts, DebounceReads, FilterCoefficient, POT_POSITION_MAX, PollHz, PotPosition,
+        Pots, RawControls,
+    };
     use crate::params::Preset;
 
     const PROPERTY_CASES: u32 = 128;
@@ -389,9 +172,34 @@ mod tests {
         PotPosition::try_new(raw).unwrap()
     }
 
+    /// Conditioning and assignment composed, which is the whole of what a
+    /// host does with the control surface — a `SixPotBypassConditioner` next
+    /// to the base parameters it assigns onto. It exists here rather than in
+    /// the library because nothing in the library owns the pair: each host
+    /// composes them itself.
+    struct Mapping {
+        base: OttParams,
+        conditioner: SixPotBypassConditioner,
+    }
+
+    impl Mapping {
+        fn new(base: OttParams, conditioning: ConditioningConfig) -> Self {
+            Self {
+                base,
+                conditioner: SixPotBypassConditioner::new(conditioning),
+            }
+        }
+
+        fn update(&mut self, raw: RawControls) -> Option<OttProcessorUpdate> {
+            self.conditioner
+                .update(raw)
+                .map(|controls| assign(self.base, controls))
+        }
+    }
+
     /// A mapping over `base`, conditioning at [`DEADBAND_COUNTS`].
-    fn mapping(base: OttParams) -> ControlMapping {
-        ControlMapping::new(base, conditioning(DEADBAND_COUNTS))
+    fn mapping(base: OttParams) -> Mapping {
+        Mapping::new(base, conditioning(DEADBAND_COUNTS))
     }
 
     /// A reading of the four effect pots, with both gain pots parked at the
@@ -453,11 +261,7 @@ mod tests {
     }
 
     /// Feeds one reading in `reads` times, returning the last snapshot published.
-    fn feed(
-        mapping: &mut ControlMapping,
-        raw: RawControls,
-        reads: usize,
-    ) -> Option<OttProcessorUpdate> {
+    fn feed(mapping: &mut Mapping, raw: RawControls, reads: usize) -> Option<OttProcessorUpdate> {
         let mut last = None;
         for _ in 0..reads {
             if let Some(params) = mapping.update(raw) {
@@ -469,7 +273,7 @@ mod tests {
 
     /// Feeds a switch position in exactly [`DEBOUNCE_READS`] times,
     /// which is the shortest run the debounce believes.
-    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<OttProcessorUpdate> {
+    fn settle(mapping: &mut Mapping, raw: RawControls) -> Option<OttProcessorUpdate> {
         feed(mapping, raw, usize::from(DEBOUNCE_READS))
     }
 
@@ -538,9 +342,8 @@ mod tests {
         let held = 500;
         let moved = held + STEP;
 
-        let mut wide =
-            ControlMapping::new(Preset::SafeStart.params(), conditioning(DEADBAND_COUNTS));
-        let mut narrow = ControlMapping::new(
+        let mut wide = Mapping::new(Preset::SafeStart.params(), conditioning(DEADBAND_COUNTS));
+        let mut narrow = Mapping::new(
             Preset::SafeStart.params(),
             conditioning(NARROW_DEADBAND_COUNTS),
         );

@@ -169,7 +169,7 @@ pub struct RawControls {
     /// electrical level is still inverted by the reading layer: this field is
     /// the switch's logical position, not its pin level. Debouncing that
     /// position is not part of this field's meaning — see
-    /// [`ControlMapping::update`](crate::control::ControlMapping::update).
+    /// [`SixPotBypassConditioner::update`](crate::control::SixPotBypassConditioner::update).
     pub bypass_engaged: bool,
 }
 

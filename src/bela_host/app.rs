@@ -14,8 +14,8 @@ use bela::{
 };
 
 use super::controls::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
-use crate::control::ControlMapping;
 use crate::control::surfaces::GEM;
+use crate::control::{SixPotBypassConditioner, assign};
 use crate::dsp::OttProcessor;
 use crate::metering::{ClipIndicator, InputMeter};
 use crate::params::OttParams;
@@ -27,7 +27,7 @@ use crate::params::OttParams;
 /// so which frame within it is read cannot matter. Reading one frame rather
 /// than averaging the block is deliberate: the mapping layer already filters,
 /// and averaging here would filter twice with only one of the two calibrated
-/// (`src/control/mapping.rs`).
+/// (`src/control/conditioning.rs`).
 const POLL_FRAME: usize = 0;
 
 /// Digital channel (`D0`) the latching bypass switch is wired to.
@@ -71,23 +71,32 @@ pub struct OttRenderState {
     input: InputMeter,
 }
 
-/// The oxtt application: a processor prototype, the control surface's mapping
-/// layer, and the counters the run reports at the end.
+/// The oxtt application: a processor prototype, the control surface's
+/// conditioning state, and the counters the run reports at the end.
 ///
-/// The mapping layer lives here rather than in [`OttRenderState`] because
-/// there is one control surface, not one per render thread — and because
-/// `render_pre` holds `&mut self` and `&mut [OttRenderState]` at the same
-/// time, which is what lets a snapshot go straight from the mapping layer
-/// into the processors with no queue, no atomic and no thread in between.
-/// That is the whole of layer C on the Raspberry Pi (ADR 0010, ADR 0011).
+/// Conditioning lives here rather than in [`OttRenderState`] because there is
+/// one control surface, not one per render thread — and because `render_pre`
+/// holds `&mut self` and `&mut [OttRenderState]` at the same time, which is
+/// what lets an update go straight from the control surface into the
+/// processors with no queue, no atomic and no thread in between. That is the
+/// whole of layer C on the Raspberry Pi (ADR 0010, ADR 0011).
+///
+/// This is also where the two halves of layer B are joined: `conditioner` is
+/// shared by every effect, [`assign`] is this one's, and `params` is the base
+/// they are assigned onto — held once here rather than a second time inside
+/// the conditioner.
 #[derive(Debug, Clone, Copy)]
 pub struct OttApplication {
     processor: OttProcessor,
-    /// The parameters the processor was built from, kept because
-    /// `validate_settings` has to re-check them against the sample rate the
-    /// settings ask for and `OttProcessor` does not hand its targets back.
+    /// The parameters the processor was built from.
+    ///
+    /// Two uses, one owner: `validate_settings` re-checks them against the
+    /// sample rate the settings ask for (and `OttProcessor` does not hand its
+    /// targets back), and [`assign`] overlays the conditioned pots onto them.
     params: OttParams,
-    mapping: Option<ControlMapping>,
+    /// The control surface's conditioning state, or `None` on a run that was
+    /// not asked for one.
+    conditioner: Option<SixPotBypassConditioner>,
     poll: PollDecimator,
     publishes: u64,
     rejects: u64,
@@ -127,14 +136,14 @@ impl OttApplication {
         Self {
             processor,
             params,
-            // Seeded with the same parameters the processor starts from, so
-            // the fields no pot drives keep their command-line values and the
-            // six that are pot-driven become the hardware's from its first
-            // reading onward (`ControlMapping::new`). The conditioning is
-            // this board's own measured figures rather than the mapping
-            // layer's, of which there no longer are any (ADR 0012).
-            mapping: if controls {
-                Some(ControlMapping::new(params, GEM))
+            // The conditioning is this board's own measured figures rather
+            // than a shared default, of which there is deliberately none
+            // (ADR 0012). The base parameters it will be assigned onto are
+            // `params` above: the fields no pot drives keep their command-line
+            // values, and the six that are pot-driven become the hardware's
+            // from the first reading onward.
+            conditioner: if controls {
+                Some(SixPotBypassConditioner::new(GEM))
             } else {
                 None
             },
@@ -172,7 +181,7 @@ impl OttApplication {
     /// Whether this run has a control surface at all.
     #[must_use]
     pub const fn has_controls(&self) -> bool {
-        self.mapping.is_some()
+        self.conditioner.is_some()
     }
 
     /// The read divisor `setup` settled on, for the host to report.
@@ -208,7 +217,7 @@ impl BelaApplication for OttApplication {
             return Err("oxtt renders on one thread: its filters carry state across frames");
         }
 
-        if self.mapping.is_some() {
+        if self.conditioner.is_some() {
             let analog_in = usize::try_from(settings.num_analog_in_channels()).unwrap_or(0);
             if !settings.use_analog() || analog_in < ANALOG_CHANNELS_USED {
                 return Err("the control surface needs six analog inputs (A0-A5)");
@@ -315,7 +324,7 @@ impl BelaApplication for OttApplication {
         if !self.poll.tick() {
             return;
         }
-        let Some(mapping) = self.mapping.as_mut() else {
+        let Some(conditioner) = self.conditioner.as_mut() else {
             return;
         };
 
@@ -337,16 +346,17 @@ impl BelaApplication for OttApplication {
         // matches `PiControls::read`.
         let bypass_engaged = !context.digital_read(POLL_FRAME, BYPASS_CHANNEL);
 
-        let Some(snapshot) = mapping.update(raw_controls(frame, bypass_engaged)) else {
+        let Some(controls) = conditioner.update(raw_controls(frame, bypass_engaged)) else {
             return;
         };
+        let update = assign(self.params, controls);
         // Saturating for `clippy::arithmetic_side_effects` (docs/contracts.md
         // §6). A `u64` at 500 publishes a second would take half a billion
         // years to reach the ceiling, so this is a lint's shape rather than a
         // behaviour.
         self.publishes = self.publishes.saturating_add(1);
         for state in states.iter_mut() {
-            if state.processor.apply_update(snapshot).is_err() {
+            if state.processor.apply_update(update).is_err() {
                 self.rejects = self.rejects.saturating_add(1);
             }
         }
