@@ -60,7 +60,7 @@ with the re-check rule kept next to the constants themselves in
 
 ## Decision
 
-- **Split the control surface into three layers** (`src/control.rs`): a
+- **Split the control surface into three layers** (`crates/oxtt/src/control.rs`): a
   platform-specific hardware read (A), a shared pure mapping from raw counts to
   a complete `ControlSnapshot` containing the current `OttParams` and explicit
   debounced bypass level (B), and a transport that moves finished snapshots

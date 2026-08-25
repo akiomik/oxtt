@@ -2,11 +2,11 @@
 //! channels 0-5 (Depth, Time, Upward, Downward, Input Gain, Output Gain) over
 //! SPI0 and the Bypass switch on GPIO17, printing raw and converted values to
 //! stdout in a loop. The same wiring, and the reasoning behind each constant,
-//! is documented in `src/control/pi.rs`, which reproduces this read inside
+//! is documented in `crates/oxtt/src/control/pi.rs`, which reproduces this read inside
 //! `oxtt` itself.
 //!
 //! The conversions here are display-only sanity checks, not the real
-//! `NormalizedF32`/`IoGain` conversions in `src/control/mapping.rs` -- this
+//! `NormalizedF32`/`IoGain` conversions in `crates/oxtt/src/control/assign.rs` -- this
 //! tool stays independent of the `oxtt` crate by design, so it can be run on a
 //! Pi with nothing else working. They mirror that module's arithmetic so the
 //! numbers on screen are the numbers the effect will act on:
@@ -39,7 +39,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const ADC_MAX: f32 = 1023.0;
 
 /// Lower stop of the gain pots, in dB, and the span they sweep. Mirrors
-/// `GAIN_MIN_DB`/`GAIN_SPAN_DB` in `src/control/mapping.rs`.
+/// `GAIN_MIN_DB`/`GAIN_SPAN_DB` in `crates/oxtt/src/control/assign.rs`.
 const GAIN_MIN_DB: f32 = -24.0;
 const GAIN_SPAN_DB: f32 = 48.0;
 

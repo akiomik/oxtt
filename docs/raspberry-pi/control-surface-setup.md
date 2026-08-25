@@ -44,7 +44,7 @@ environment-specific.
 | Reference | 3.3 V from the Pi header, so full scale is 1023 counts |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
-The constants above are not free choices — `src/control/pi.rs` holds them and
+The constants above are not free choices — `crates/oxtt/src/control/pi.rs` holds them and
 records why each one is what it is, and `oxtt-pi-tools` reads the same hardware
 the same way. If you change the bus, the clock rate, the SPI mode, or the
 channel assignment, you are changing that module too.
@@ -77,7 +77,7 @@ Generic parts; no specific vendor part number is assumed.
 
 ### Why the pots must be linear taper
 
-`src/control/assign.rs` converts a pot's travel to a normalized parameter with a
+`crates/oxtt/src/control/assign.rs` converts a pot's travel to a normalized parameter with a
 plain `raw / 1023` and no curve fitting, and `oxtt-pi-tools` displays the same
 scale. That mapping is only correct for a linear-taper pot. A log/audio-taper
 pot will still read 0–1023 end to end and will still look fine in
@@ -117,7 +117,7 @@ Wire everything with the Pi **powered off and unplugged**.
 
 ### Pin map
 
-Software uses BCM numbering — that is what `rppal`, `src/control/pi.rs`, and
+Software uses BCM numbering — that is what `rppal`, `crates/oxtt/src/control/pi.rs`, and
 `oxtt-pi-tools` speak. Your hands use physical header positions. Both are given
 below, because confusing the two is the one wiring mistake that damages the Pi
 rather than merely failing to read.
@@ -153,7 +153,7 @@ The analog side, and the switch:
 Each pot is a divider: top terminal to 3.3 V, bottom terminal to ground, wiper
 to its MCP3008 channel. The channel order matches `CHANNEL_DEPTH = 0`,
 `CHANNEL_TIME = 1`, `CHANNEL_UPWARD = 2`, `CHANNEL_DOWNWARD = 3`,
-`CHANNEL_INPUT_GAIN = 4`, `CHANNEL_OUTPUT_GAIN = 5` in `src/control/pi.rs`;
+`CHANNEL_INPUT_GAIN = 4`, `CHANNEL_OUTPUT_GAIN = 5` in `crates/oxtt/src/control/pi.rs`;
 swapping two pots here silently swaps two knobs on the panel, and nothing
 downstream can tell.
 
@@ -210,7 +210,7 @@ switch), so this is a mapping to keep rather than to re-derive.
    no short. Do this last, after everything is inserted, and before power.
 3. Across the switch: continuity in one resting position, open in the other, and
    it **stays** in whichever one you left it in. That is the part working
-   correctly — the bypass logic in `src/control/conditioning.rs` takes the switch's
+   correctly — the bypass logic in `crates/oxtt/src/control/conditioning.rs` takes the switch's
    resting position as the bypass state itself. A switch that is only continuous
    while you hold it and springs back open is a momentary one, which is the
    wrong part; one that reads the same in both positions is a wiring fault or a
@@ -380,7 +380,7 @@ not the way to run the control surface. Fix the group membership instead.
 
 `oxtt-pi-tools` is the standalone wiring-verification binary. It depends only on
 `rppal` and not on `oxtt` at all, so it runs on a Pi with nothing else working,
-and `src/control/pi.rs` reproduces its read byte for byte — same bus, same mode,
+and `crates/oxtt/src/control/pi.rs` reproduces its read byte for byte — same bus, same mode,
 same clock, same three-byte conversation. Run it before building `oxtt` and
 before involving JACK, so that anything it finds is unambiguously hardware.
 
@@ -408,7 +408,7 @@ Depth=991 (0.969) Time=1023 (1.000) Upward=1017 (0.994) Downward=1002 (0.980) In
 
 The four dynamics channels are shown as the normalized `0.000..=1.000` the
 effect acts on; the two gain channels are shown in dB, on the same
-`-24..+24` map `src/control/assign.rs` uses, so a centred gain pot reads
+`-24..+24` map `crates/oxtt/src/control/assign.rs` uses, so a centred gain pot reads
 approximately `+0.0 dB`.
 
 If it fails to start, the error says which device: an SPI error sends you back

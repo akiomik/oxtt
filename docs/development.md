@@ -98,7 +98,7 @@ latency verification with a class-compliant USB audio interface — see
 
 ### The `pi-controls` feature
 
-The physical control surface (`src/control/pi.rs`: MCP3008 pots over SPI0/CE0, a
+The physical control surface (`crates/oxtt/src/control/pi.rs`: MCP3008 pots over SPI0/CE0, a
 bypass switch on GPIO17) is behind the optional `pi-controls` Cargo feature,
 which is **off by default**. `rppal` is Linux-only, so a default build stays
 buildable on macOS and every host runs exactly as it did before the control
@@ -118,12 +118,15 @@ for the hardware verification, and
 [`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`](decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
 for the design.
 
-Because `rppal` cannot compile on macOS, two kinds of command **fail there**: any
-workspace-wide one (`cargo build --workspace`, `cargo clippy --workspace
---all-targets`), because the `oxtt-pi-tools` crate depends on `rppal`
-unconditionally; and any command that enables `pi-controls`. Scope macOS work to
-`-p oxtt` (or plain `cargo build`/`cargo clippy --all-targets`, which already
-build only the root package) and leave the feature off.
+Because `rppal` cannot compile on macOS, two kinds of command **fail there**:
+any `--workspace` one (`cargo build --workspace`, `cargo clippy --workspace
+--all-targets`), because `oxtt-pi-tools` depends on `rppal` unconditionally;
+and any command that enables `pi-controls`. **`--workspace` is a Linux and CI
+command**, not one to reach for on a development machine.
+
+Without a package selector, `cargo build`/`cargo test`/`cargo clippy` are safe
+anywhere: the workspace's `default-members` leaves `oxtt-pi-tools` out. Add
+`-p oxtt-pi-tools` on Linux when that crate is what is being changed.
 
 The feature-gated module can still be type-checked from macOS by
 cross-compiling. Nothing links, so no Linux linker or sysroot is needed:
@@ -136,7 +139,7 @@ PKG_CONFIG_ALLOW_CROSS=1 cargo clippy -p oxtt --features pi-controls --all-targe
 `PKG_CONFIG_ALLOW_CROSS=1` is required because `jack-sys`'s build script
 otherwise refuses to run `pkg-config` for a foreign target. Since `cargo
 check`/`cargo clippy` never link, that is sufficient to type-check and lint
-`src/control/pi.rs` without a Pi in reach — it is not a way to produce a
+`crates/oxtt/src/control/pi.rs` without a Pi in reach — it is not a way to produce a
 runnable binary (see the next section).
 
 CI covers the feature natively on Linux in the `pi-controls` job, which lints,
@@ -207,16 +210,16 @@ Separately, `cargo test --release` also proves `OttProcessor::process`/`process_
 
 The suite is organized by module and none of it requires a running JACK server:
 
-- `src/cli.rs` — CLI argument parsing
-- `src/params/` — parameter value objects, validation, and presets
-- `src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
-- `src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`src/dsp/filter.rs` holds the biquad and `Lr4` these exercise)
-- `src/dsp/compressor.rs` — dual-threshold gain computation tests
-- `src/dsp/envelope.rs` — envelope follower and time-scaling tests
-- `src/dsp/decibels.rs` — the dB conversions and the floor they respect
-- `src/dsp/smooth.rs` — parameter-smoothing tests
-- `src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
-- `src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording
+- `crates/oxtt/src/cli.rs` — CLI argument parsing
+- `crates/oxtt/src/params/` — parameter value objects, validation, and presets
+- `crates/oxtt/src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
+- `crates/oxtt/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/oxtt/src/dsp/filter.rs` holds the biquad and `Lr4` these exercise)
+- `crates/oxtt/src/dsp/compressor.rs` — dual-threshold gain computation tests
+- `crates/oxtt/src/dsp/envelope.rs` — envelope follower and time-scaling tests
+- `crates/oxtt/src/dsp/decibels.rs` — the dB conversions and the floor they respect
+- `crates/oxtt/src/dsp/smooth.rs` — parameter-smoothing tests
+- `crates/oxtt/src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
+- `crates/oxtt/src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording
 
 See [contracts.md](contracts.md) for the guarantees those tests protect.
 

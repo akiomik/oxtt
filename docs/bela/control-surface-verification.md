@@ -23,7 +23,7 @@ What is deliberately *not* verified here: the audio path itself, covered by
 [`audio-verification.md`](audio-verification.md); the board's noise floor,
 covered by [`noise-floor.md`](noise-floor.md); and the conditioning logic
 (filter, deadband, debounce, explicit bypass level), covered by the unit and
-property tests in `src/control/assign.rs` and `src/bela_host/controls.rs`,
+property tests in `crates/oxtt/src/control/assign.rs` and `crates/oxtt/src/bela_host/controls.rs`,
 which need no hardware.
 
 ## 1. Hardware under test
@@ -78,7 +78,7 @@ time, in channel order. Readings are the raw 0-to-1 fraction of full scale.
   between a pot and the two grounded inputs.
 - **The channel index is the pot.** Sweeping in `A0`→`A5` order moved the
   channels in `ch0`→`ch5` order, which is the order
-  `src/bela_host/controls.rs` maps onto `Pots`' fields.
+  `crates/oxtt/src/bela_host/controls.rs` maps onto `Pots`' fields.
 - **`A6` and `A7` are at ground**, 0.0000–0.0001 with zero travel, throughout
   every capture in this document.
 - **The upper stop sits above the nominal ceiling.** 0.8063–0.8065 against the
@@ -155,7 +155,7 @@ declares in `PiControls::CONDITIONING`. Eight counts here would be silent with a
 that margin is spent on nothing: as a fraction of travel it is 0.8% and about
 128 distinct positions across a sweep.
 
-`src/bela_host/controls.rs` therefore declares **3.0 counts** for this board,
+`crates/oxtt/src/bela_host/controls.rs` therefore declares **3.0 counts** for this board,
 which is above every reading actually observed — so a motionless pot is silent
 rather than merely quiet — and leaves 0.29% of travel, about 341 positions,
 and 0.141 dB per step on the two gain pots.
@@ -269,7 +269,7 @@ of runs separated by a pause.
 
 The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes a
 21 µs clipped frame visible at all. Its arithmetic is covered by unit tests in
-`src/metering.rs`; what the board adds is that the pin follows.
+`crates/oxtt/src/metering.rs`; what the board adds is that the pin follows.
 
 ## 7. Outstanding
 
@@ -277,7 +277,7 @@ The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes
   as on the Pi: the breadboard is too dense to disturb safely while the rig is
   running. What it would exercise is the bad-input path rather than an error
   path — an analog read cannot fail on this host — and
-  `src/bela_host/controls.rs` already covers the shape of it without hardware:
+  `crates/oxtt/src/bela_host/controls.rs` already covers the shape of it without hardware:
   a short frame and a nonsense reading both fall back to the quiet floor.
 - **Everything here is on a breadboard.** Re-measure section 4 when the
   surface moves into an enclosure with a loom, which is the change most likely

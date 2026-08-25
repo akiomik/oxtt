@@ -24,4 +24,4 @@ Gain is computed directly from this definition: `up_gain_db = effective_up_amoun
 
 - Every value of `amount` in `[0, 1]` is safe by construction: no input can produce an unstable or diverging slope, and no unit conversion is needed where `amount` is combined with `upward`/`downward`.
 - Anyone porting a "ratio" value from a reference compressor into `oxtt`'s preset table must convert it (`amount = 1 - 1/ratio`) rather than copying the number directly. `oxtt` does not target preset compatibility with any reference implementation, so this conversion is a one-time authoring step, not a runtime concern.
-- Verified at the boundary values by `gain_is_0db_everywhere_when_amounts_are_zero` and `effective_amount_clamps_to_unit_range` (`src/dsp/compressor.rs`).
+- Verified at the boundary values by `gain_is_0db_everywhere_when_amounts_are_zero` and `effective_amount_clamps_to_unit_range` (`crates/oxtt/src/dsp/compressor.rs`).

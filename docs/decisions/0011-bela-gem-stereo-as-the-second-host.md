@@ -169,8 +169,8 @@ type-checks the device half with.
 
 ## Consequences
 
-- oxtt has two hosts and one DSP. `src/bela_host.rs` is the counterpart of
-  `src/jack_host.rs` and contains no DSP, as that one contains none.
+- oxtt has two hosts and one DSP. `crates/oxtt/src/bela_host.rs` is the counterpart of
+  `crates/oxtt/src/jack_host.rs` and contains no DSP, as that one contains none.
 - **Almost all of the Bela host is testable on a development machine.**
   `bela`'s device code is behind a `bela_device` cfg its build script sets only
   for aarch64 Linux, so the application type, the control conversion and their

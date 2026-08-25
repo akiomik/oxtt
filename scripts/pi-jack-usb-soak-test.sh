@@ -252,7 +252,7 @@ jackd_pid=''
 
 # WAV verdict (dropout/clip/gap thresholds). Ported from an inline Python
 # analyser to target/release/soak_analyze so the thresholds are unit- and
-# property-tested; see tools/src/analysis.rs. Statistics go to stdout (kept in
+# property-tested; see crates/oxtt-jack-tools/src/analysis.rs. Statistics go to stdout (kept in
 # wav-analysis.txt); a rejection prints its reason to stderr and exits non-zero,
 # which pipefail propagates to abort the run.
 target/release/soak_analyze "$recording" "$duration" | tee "$output_dir/wav-analysis.txt"

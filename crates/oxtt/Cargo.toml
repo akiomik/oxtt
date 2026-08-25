@@ -6,6 +6,10 @@ rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
 description = "A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records OTT"
+# Cargo looks for a README beside the manifest, which stopped being the
+# repository's when this package moved under `crates/`. Named explicitly so
+# that `clippy::cargo_common_metadata` stays satisfied.
+readme = "../../README.md"
 keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
 categories = ["multimedia::audio"]
 

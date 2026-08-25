@@ -29,7 +29,7 @@ resistor you buy is environment-specific.
 | Pot reference | 3.3 V from the board, against the converter's 4.096 V full scale |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
-The constants above are not free choices. `src/bela_host/controls.rs` holds
+The constants above are not free choices. `crates/oxtt/src/bela_host/controls.rs` holds
 them and records why each is what it is; changing the channel assignment or the
 switch polarity changes that module too.
 
@@ -149,7 +149,7 @@ gain pots and fully dry on depth. Everything fails quiet.
 internal reference, which is **above** the 3.3 V rail the pots are wired
 across. A pot at its upper stop therefore reads about **0.806**, not 1.0.
 
-`src/bela_host/controls.rs` scales by that ratio, so the top of the travel means
+`crates/oxtt/src/bela_host/controls.rs` scales by that ratio, so the top of the travel means
 depth 1.0 and +24 dB. Scaling by full scale instead would stop the pots at 826
 of 1023 steps, which is +14.6 dB on the gain pots and a depth that never reaches
 fully wet — a plausible-looking result that is simply wrong, which is why it is

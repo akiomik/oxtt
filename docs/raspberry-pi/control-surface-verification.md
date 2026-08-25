@@ -21,7 +21,7 @@ Two things are deliberately *not* verified here. The audio path itself is
 covered by [`usb-audio-verification.md`](usb-audio-verification.md) and its
 `128×3` baseline is reused unchanged; the pure conditioning logic (filter,
 deadband, debounce, explicit bypass-level transport) is covered by the unit and property tests
-in `src/control/conditioning.rs` and needs no hardware. What this document verifies
+in `crates/oxtt/src/control/conditioning.rs` and needs no hardware. What this document verifies
 is the part that only real hardware can show: what the assembled surface
 actually reads, and whether the whole chain from a knob to the audio callback
 behaves as `docs/contracts.md` §8 says it must.
@@ -59,7 +59,7 @@ audio-stability scripts under `scripts/` exactly as before.
 
 **Result: PASS.** `oxtt-pi-tools` is the standalone wiring-verification
 binary. It depends only on `rppal`, not on `oxtt`, so it runs on a Pi with
-nothing else working, and `src/control/pi.rs` reproduces its read byte for
+nothing else working, and `crates/oxtt/src/control/pi.rs` reproduces its read byte for
 byte — same bus, same mode, same clock, same three-byte conversation. Run it
 before building `oxtt` and before involving JACK:
 
@@ -162,7 +162,7 @@ as the form to re-check against if the pots, the wiring, or the ADC change,
 and carries the derivation; it is not repeated here. Against this measurement,
 8.0 ≥ 6.39 holds with room to spare.
 
-The value itself lives in `src/control/pi.rs`, next to the hardware it was
+The value itself lives in `crates/oxtt/src/control/pi.rs`, next to the hardware it was
 measured on, rather than in the mapping layer: it is a property of this
 converter and not of the conditioning, and a second host measured an order of
 magnitude quieter
@@ -173,7 +173,7 @@ move.
 
 All six channels are the same part in the same divider on the same converter,
 so this measurement judges all of them, gain pots included. On the two gain
-pots the deadband also lands on a dB figure: `src/control/assign.rs` works it
+pots the deadband also lands on a dB figure: `crates/oxtt/src/control/assign.rs` works it
 out as `8 / 1023 * 48` ≈ 0.375 dB across the pots' 48 dB span, which is well
 under the roughly 1 dB step a listener picks out on programme material.
 
@@ -289,7 +289,7 @@ demonstrate:
   What it would show is that garbage readings cannot crash, hang, or silence
   the effect — the conditioning simply follows the garbage.
 - The **error** path is already covered without hardware, by the unit tests
-  in `src/control/thread.rs`: a source that fails some reads and then
+  in `crates/oxtt/src/control/thread.rs`: a source that fails some reads and then
   recovers is counted and survived, and a source that never succeeds neither
   panics nor publishes, leaving the callback on its last good snapshot.
 

@@ -1,6 +1,6 @@
 # Contracts and Invariants
 
-This is the normative reference for the public DSP API (`src/dsp.rs`, `src/params.rs`), the JACK audio callback (`src/jack_host.rs`), and the physical control surface (`src/control.rs`). It states observable guarantees and real-time requirements; it intentionally does not repeat constructor plumbing, CLI error rendering, lint configuration, or individual test names. `docs/development.md` describes how to run verification, and `docs/decisions/` records the rationale.
+This is the normative reference for the public DSP API (`crates/oxtt/src/dsp.rs`, `crates/oxtt/src/params.rs`), the JACK audio callback (`crates/oxtt/src/jack_host.rs`), and the physical control surface (`crates/oxtt/src/control.rs`). It states observable guarantees and real-time requirements; it intentionally does not repeat constructor plumbing, CLI error rendering, lint configuration, or individual test names. `docs/development.md` describes how to run verification, and `docs/decisions/` records the rationale.
 
 ## 1. Parameter validation
 
