@@ -2,6 +2,7 @@
 
 pub mod compressor;
 pub mod crossover;
+pub mod decibels;
 pub mod envelope;
 pub mod filter;
 pub mod smooth;
@@ -12,25 +13,9 @@ use crate::bands::Bands;
 use crate::params::{BandParams, ConfigError, GlobalParams, OttParams, OttProcessorUpdate};
 use compressor::{BandDynamics, DualThresholdCompressor, effective_amount};
 use crossover::Crossover;
+use decibels::db_to_amp;
 use envelope::{attack_release_ms, detector_power};
 use smooth::Smoothed;
-
-/// Internal floor (docs/contracts.md §4). Treats anything below `-120 dBFS`
-/// as zero input, preventing `log(0)`, division by zero, and NaN.
-pub(crate) const FLOOR_DB: f32 = -120.0;
-
-/// `db_to_amp(x) = 10^(x / 20)`.
-#[inline]
-pub(crate) fn db_to_amp(db: f32) -> f32 {
-    10f32.powf(db / 20.0)
-}
-
-/// `power_to_db(p) = 10 * log10(max(p, floor))`.
-#[inline]
-pub(crate) fn power_to_db(power: f32) -> f32 {
-    let floor_power = db_to_amp(FLOOR_DB) * db_to_amp(FLOOR_DB);
-    10.0 * power.max(floor_power).log10()
-}
 
 #[inline]
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -453,30 +438,6 @@ impl OttProcessor {
         }
 
         (out_left, out_right)
-    }
-}
-
-#[cfg(test)]
-mod unit_tests {
-    use super::*;
-
-    #[test]
-    fn db_to_amp_matches_reference_points() {
-        assert!((db_to_amp(0.0) - 1.0).abs() < 1e-6);
-        assert!((db_to_amp(-20.0) - 0.1).abs() < 1e-6);
-    }
-
-    #[test]
-    fn power_to_db_floors_zero_input() {
-        assert!(power_to_db(0.0).is_finite());
-        assert!((power_to_db(0.0) - FLOOR_DB).abs() < 1e-3);
-    }
-
-    #[test]
-    fn power_to_db_matches_db_to_amp_for_squared_amplitude() {
-        let amp = db_to_amp(-20.0);
-        let db_from_power = power_to_db(amp * amp);
-        assert!((db_from_power - (-20.0)).abs() < 1e-3);
     }
 }
 

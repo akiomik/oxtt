@@ -213,6 +213,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`src/dsp/filter.rs` holds the biquad and `Lr4` these exercise)
 - `src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `src/dsp/envelope.rs` — envelope follower and time-scaling tests
+- `src/dsp/decibels.rs` — the dB conversions and the floor they respect
 - `src/dsp/smooth.rs` — parameter-smoothing tests
 - `src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
 - `src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording

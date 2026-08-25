@@ -4,7 +4,7 @@
 //! threshold. 0 means no processing; 1 pins the signal to the threshold
 //! under extreme compression.
 
-use crate::dsp::db_to_amp;
+use crate::dsp::decibels::db_to_amp;
 use crate::dsp::envelope::BandEnvelope;
 
 /// Lower clamp for the combined gain (docs/contracts.md §4).
