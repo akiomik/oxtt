@@ -38,8 +38,21 @@ jobs:
         run: cargo test --workspace --all-targets --locked
       - name: cargo build --release
         run: cargo build --workspace --release --locked
-      - name: cargo test --release (no-panic proof, docs/contracts.md §6)
-        run: cargo test --release --locked
+      # Named crate by crate rather than left to `--workspace` or to
+      # `default-members`, because this step proves something specific: the
+      # `#[no_panic]` attributes that only hold under full optimisation
+      # (docs/contracts.md §6). The list is every crate that carries one.
+      #
+      # `oxtt-controls` is on it because `assign` runs inside Bela's audio
+      # callback. `oxtt` is not: the composition of conditioning, assignment
+      # and `apply_update` has no proof of its own — each half is proved in
+      # the crate that owns it, which is what makes a failure attributable.
+      #
+      # Add a crate here when it gains a `#[no_panic]`.
+      - name: cargo test --release (no-panic proofs, docs/contracts.md §6)
+        run: >-
+          cargo test --release --locked
+          -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls
 
   pi-controls:
     # The `pi-controls` feature is off by default and cannot build on macOS
@@ -55,9 +68,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
       - uses: Swatinem/rust-cache@v2
       - name: cargo clippy --features pi-controls
-        run: cargo clippy -p oxtt --features pi-controls --all-targets -- -D warnings
+        run: >-
+          cargo clippy -p oxtt --features pi-controls -p effectkit-controls-pi
+          --all-targets -- -D warnings
       - name: cargo test --features pi-controls
-        run: cargo test -p oxtt --features pi-controls --all-targets --locked
+        run: >-
+          cargo test -p oxtt --features pi-controls -p effectkit-controls-pi
+          --all-targets --locked
       - name: cargo build --features pi-controls
         run: cargo build -p oxtt --features pi-controls --locked
 
@@ -65,9 +82,13 @@ jobs:
     # `bela`'s device code is behind a `bela_device` cfg its build script only
     # sets for aarch64 Linux, so on this runner the crate builds with no
     # sysroot, no cross toolchain and no extra packages — and the Bela host's
-    # application type, control conversion and their tests are ordinary code
-    # that compiles and runs here. Only `bela_host::run` needs a board, and it
-    # is covered by the `bela-device` job below.
+    # application type and its tests are ordinary code that compiles and runs
+    # here. Only `bela_host::run` needs a board, and it is covered by the
+    # `bela-device` job below.
+    #
+    # The board's control conversion is no longer in this job's scope: it does
+    # not depend on libbela, so it lives in `effectkit-controls` (module `gem`)
+    # and is covered by the `test` job like any other crate.
     name: Bela host feature
     runs-on: ubuntu-latest
     steps:
@@ -77,8 +98,6 @@ jobs:
         run: cargo clippy -p oxtt --no-default-features --features bela-host --all-targets -- -D warnings
       - name: cargo test --features bela-host
         run: cargo test -p oxtt --no-default-features --features bela-host --all-targets --locked
-      - name: cargo test --release (no-panic proof, docs/contracts.md §6)
-        run: cargo test -p oxtt --release --no-default-features --features bela-host --locked
 
   bela-device:
     # Type-checks the half of the Bela host that only exists on the board:
@@ -91,7 +110,7 @@ jobs:
     # The no-panic proof cannot follow it here: proving it needs
     # `cargo test --release`, which needs to run the tests, which needs the
     # board. The proof stays a property of the source and the optimiser,
-    # established on x86-64 by the jobs above.
+    # established on x86-64 by the `test` job's explicit crate list.
     name: Bela device target
     runs-on: ubuntu-latest
     steps:
@@ -104,21 +123,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo clippy --target aarch64-unknown-linux-gnu
         run: cargo clippy -p oxtt --no-default-features --features bela-host --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
-
-  no-host:
-    # The DSP, the parameters and the control surface's mapping layer belong
-    # to no host and must keep building without one — that is what lets a
-    # second host be added by writing an adapter rather than by unpicking the
-    # first. Nothing else checks this: every other job enables a host.
-    name: No host feature
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy --no-default-features
-        run: cargo clippy -p oxtt --no-default-features --all-targets -- -D warnings
-      - name: cargo test --no-default-features
-        run: cargo test -p oxtt --no-default-features --all-targets --locked
 
   msrv:
     name: MSRV (1.88.0)

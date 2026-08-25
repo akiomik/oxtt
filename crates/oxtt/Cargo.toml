@@ -47,9 +47,11 @@ ebur128 = "0.1.10"
 effectkit = { path = "../effectkit" }
 effectkit-controls = { path = "../effectkit-controls" }
 effectkit-controls-pi = { path = "../effectkit-controls-pi", optional = true }
+oxtt-args = { path = "../oxtt-args" }
+oxtt-controls = { path = "../oxtt-controls" }
+oxtt-dsp = { path = "../oxtt-dsp" }
 hound = "3.5.1"
 jack = { workspace = true, optional = true }
-nutype = "0.7.0"
 signal-hook = { version = "0.4", optional = true }
 thiserror = { workspace = true }
 # Hands whole `OttParams` snapshots from the control thread to the audio

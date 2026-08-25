@@ -429,7 +429,7 @@ merges with the noise and pulls attention to it.
 The three gains are not interchangeable, and the difference is the whole
 problem. `--adc-gain-db` is analog and sits in front of everything, including
 the bypass path. `input_gain` is digital and sits *inside* the effect branch —
-`bypass_left` in `crates/oxtt/src/dsp.rs` is the crossover reconstruction of the raw input
+`bypass_left` in `crates/oxtt-dsp/src/dsp.rs` is the crossover reconstruction of the raw input
 and never sees it. `output_gain` is digital and applies to the effect branch
 only, after the bands are summed.
 

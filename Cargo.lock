@@ -461,11 +461,43 @@ dependencies = [
  "hound",
  "jack",
  "no-panic",
- "nutype",
+ "oxtt-args",
+ "oxtt-controls",
+ "oxtt-dsp",
  "proptest",
  "signal-hook",
  "thiserror",
  "triple_buffer",
+]
+
+[[package]]
+name = "oxtt-args"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "oxtt-dsp",
+]
+
+[[package]]
+name = "oxtt-controls"
+version = "0.1.0"
+dependencies = [
+ "effectkit-controls",
+ "no-panic",
+ "oxtt-dsp",
+ "proptest",
+]
+
+[[package]]
+name = "oxtt-dsp"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "effectkit",
+ "no-panic",
+ "nutype",
+ "proptest",
+ "thiserror",
 ]
 
 [[package]]

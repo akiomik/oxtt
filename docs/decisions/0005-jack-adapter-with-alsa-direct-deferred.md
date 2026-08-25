@@ -14,7 +14,7 @@ The target deployment includes a Raspberry Pi 5 with a class-compliant USB audio
 
 ## Decision
 
-Depend on the `jack` crate (0.13.x) exclusively for audio I/O, and keep all JACK-specific code confined to `crates/oxtt/src/jack_host.rs` and `crates/oxtt/src/main.rs`. `crates/oxtt/src/dsp/` and its public type `OttProcessor` (`crates/oxtt/src/dsp.rs`) have zero dependency on the `jack` crate or any other host-audio API — they operate purely on `&[f32]` slices.
+Depend on the `jack` crate (0.13.x) exclusively for audio I/O, and keep all JACK-specific code confined to `crates/oxtt/src/jack_host.rs` and `crates/oxtt/src/main.rs`. `crates/oxtt-dsp/src/dsp/` and its public type `OttProcessor` (`crates/oxtt-dsp/src/dsp.rs`) have zero dependency on the `jack` crate or any other host-audio API — they operate purely on `&[f32]` slices.
 
 ## Consequences
 

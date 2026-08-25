@@ -206,19 +206,36 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-Separately, `cargo test --release` also proves `OttProcessor::process`/`process_frame`/`reset`/`apply_update`, `SixPotBypassConditioner::update` and `control::assign` panic-free ([contracts.md §6](contracts.md#6-real-time-callback)); the proof only holds under full optimization, so it doesn't run as part of the plain debug-mode suite above.
+Separately, a release build proves the real-time path panic-free
+([contracts.md §6](contracts.md#6-real-time-callback)). The proof only holds
+under full optimization, so it does not run as part of the debug suite above,
+and it is asked for crate by crate rather than left to `--workspace`:
+
+```sh
+cargo test --release -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls
+```
+
+Each crate proves what is closed inside it — `effectkit`'s per-sample
+primitives, `SixPotBypassConditioner::update` and `PotTravel::from_counts`,
+`OttProcessor`'s callback methods, and `oxtt_controls::assign`. Their
+composition is deliberately not proved anywhere, so that a failure names the
+crate that caused it. **Add a crate to this list, and to the same step in
+`.github/workflows/ci.yml`, when it gains a `#[no_panic]`.**
 
 The suite is organized by module and none of it requires a running JACK server:
 
-- `crates/oxtt/src/cli.rs` — CLI argument parsing
-- `crates/oxtt/src/params/` — parameter value objects, validation, and presets
-- `crates/oxtt/src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
-- `crates/oxtt/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/effectkit/src/filter.rs` holds the biquad and `Lr4` these exercise)
-- `crates/oxtt/src/dsp/compressor.rs` — dual-threshold gain computation tests
-- `crates/oxtt/src/dsp/envelope.rs` — envelope follower and time-scaling tests
+- `crates/oxtt-args/src/lib.rs` — the shared CLI arguments; `crates/oxtt/src/cli.rs` — the JACK binary's own flags
+- `crates/oxtt-dsp/src/params/` — parameter value objects, validation, and presets
+- `crates/oxtt-dsp/src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
+- `crates/oxtt-dsp/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/effectkit/src/filter.rs` holds the biquad and `Lr4` these exercise)
+- `crates/oxtt-dsp/src/dsp/compressor.rs` — dual-threshold gain computation tests
+- `crates/oxtt-dsp/src/dsp/envelope.rs` — envelope follower and time-scaling tests
 - `crates/effectkit/src/` — the effect-independent primitives: parameter smoothing, the biquad and `Lr4` sections, the dB conversions and the floor they respect, and the input meter
-- `crates/oxtt/src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
-- `crates/oxtt/src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording
+- `crates/effectkit-controls/src/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)), and `gem.rs`'s analog-reading-to-pot-position conversion, the board's own measured deadband and the read decimator
+- `crates/oxtt-controls/src/lib.rs` — the pot-to-parameter assignment, and the conditioning/assignment pair driven end to end
+- `crates/effectkit-controls-pi/src/lib.rs` — the MCP3008 command/response encoding (Linux only)
+- `crates/oxtt/src/control/thread.rs` — only under `--features jack-host`: the control thread and its handoff
+- `crates/oxtt/src/bela_host/` — only under `--features bela-host`: the settings the board is asked for, and the exit report's wording
 
 See [contracts.md](contracts.md) for the guarantees those tests protect.
 

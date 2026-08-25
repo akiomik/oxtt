@@ -1,0 +1,21 @@
+[package]
+name = "oxtt-controls"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Assigns a conditioned six-pot control surface onto oxtt's parameters"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+effectkit-controls = { path = "../effectkit-controls" }
+oxtt-dsp = { path = "../oxtt-dsp" }
+
+[dev-dependencies]
+no-panic = "0.1"
+proptest = { workspace = true }
+
+[lints]
+workspace = true

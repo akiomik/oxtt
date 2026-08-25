@@ -19,7 +19,7 @@ use core::num::NonZeroU32;
 
 use thiserror::Error;
 
-use crate::params::ConfigError;
+use oxtt_dsp::params::ConfigError;
 
 pub use app::{OttApplication, OttRenderState, RunDiagnostics};
 pub use cli::BelaCli;
@@ -185,8 +185,8 @@ mod device {
     use bela::{Bela, Channel};
 
     use super::{HostError, OttApplication, RunOptions, settings};
-    use crate::dsp::OttProcessor;
-    use crate::params::OttParams;
+    use oxtt_dsp::dsp::OttProcessor;
+    use oxtt_dsp::params::OttParams;
 
     /// Brings up the audio system, runs until stopped, and reports.
     ///

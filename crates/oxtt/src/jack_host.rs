@@ -12,8 +12,8 @@ use signal_hook::flag;
 use thiserror::Error;
 
 use crate::control::ControlHandle;
-use crate::dsp::OttProcessor;
-use crate::params::{ConfigError, OttParams, OttProcessorUpdate};
+use oxtt_dsp::dsp::OttProcessor;
+use oxtt_dsp::params::{ConfigError, OttParams, OttProcessorUpdate};
 
 /// JACK client name and the port names it registers (docs/contracts.md §7).
 const CLIENT_NAME: &str = "oxtt";

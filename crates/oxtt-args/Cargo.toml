@@ -1,0 +1,17 @@
+[package]
+name = "oxtt-args"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "The command-line arguments oxtt's binaries share: a startup preset and the global parameter overrides"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+oxtt-dsp = { path = "../oxtt-dsp", features = ["clap"] }
+
+[lints]
+workspace = true

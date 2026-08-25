@@ -51,13 +51,41 @@ bin/oxtt-bela.rs
 
 Only `bela_host::run` needs a board. Everything else above it — the application type, the control conversion, and their tests — compiles and runs on a development machine, because `bela`'s device code sits behind a `bela_device` cfg its build script sets only for aarch64 Linux.
 
+### The crates
+
+Nine packages, in three groups. The line between them is one question: does
+this depend on what oxtt *is*?
+
+```
+effect-independent            effectkit              smoothing, biquad/Lr4, dB, metering
+                              effectkit-controls     six pots + latching switch, conditioned
+                              effectkit-controls-pi  the Pi's read of that surface (Linux)
+                              effectkit-pi-tools     the calibration tools those numbers came from
+
+oxtt                          oxtt-dsp               OttProcessor, parameters, presets
+                              oxtt-controls          what each pot does
+                              oxtt-args              the arguments the binaries share
+                              oxtt                   the binaries, the hosts, the renderer
+
+tools                         oxtt-jack-tools        JACK soak testing
+```
+
+Only `effectkit` is published; everything else is `publish = false`.
+`effectkit-controls*` are unpublished because they fix one panel's contract and
+no second panel has existed yet to say which parts of it are general.
+
+`oxtt-controls` is split from `oxtt-dsp` so that `oxtt-render`, which has no
+control surface, does not acquire a six-pot API transitively — and so that
+`oxtt-dsp` goes on meaning "the DSP". `oxtt-args` is split out because all three
+binaries flatten the same parameter arguments.
+
 ### What the two share
 
-`OttProcessor` (`crates/oxtt/src/dsp.rs`) has no dependency on JACK, on libbela, or on any other host-audio API; it operates purely on `f32` samples. `jack_host.rs` and `bela_host.rs` register ports and wire callbacks — neither contains DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without an audio system at all, and it is what made the second host an adapter rather than a port.
+`OttProcessor` (`crates/oxtt-dsp/src/dsp.rs`) has no dependency on JACK, on libbela, or on any other host-audio API; it operates purely on `f32` samples, and it is a crate of its own so that the boundary is a linkage fact rather than a convention. `jack_host.rs` and `bela_host.rs` register ports and wire callbacks — neither contains DSP logic. This separation is what lets the DSP core run and be tested (`cargo test`) without an audio system at all, and it is what made the second host an adapter rather than a port.
 
 The two hosts reach the DSP through different doors for the same reason they exist separately: JACK hands over four per-channel buffers, so it calls `process`; Bela hands over interleaved frames paired with their outputs, so it calls `process_frame` and needs no intermediate buffer. `process` is a loop over `process_frame`, and `contracts.md` section 3 states that the two agree.
 
-The control surface (`crates/oxtt/src/control.rs`) is layered on the same principle, and layer B is split in two. B1, `SixPotBypassConditioner` (`crates/effectkit-controls/src/conditioning.rs`, in `effectkit-controls`), filters jitter, applies the deadband, debounces the switch and normalises onto `PotTravel`; it knows nothing about OTT and is what a second effect on the same panel reuses. B2, `assign` (`crates/oxtt/src/control/assign.rs`), is the one place a pot is given a meaning. Both are pure, allocation-free and panic-free, so they hold themselves to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call them from `render_pre` directly. Neither half owns the base `OttParams`; whoever joins the two does. Layer A is the hardware read — `PiControls` (`crates/effectkit-controls-pi`, reached through the `pi-controls` feature) for the Raspberry Pi, and the free functions in `crates/effectkit-controls/src/gem.rs` for a Bela Gem. Layer C, `ControlHandle` (`crates/oxtt/src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
+The control surface (`crates/oxtt/src/control.rs`) is layered on the same principle, and layer B is split in two. B1, `SixPotBypassConditioner` (`crates/effectkit-controls/src/conditioning.rs`, in `effectkit-controls`), filters jitter, applies the deadband, debounces the switch and normalises onto `PotTravel`; it knows nothing about OTT and is what a second effect on the same panel reuses. B2, `assign` (`crates/oxtt-controls/src/lib.rs`, its own crate so that `oxtt-render` does not acquire a six-pot API transitively), is the one place a pot is given a meaning. Both are pure, allocation-free and panic-free, so they hold themselves to the audio callback's own prohibitions (`contracts.md` section 6). That is what lets the Bela host call them from `render_pre` directly. Neither half owns the base `OttParams`; whoever joins the two does. Layer A is the hardware read — `PiControls` (`crates/effectkit-controls-pi`, reached through the `pi-controls` feature) for the Raspberry Pi, and the free functions in `crates/effectkit-controls/src/gem.rs` for a Bela Gem. Layer C, `ControlHandle` (`crates/oxtt/src/control/thread.rs`), is the polling thread and the lock-free handoff, and exists only under `jack-host`: Bela's callback reads the hardware itself, so it has nothing to carry across a thread boundary.
 
 The seam between layer A and layer B is the `RawControls` *value*, not the `ControlSource` trait — the trait is the Raspberry Pi's way of producing one, and the Bela host does not implement it (`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`, revised by ADR 0011). What layer B gains in exchange for being platform-independent is a duty on its callers: its constants are defined per read, so a host owes it reads at the rate they were calibrated for. JACK's poll interval supplies that directly; Bela's `PollDecimator` reads on every *n*th block to reach it.
 
@@ -90,9 +118,9 @@ input_l, input_r
 
 - `GlobalRuntime`: smoothed input/output gain, depth, time, upward, downward.
 - `Crossover`: log-smoothed low/high cutoff, plus, per channel, three independent `Lr4` pairs (low split, high split, phase compensator) — six second-order biquad cascades per channel, twelve total.
-- `Bands<BandProcessor>`: smoothed per-band thresholds/amounts/makeup gain, and one `DualThresholdCompressor` (two envelope states, `low_env` and `high_env`) each. `Bands<T>` (`crates/oxtt/src/bands.rs`) fixes the arity at exactly `low`/`mid`/`high` rather than `[T; 3]`, since oxtt is architecturally a 3-band compressor — used the same way for `OttParams::bands` and for `Crossover`'s per-band filter outputs, so the "3 bands" concept has one representation from config through to the real-time core.
+- `Bands<BandProcessor>`: smoothed per-band thresholds/amounts/makeup gain, and one `DualThresholdCompressor` (two envelope states, `low_env` and `high_env`) each. `Bands<T>` (`crates/oxtt-dsp/src/bands.rs`) fixes the arity at exactly `low`/`mid`/`high` rather than `[T; 3]`, since oxtt is architecturally a 3-band compressor — used the same way for `OttParams::bands` and for `Crossover`'s per-band filter outputs, so the "3 bands" concept has one representation from config through to the real-time core.
 
-There is no intermediate buffer sized to the host's callback buffer. Processing is frame-by-frame: one stereo sample is split, processed by all three bands, summed, and written, before moving to the next sample. This is what makes `process()`'s output independent of how the caller chunks the input slices — verified by `chunking_does_not_affect_output` (`crates/oxtt/src/dsp.rs`).
+There is no intermediate buffer sized to the host's callback buffer. Processing is frame-by-frame: one stereo sample is split, processed by all three bands, summed, and written, before moving to the next sample. This is what makes `process()`'s output independent of how the caller chunks the input slices — verified by `chunking_does_not_affect_output` (`crates/oxtt-dsp/src/dsp.rs`).
 
 With a control surface attached, two more owners exist, both outside the DSP:
 

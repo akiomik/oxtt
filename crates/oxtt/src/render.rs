@@ -13,8 +13,8 @@ use ebur128::{EbuR128, Mode};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use thiserror::Error;
 
-use crate::dsp::{OttProcessor, ProcessError};
-use crate::params::{ConfigError, OttParams};
+use oxtt_dsp::dsp::{OttProcessor, ProcessError};
+use oxtt_dsp::params::{ConfigError, OttParams};
 
 const CHANNELS: u16 = 2;
 const FRAMES_PER_CHUNK: usize = 4_096;
@@ -397,7 +397,7 @@ mod tests {
     use hound::WavWriter;
 
     use super::*;
-    use crate::params::Preset;
+    use oxtt_dsp::params::Preset;
 
     fn path(name: &str) -> PathBuf {
         env::temp_dir().join(format!(

@@ -1,7 +1,5 @@
 //! Startup presets (docs/contracts.md §1, ADR 0006).
 
-use clap::ValueEnum;
-
 use crate::bands::Bands;
 
 use super::model::{BandParams, CrossoverSplit, GlobalParams, OttParams, ThresholdRange};
@@ -10,7 +8,12 @@ use super::value::{
 };
 
 /// Startup presets (docs/contracts.md §1, ADR 0006).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+///
+/// `clap::ValueEnum` is derived under the `clap` feature. It has to be derived
+/// here — the orphan rule leaves nowhere else — but a DSP core does not depend
+/// on an argument parser unless asked; `oxtt-args` asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Preset {
     /// Conservative output level, suitable for a first listen (docs/contracts.md §1).
     #[default]

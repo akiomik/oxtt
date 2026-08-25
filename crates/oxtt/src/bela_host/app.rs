@@ -13,13 +13,13 @@ use bela::{
     SetupContext, ThreadInfo,
 };
 
-use crate::control::assign;
-use crate::dsp::OttProcessor;
-use crate::params::OttParams;
 use effectkit::metering::{ClipIndicator, InputMeter};
 use effectkit_controls::SixPotBypassConditioner;
 use effectkit_controls::gem::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
 use effectkit_controls::surfaces::GEM;
+use oxtt_controls::assign;
+use oxtt_dsp::dsp::OttProcessor;
+use oxtt_dsp::params::OttParams;
 
 /// Analog frame the control surface is read from.
 ///
@@ -581,7 +581,7 @@ fn input_meter(states: &[OttRenderState]) -> InputMeter {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::params::Preset;
+    use oxtt_dsp::params::Preset;
 
     /// A meter that has seen one frame at the given magnitude, which is the
     /// shortest way to build a `RunDiagnostics` with a known level in it.

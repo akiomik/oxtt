@@ -10,7 +10,7 @@ use core::num::NonZeroU32;
 use clap::Parser;
 
 use super::RunOptions;
-use crate::cli::ParamsArgs;
+use oxtt_args::ParamsArgs;
 
 /// Command-line arguments for the Bela host.
 ///

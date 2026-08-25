@@ -7,7 +7,8 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use oxtt::{cli::Cli, jack_host, params::OttParams};
+use oxtt::{cli::Cli, jack_host};
+use oxtt_dsp::params::OttParams;
 
 #[cfg(feature = "pi-controls")]
 use effectkit_controls_pi::{PiControlError, PiControls};

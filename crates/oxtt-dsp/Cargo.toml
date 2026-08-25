@@ -1,0 +1,32 @@
+[package]
+name = "oxtt-dsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "The DSP core of oxtt: a 3-band upward/downward multiband compressor, free of any audio host"
+readme = "../../README.md"
+publish = false
+
+[features]
+# Derives `clap::ValueEnum` on `Preset`, and nothing else.
+#
+# A dependency-enabling feature, not a build configuration: the orphan rule
+# means the impl can only exist in this crate, but a DSP core has no business
+# depending on an argument parser by default. `oxtt-args` turns it on, and it
+# is the only crate that needs it.
+clap = ["dep:clap"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
+effectkit = { path = "../effectkit" }
+nutype = "0.7.0"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+no-panic = "0.1"
+proptest = { workspace = true }
+
+[lints]
+workspace = true

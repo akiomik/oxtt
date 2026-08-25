@@ -77,7 +77,7 @@ Generic parts; no specific vendor part number is assumed.
 
 ### Why the pots must be linear taper
 
-`crates/oxtt/src/control/assign.rs` converts a pot's travel to a normalized parameter with a
+`crates/oxtt-controls/src/lib.rs` converts a pot's travel to a normalized parameter with a
 plain `raw / 1023` and no curve fitting, and `effectkit-pi-tools` displays the same
 scale. That mapping is only correct for a linear-taper pot. A log/audio-taper
 pot will still read 0–1023 end to end and will still look fine in
@@ -408,7 +408,7 @@ Depth=991 (0.969) Time=1023 (1.000) Upward=1017 (0.994) Downward=1002 (0.980) In
 
 The four dynamics channels are shown as the normalized `0.000..=1.000` the
 effect acts on; the two gain channels are shown in dB, on the same
-`-24..+24` map `crates/oxtt/src/control/assign.rs` uses, so a centred gain pot reads
+`-24..+24` map `crates/oxtt-controls/src/lib.rs` uses, so a centred gain pot reads
 approximately `+0.0 dB`.
 
 If it fails to start, the error says which device: an SPI error sends you back

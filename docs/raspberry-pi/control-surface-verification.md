@@ -173,7 +173,7 @@ move.
 
 All six channels are the same part in the same divider on the same converter,
 so this measurement judges all of them, gain pots included. On the two gain
-pots the deadband also lands on a dB figure: `crates/oxtt/src/control/assign.rs` works it
+pots the deadband also lands on a dB figure: `crates/oxtt-controls/src/lib.rs` works it
 out as `8 / 1023 * 48` ≈ 0.375 dB across the pots' 48 dB span, which is well
 under the roughly 1 dB step a listener picks out on programme material.
 

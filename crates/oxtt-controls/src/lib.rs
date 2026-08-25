@@ -1,5 +1,10 @@
 //! Layer B2 for oxtt: what each pot on the control surface does.
 //!
+//! One function, [`assign`]. It is a crate of its own rather than a module of
+//! `oxtt-dsp` so that `oxtt-render`, which renders a file and has no control
+//! surface, does not acquire a transitive dependency on a six-pot API — and so
+//! that `oxtt-dsp` keeps meaning "the DSP".
+//!
 //! The only place in this program where a pot is given a meaning. Everything
 //! before it — the read, the jitter filter, the deadband, the debounce, the
 //! normalisation onto [`PotTravel`] — is effect-independent and shared
@@ -11,7 +16,7 @@
 //! knob. `effectkit_controls::gem`'s `channel_order_is_pot_order` is the test
 //! that pins the other end of that chain down.
 
-use crate::params::{IoGain, NormalizedF32, OttParams, OttProcessorUpdate};
+use oxtt_dsp::params::{IoGain, NormalizedF32, OttParams, OttProcessorUpdate};
 
 use effectkit_controls::{ConditionedControls, PotTravel};
 
@@ -125,11 +130,11 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::params::Preset;
     use effectkit_controls::{
         ConditioningConfig, DeadbandCounts, DebounceReads, FilterCoefficient, POT_POSITION_MAX,
         PollHz, PotPosition, Pots, RawControls, SixPotBypassConditioner,
     };
+    use oxtt_dsp::params::Preset;
 
     const PROPERTY_CASES: u32 = 128;
     const SAMPLE_RATE: f32 = 48_000.0;

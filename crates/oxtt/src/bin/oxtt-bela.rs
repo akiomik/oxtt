@@ -20,10 +20,8 @@ use std::process::ExitCode;
 use clap::Parser;
 #[cfg(bela_device)]
 use oxtt::bela_host::run;
-use oxtt::{
-    bela_host::{BelaCli, RunOptions},
-    params::OttParams,
-};
+use oxtt::bela_host::{BelaCli, RunOptions};
+use oxtt_dsp::params::OttParams;
 
 /// Parses the command line into the two things a run needs.
 ///

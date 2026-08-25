@@ -75,7 +75,7 @@ findings drive the reopening.
    that PocketBeagle 2 actually runs cool enough to seal into an enclosure — is
    substantiated under *Power draw versus Raspberry Pi 5* below.
 3. **The DSP core's portability cost is small, and now verified — but this
-   finding is scoped to `crates/oxtt/src/dsp/` only.** The real-time signal path uses only
+   finding is scoped to `crates/oxtt-dsp/src/dsp/` only.** The real-time signal path uses only
    `exp` and `ln` transcendentals, at block / parameter granularity rather than
    per sample; its only `std` dependence is `std::{f32,f64}::consts`, which exist
    identically in `core`; there are no heap allocations on the audio path. A
@@ -98,7 +98,7 @@ findings drive the reopening.
    Teensy), read directly in the control loop instead of through a queue from a
    separate thread. The CLI layer (`crates/oxtt/src/cli.rs`, `crates/oxtt/src/main.rs`) is `std`-dependent
    (`clap`) and does not carry over to bare metal either, though the preset table
-   (`crates/oxtt/src/params/preset.rs`) is `const` data with no file I/O and is unaffected.
+   (`crates/oxtt-dsp/src/params/preset.rs`) is `const` data with no file I/O and is unaffected.
    For Daisy/Teensy, then, the migration is not "port the DSP plus write a new
    audio adapter" — it is that plus a rewrite of the control-acquisition and CLI
    host layer, a materially larger scope than finding 3 alone suggests. This
@@ -205,7 +205,7 @@ current rules and should be rechecked if ordering after that repeal takes effect
 
 ### Compute headroom for FFT-heavy spectral effects
 
-The current DSP (`crates/oxtt/src/dsp/`) is IIR-only (biquads, envelope followers), the
+The current DSP (`crates/oxtt-dsp/src/dsp/`) is IIR-only (biquads, envelope followers), the
 workload finding 3 verified as cheap to port. Future effects under consideration
 go beyond that profile: a "pitchmap/chroma"-style effect combining a harmonic
 resonator, multi-stage bandpass filter, comb filter, and phase vocoder; and a
