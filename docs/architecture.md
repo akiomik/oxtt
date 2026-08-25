@@ -72,7 +72,8 @@ tools                         oxtt-jack-tools        JACK soak testing
 
 Only `effectkit` is published; everything else is `publish = false`.
 `effectkit-controls*` are unpublished because they fix one panel's contract and
-no second panel has existed yet to say which parts of it are general.
+no second panel has existed yet to say which parts of it are general
+(`decisions/0013-crates-not-features-and-effectkit-as-the-shared-half.md`).
 
 `oxtt-controls` is split from `oxtt-dsp` so that `oxtt-render`, which has no
 control surface, does not acquire a six-pot API transitively — and so that

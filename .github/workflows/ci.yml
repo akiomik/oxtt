@@ -67,13 +67,15 @@ jobs:
       - name: Install JACK development headers
         run: sudo apt-get update && sudo apt-get install -y libjack-jackd2-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+      # `oxtt/pi-controls` rather than a bare feature name: two packages are
+      # selected and only one of them has the feature.
       - name: cargo clippy --features pi-controls
         run: >-
-          cargo clippy -p oxtt --features pi-controls -p effectkit-controls-pi
+          cargo clippy -p oxtt -p effectkit-controls-pi --features oxtt/pi-controls
           --all-targets -- -D warnings
       - name: cargo test --features pi-controls
         run: >-
-          cargo test -p oxtt --features pi-controls -p effectkit-controls-pi
+          cargo test -p oxtt -p effectkit-controls-pi --features oxtt/pi-controls
           --all-targets --locked
       - name: cargo build --features pi-controls
         run: cargo build -p oxtt --features pi-controls --locked
@@ -81,10 +83,11 @@ jobs:
   bela-device:
     # Type-checks the half of `oxtt-bela` that only exists on the board:
     # everything behind `cfg(bela_device)`, which nothing above compiles. The
-    # rest of the package is an ordinary workspace member and is covered by
-    # `lint` and `test` — `bela`'s device code is behind a `bela_device` cfg
-    # its build script sets only for aarch64 Linux, so on an x86-64 runner the
-    # crate builds with no sysroot and no cross toolchain.
+    # rest of the package needs no job of its own — `bela`'s device code is
+    # behind a `bela_device` cfg its build script sets only for aarch64 Linux,
+    # so on an x86-64 runner `oxtt-bela` is an ordinary workspace member that
+    # `lint` and `test` already cover.
+    #
     # `cargo clippy` does not link, so this needs neither `libbela` nor the
     # 800 MB sysroot a real device build copies off the board — only the
     # target's standard library. Producing an actual binary is a

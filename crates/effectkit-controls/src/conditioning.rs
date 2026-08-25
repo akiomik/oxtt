@@ -185,7 +185,8 @@ impl PollHz {
 /// layer B deliberately does not
 /// ([`PotTravel`](crate::PotTravel) is a fraction of travel). The asymmetry is
 /// intended: a deadband quoted as a fraction would have to be converted back
-/// before it could be compared against anything.
+/// before it could be compared against anything, and the `deadband >= σ` rule
+/// would compare a fraction against a count (ADR 0014).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConditioningConfig {
     filter_coefficient: FilterCoefficient,

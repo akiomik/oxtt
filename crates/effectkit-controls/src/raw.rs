@@ -18,8 +18,12 @@ use super::conditioning::ConditioningConfig;
 /// produces directly: a 10-bit successive-approximation conversion spans
 /// `0..=2^10 - 1`, with full scale at the reference voltage (3.3 V on the
 /// Pi's header). It stays the scale on a platform whose converter is a
-/// different width, because the mapping layer's constants — the deadband
-/// above all — are calibrated in these steps.
+/// different width, because the conditioning constants — the deadband above
+/// all — are calibrated in these steps.
+///
+/// **This is a declaration about every surface, not just the two that exist**
+/// (ADR 0014). Raising it means re-deriving each surface's `deadband_counts`
+/// from its measurement rather than multiplying the existing number.
 pub const POT_POSITION_MAX: u16 = 1023;
 
 /// Where a pot is sitting, as a step from zero up to [`POT_POSITION_MAX`].

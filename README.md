@@ -88,7 +88,7 @@ limiter; inspect the reported sample and true peaks before playback.
 
 ### `--controls`
 
-Both hosts accept `--controls`, which drives six parameters from a physical control surface instead of the CLI flags: potentiometers for depth/time/upward/downward and the input/output gains, and a latching switch that bypasses the effect. Everything after the hardware read is shared — the jitter filtering, the deadband, the debounce and the mapping to parameters are the same code on both boards ([ADR 0010](docs/decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)).
+Both hosts accept `--controls`, which drives six parameters from a physical control surface instead of the CLI flags: potentiometers for depth/time/upward/downward and the input/output gains, and a latching switch that bypasses the effect. Everything after the hardware read is shared — the jitter filtering, the deadband and the debounce are the same code on both boards ([ADR 0010](docs/decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)), in a crate that knows nothing about this effect ([ADR 0013](docs/decisions/0013-crates-not-features-and-effectkit-as-the-shared-half.md)).
 
 The flag is opt-in on both, so the same binary still runs off CLI flags alone with nothing wired up.
 
