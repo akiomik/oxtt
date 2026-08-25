@@ -1,10 +1,10 @@
 [workspace]
 members = ["crates/*"]
 # `--workspace` still builds everything, so this only changes what a bare
-# `cargo build`/`cargo test` picks: `oxtt-pi-tools` depends on `rppal`
+# `cargo build`/`cargo test` picks: the Raspberry Pi crates depend on `rppal`
 # unconditionally and `rppal` is Linux-only, so leaving it in would break the
 # no-selector commands on the macOS machine the DSP is developed on. Building
-# it is a `-p oxtt-pi-tools` or a Linux `--workspace` away.
+# it is a `-p effectkit-pi-tools` or a Linux `--workspace` away.
 default-members = [
     "crates/effectkit",
     "crates/effectkit-controls",
@@ -18,8 +18,8 @@ resolver = "3"
 # binding; keeping them in sync avoids `clippy::multiple_crate_versions`.
 jack = "0.13"
 proptest = "1"
-# Shared between `oxtt`'s optional `pi-controls` feature and `oxtt-pi-tools`,
-# for the same single-version reason as `jack` above.
+# Shared between `effectkit-controls-pi` and `effectkit-pi-tools`, for the
+# same single-version reason as `jack` above.
 rppal = "0.22"
 thiserror = "2"
 

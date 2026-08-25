@@ -1,14 +1,19 @@
-//! Wiring verification for oxtt's physical control surface: reads MCP3008
+//! Wiring verification for an `effectkit` control surface: reads MCP3008
 //! channels 0-5 (Depth, Time, Upward, Downward, Input Gain, Output Gain) over
 //! SPI0 and the Bypass switch on GPIO17, printing raw and converted values to
 //! stdout in a loop. The same wiring, and the reasoning behind each constant,
-//! is documented in `crates/oxtt/src/control/pi.rs`, which reproduces this read inside
-//! `oxtt` itself.
+//! is documented in `crates/effectkit-controls-pi/src/lib.rs`, which reproduces
+//! this read inside the effect itself.
 //!
 //! The conversions here are display-only sanity checks, not the real
 //! `NormalizedF32`/`IoGain` conversions in `crates/oxtt/src/control/assign.rs` -- this
-//! tool stays independent of the `oxtt` crate by design, so it can be run on a
-//! Pi with nothing else working. They mirror that module's arithmetic so the
+//! tool depends on nothing else in this workspace by design. Two reasons, and
+//! the second is the one that matters: it can be run on a Pi with nothing else
+//! working, and — because what it measures is the σ of the *raw* readings, the
+//! figure `effectkit-controls`' filter coefficient and deadband are justified
+//! against — it must never end up measuring values that have already been
+//! through that filter. Calibrating a filter through itself proves nothing.
+//! If layer A is ever reused here, reuse layer A alone. They mirror that module's arithmetic so the
 //! numbers on screen are the numbers the effect will act on:
 //!
 //! - CH0-CH3 are a plain linear scale (raw / 1023). No per-pot calibration

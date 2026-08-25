@@ -1,0 +1,21 @@
+[package]
+name = "effectkit-controls-pi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Reads a six-pot, latching-bypass control surface on a Raspberry Pi: MCP3008 over SPI0/CE0 and a GPIO switch"
+readme = "../../README.md"
+# Not published, for the same reason as `effectkit-controls`: this fixes one
+# breadboard's wiring — an MCP3008 on SPI0/CE0 and a switch on GPIO17 — and
+# nothing has yet asked for a second.
+publish = false
+
+[dependencies]
+effectkit-controls = { path = "../effectkit-controls" }
+rppal = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

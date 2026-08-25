@@ -1,11 +1,12 @@
 [package]
-name = "oxtt-pi-tools"
+name = "effectkit-pi-tools"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Raspberry Pi GPIO/SPI wiring verification tools for oxtt"
+description = "Raspberry Pi GPIO/SPI wiring verification and jitter-calibration tools for an effectkit control surface"
 repository.workspace = true
 license.workspace = true
+readme = "../../README.md"
 publish = false
 
 [dependencies]
@@ -16,6 +17,8 @@ rppal = { workspace = true }
 # no allocation, no indexing). Cargo refuses a member that both inherits
 # `[workspace.lints]` and overrides part of it, so this spells out the weaker
 # set in full rather than inheriting.
+#
+# It also deliberately depends on nothing else here — see the crate docs.
 [lints.rust]
 missing_docs = "warn"
 

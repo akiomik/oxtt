@@ -7,7 +7,7 @@
 //!
 //! | Layer | Responsibility | Where |
 //! |---|---|---|
-//! | A: raw read | produce a `RawControls` value | `effectkit_controls::gem`, or [`PiControls`] (module `pi`) |
+//! | A: raw read | produce a `RawControls` value | `effectkit_controls::gem`, or `effectkit-controls-pi` |
 //! | B1: conditioning | jitter filter, deadband, debounce, normalisation | `effectkit_controls::SixPotBypassConditioner` |
 //! | **B2: assignment** | **what each pot *does*** | [`assign`], here |
 //! | **C: transport** | **control thread plus a `triple_buffer` handoff into the audio callback** | [`ControlHandle`], here, JACK only |
@@ -32,17 +32,13 @@
 //! check that guess against — hyperglare is Bela-only, so one is not coming
 //! from there either.
 //!
-//! [`PiControls`] (module `pi`) is compiled only under the `pi-controls`
-//! feature, because `rppal` is Linux-only.
+//! The Raspberry Pi's layer A is reached through the `pi-controls` feature,
+//! because its `rppal` dependency is Linux-only.
 
 mod assign;
-#[cfg(feature = "pi-controls")]
-mod pi;
 #[cfg(feature = "jack-host")]
 mod thread;
 
 pub use assign::assign;
-#[cfg(feature = "pi-controls")]
-pub use pi::{PiControlError, PiControls};
 #[cfg(feature = "jack-host")]
 pub use thread::ControlHandle;

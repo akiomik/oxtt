@@ -57,14 +57,14 @@ audio-stability scripts under `scripts/` exactly as before.
 
 ## 3. Wiring check
 
-**Result: PASS.** `oxtt-pi-tools` is the standalone wiring-verification
+**Result: PASS.** `effectkit-pi-tools` is the standalone wiring-verification
 binary. It depends only on `rppal`, not on `oxtt`, so it runs on a Pi with
-nothing else working, and `crates/oxtt/src/control/pi.rs` reproduces its read byte for
+nothing else working, and `crates/effectkit-controls-pi/src/lib.rs` reproduces its read byte for
 byte — same bus, same mode, same clock, same three-byte conversation. Run it
 before building `oxtt` and before involving JACK:
 
 ```sh
-cargo run --release -p oxtt-pi-tools
+cargo run --release -p effectkit-pi-tools
 ```
 
 It prints one line every 200 ms:
@@ -97,7 +97,7 @@ noisiest — and that is not what the hardware does.
 Two positions were captured, with all six pots left completely untouched for
 the duration of each: full travel (against the upper end stop) and mid travel
 (centred). Each capture is 300 readings per channel, taken together across all
-six channels rather than one pot at a time; at `oxtt-pi-tools`'s 200 ms poll
+six channels rather than one pot at a time; at `effectkit-pi-tools`'s 200 ms poll
 interval that is 60 seconds per capture.
 
 `scripts/pi-idle-jitter.sh` captures one position and reduces it to
@@ -162,7 +162,7 @@ as the form to re-check against if the pots, the wiring, or the ADC change,
 and carries the derivation; it is not repeated here. Against this measurement,
 8.0 ≥ 6.39 holds with room to spare.
 
-The value itself lives in `crates/oxtt/src/control/pi.rs`, next to the hardware it was
+The value itself lives in `crates/effectkit-controls-pi/src/lib.rs`, next to the hardware it was
 measured on, rather than in the mapping layer: it is a property of this
 converter and not of the conditioning, and a second host measured an order of
 magnitude quieter
@@ -216,7 +216,7 @@ describe the superseded gain/depth-transition implementation; do not treat
 them as verification of the current phase-coherent crossfade.
 
 - **Both gain pots sweep independently.** CH4 and CH5 each moved only their
-  own parameter — confirmed both via `oxtt-pi-tools` (independent channel
+  own parameter — confirmed both via `effectkit-pi-tools` (independent channel
   movement) and via the audio interface's output level meter.
 - **Unity is at the centre of each gain pot's rotation.** With both gain pots
   centred, the output level matched the input level on the audio interface's
@@ -302,7 +302,7 @@ Met:
 
 - A `pi-controls` release build on the Pi, with `--controls` present in
   `--help`.
-- Wiring confirmed channel by channel with `oxtt-pi-tools`, including both
+- Wiring confirmed channel by channel with `effectkit-pi-tools`, including both
   switch positions.
 - Idle jitter measured at both full travel and mid travel, 300 readings per
   channel per position, with worst-case σ recorded and checked against

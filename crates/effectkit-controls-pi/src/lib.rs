@@ -1,11 +1,13 @@
 //! Layer A on a Raspberry Pi: six pots on an MCP3008 over SPI, and a bypass
-//! switch on a GPIO pin (see [`crate::control`] for the layering).
+//! switch on a GPIO pin (see [`effectkit_controls`] for the layering).
 //!
-//! Behind the `pi-controls` feature, because `rppal` is Linux-only and the
-//! rest of the control surface has to keep building on a development machine.
+//! Its own crate, and reached through a feature everywhere it is used, because
+//! `rppal` is Linux-only and the rest of the control surface has to keep
+//! building on a development machine.
 //!
-//! The read sequence below is not a proposal: it is what the `pi-tools` binary
-//! in this workspace verified against the assembled hardware, where CH0..CH3
+//! The read sequence below is not a proposal: it is what the
+//! `effectkit-pi-tools` binary in this workspace verified against the
+//! assembled hardware, where CH0..CH3
 //! track their pots across the full `0..=1023` range and the switch is
 //! detected. This module reproduces that read exactly — same bus, same mode,
 //! same clock, same three-byte conversation — so that a fault here is a fault
@@ -27,9 +29,8 @@
 //! towards a loud surprise.
 //!
 //! Nothing here is on the real-time path. A conversion is a blocking `ioctl`,
-//! which is exactly why it is polled from the control thread
-//! ([`ControlHandle`](crate::control::ControlHandle)) instead of the audio
-//! callback (docs/contracts.md §6, ADR 0009).
+//! which is exactly why it is polled from a control thread of its own instead
+//! of the audio callback (docs/contracts.md §6, ADR 0009).
 
 use rppal::gpio::{Gpio, InputPin, Level};
 // Aliased rather than qualified at the use site: `rppal::spi::Error` is three
@@ -216,7 +217,7 @@ impl ControlSource for PiControls {
     /// distinct positions across a sweep, and `8 / 1023 * 48` ≈ 0.375 dB on
     /// the two gain pots.
     ///
-    /// **`filter_coefficient = 0.2`** — idle jitter measured with `pi-tools`
+    /// **`filter_coefficient = 0.2`** — idle jitter measured with `effectkit-pi-tools`
     /// over 300 readings per position on all six channels has a standard
     /// deviation of 5.30–6.39 counts out of 1023 with the pots at full travel
     /// and 2.98–4.19 counts at mid travel. The worst case is therefore σ ≈
@@ -323,7 +324,7 @@ impl ControlSource for PiControls {
 // only that the mock matches this code.
 mod tests {
     use super::*;
-    use crate::control::POT_POSITION_MAX;
+    use effectkit_controls::POT_POSITION_MAX;
 
     #[test]
     fn the_command_selects_each_wired_channel() {

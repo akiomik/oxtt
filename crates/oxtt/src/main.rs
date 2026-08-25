@@ -10,7 +10,9 @@ use clap::Parser;
 use oxtt::{cli::Cli, jack_host, params::OttParams};
 
 #[cfg(feature = "pi-controls")]
-use oxtt::control::{ControlHandle, PiControlError, PiControls};
+use effectkit_controls_pi::{PiControlError, PiControls};
+#[cfg(feature = "pi-controls")]
+use oxtt::control::ControlHandle;
 
 /// Starts the Raspberry Pi control surface if `--controls` asked for it.
 ///

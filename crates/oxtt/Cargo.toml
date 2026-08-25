@@ -34,10 +34,11 @@ jack-host = ["dep:jack", "dep:signal-hook", "dep:triple_buffer"]
 bela-host = ["dep:bela"]
 
 # The Raspberry Pi control surface (SPI ADC + GPIO). Off by default because
-# `rppal` is Linux-only and fails to compile on macOS, where the DSP core and
-# its tests are developed; only a build targeting the Pi itself enables this.
-# It is a control surface for the JACK host, not a host of its own.
-pi-controls = ["dep:rppal"]
+# `effectkit-controls-pi` depends on Linux-only `rppal` and fails to compile on
+# macOS, where the DSP core and its tests are developed; only a build targeting
+# the Pi itself enables this. It is a control surface for the JACK host, not a
+# host of its own.
+pi-controls = ["dep:effectkit-controls-pi"]
 
 [dependencies]
 bela = { version = "0.7", optional = true }
@@ -45,10 +46,10 @@ clap = { version = "4", features = ["derive"] }
 ebur128 = "0.1.10"
 effectkit = { path = "../effectkit" }
 effectkit-controls = { path = "../effectkit-controls" }
+effectkit-controls-pi = { path = "../effectkit-controls-pi", optional = true }
 hound = "3.5.1"
 jack = { workspace = true, optional = true }
 nutype = "0.7.0"
-rppal = { workspace = true, optional = true }
 signal-hook = { version = "0.4", optional = true }
 thiserror = { workspace = true }
 # Hands whole `OttParams` snapshots from the control thread to the audio

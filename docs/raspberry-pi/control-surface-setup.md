@@ -44,8 +44,8 @@ environment-specific.
 | Reference | 3.3 V from the Pi header, so full scale is 1023 counts |
 | Assembly | Breadboard with jumper wiring, not an enclosure |
 
-The constants above are not free choices — `crates/oxtt/src/control/pi.rs` holds them and
-records why each one is what it is, and `oxtt-pi-tools` reads the same hardware
+The constants above are not free choices — `crates/effectkit-controls-pi/src/lib.rs` holds them and
+records why each one is what it is, and `effectkit-pi-tools` reads the same hardware
 the same way. If you change the bus, the clock rate, the SPI mode, or the
 channel assignment, you are changing that module too.
 
@@ -78,10 +78,10 @@ Generic parts; no specific vendor part number is assumed.
 ### Why the pots must be linear taper
 
 `crates/oxtt/src/control/assign.rs` converts a pot's travel to a normalized parameter with a
-plain `raw / 1023` and no curve fitting, and `oxtt-pi-tools` displays the same
+plain `raw / 1023` and no curve fitting, and `effectkit-pi-tools` displays the same
 scale. That mapping is only correct for a linear-taper pot. A log/audio-taper
 pot will still read 0–1023 end to end and will still look fine in
-`oxtt-pi-tools`, so the mistake does not announce itself — it just makes every
+`effectkit-pi-tools`, so the mistake does not announce itself — it just makes every
 knob's travel feel wrong, with all the useful range crowded into one end.
 
 The two gain pots go through that same plain scale onto a dB range: count 0 is
@@ -117,8 +117,8 @@ Wire everything with the Pi **powered off and unplugged**.
 
 ### Pin map
 
-Software uses BCM numbering — that is what `rppal`, `crates/oxtt/src/control/pi.rs`, and
-`oxtt-pi-tools` speak. Your hands use physical header positions. Both are given
+Software uses BCM numbering — that is what `rppal`, `crates/effectkit-controls-pi/src/lib.rs`, and
+`effectkit-pi-tools` speak. Your hands use physical header positions. Both are given
 below, because confusing the two is the one wiring mistake that damages the Pi
 rather than merely failing to read.
 
@@ -153,7 +153,7 @@ The analog side, and the switch:
 Each pot is a divider: top terminal to 3.3 V, bottom terminal to ground, wiper
 to its MCP3008 channel. The channel order matches `CHANNEL_DEPTH = 0`,
 `CHANNEL_TIME = 1`, `CHANNEL_UPWARD = 2`, `CHANNEL_DOWNWARD = 3`,
-`CHANNEL_INPUT_GAIN = 4`, `CHANNEL_OUTPUT_GAIN = 5` in `crates/oxtt/src/control/pi.rs`;
+`CHANNEL_INPUT_GAIN = 4`, `CHANNEL_OUTPUT_GAIN = 5` in `crates/effectkit-controls-pi/src/lib.rs`;
 swapping two pots here silently swaps two knobs on the panel, and nothing
 downstream can tell.
 
@@ -370,27 +370,27 @@ point is otherwise easy to misread as a wiring fault.
 3. There is no equivalent one-line test for the GPIO character device, because
    which `gpiochip` carries the 40-pin header is firmware-dependent on a Pi 5
    and `rppal` selects it itself. The practical check is step 6: if
-   `oxtt-pi-tools` starts and prints readings, both devices opened.
+   `effectkit-pi-tools` starts and prints readings, both devices opened.
 
 Running the tool under `sudo` is a legitimate *diagnostic* — if it works as root
 and fails as your user, the problem is permissions and not wiring — but it is
 not the way to run the control surface. Fix the group membership instead.
 
-## 6. Confirm the wiring end to end with `oxtt-pi-tools`
+## 6. Confirm the wiring end to end with `effectkit-pi-tools`
 
-`oxtt-pi-tools` is the standalone wiring-verification binary. It depends only on
+`effectkit-pi-tools` is the standalone wiring-verification binary. It depends only on
 `rppal` and not on `oxtt` at all, so it runs on a Pi with nothing else working,
-and `crates/oxtt/src/control/pi.rs` reproduces its read byte for byte — same bus, same mode,
+and `crates/effectkit-controls-pi/src/lib.rs` reproduces its read byte for byte — same bus, same mode,
 same clock, same three-byte conversation. Run it before building `oxtt` and
 before involving JACK, so that anything it finds is unambiguously hardware.
 
 In the repository on the Pi:
 
 ```sh
-cargo run --release -p oxtt-pi-tools
+cargo run --release -p effectkit-pi-tools
 ```
 
-It needs no Cargo feature flag: the `oxtt-pi-tools` package depends on `rppal`
+It needs no Cargo feature flag: the `effectkit-pi-tools` package depends on `rppal`
 unconditionally, and `pi-controls` gates only `oxtt`'s own hardware layer.
 
 `cargo run` builds *and* runs in one command, so run it somewhere the SPI and

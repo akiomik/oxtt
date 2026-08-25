@@ -7,7 +7,7 @@ usage() {
 Usage:
   scripts/pi-idle-jitter.sh [--readings N]
 
-Captures N readings (default 300) per channel from oxtt-pi-tools and reduces
+Captures N readings (default 300) per channel from effectkit-pi-tools and reduces
 them to n/min/max/spread/sd per channel: Depth, Time, Upward, Downward,
 InputGain, OutputGain. Counts are raw MCP3008 counts out of 1023.
 
@@ -41,11 +41,11 @@ done
   exit 2
 }
 
-# oxtt-pi-tools prints a banner line before the first reading, so one extra
+# effectkit-pi-tools prints a banner line before the first reading, so one extra
 # line is dropped along with it.
 head_lines=$((readings + 1))
 
-cargo run --release -p oxtt-pi-tools \
+cargo run --release -p effectkit-pi-tools \
   | head -n "$head_lines" | tail -n "$readings" \
   | awk -v expected_n="$readings" '
       {

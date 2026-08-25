@@ -44,7 +44,7 @@ const POT_SUPPLY_FRACTION: f32 = 3.3 / 4.096;
 /// Zero rather than centre: on the gain pots it is -24 dB and on depth it is
 /// fully dry, so a channel that is not reading fails quiet. That matches the
 /// Raspberry Pi wiring, where the unused ADC channels are tied to ground for
-/// the same reason (`src/control/pi.rs`).
+/// the same reason (`effectkit-controls-pi`).
 const POT_POSITION_FLOOR: PotPosition = PotPosition::new_const(0);
 
 /// Number of analog channels the control surface occupies, `A0` through `A5`.
@@ -93,8 +93,8 @@ pub fn pot_position(reading: f32) -> PotPosition {
 ///
 /// `bypass_engaged` is the switch's logical position, already inverted from
 /// its active-low pin level by the caller — the same division of labour as
-/// `PiControls::read` (`src/control/pi.rs`). Debouncing it is the mapping
-/// layer's job, not this function's.
+/// `PiControls::read` (`effectkit-controls-pi`). Debouncing it is the
+/// conditioning layer's job, not this function's.
 #[must_use]
 pub fn raw_controls(analog_frame: &[f32], bypass_engaged: bool) -> RawControls {
     let mut readings = analog_frame.iter().copied();

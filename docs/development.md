@@ -98,7 +98,7 @@ latency verification with a class-compliant USB audio interface — see
 
 ### The `pi-controls` feature
 
-The physical control surface (`crates/oxtt/src/control/pi.rs`: MCP3008 pots over SPI0/CE0, a
+The physical control surface (`crates/effectkit-controls-pi/src/lib.rs`: MCP3008 pots over SPI0/CE0, a
 bypass switch on GPIO17) is behind the optional `pi-controls` Cargo feature,
 which is **off by default**. `rppal` is Linux-only, so a default build stays
 buildable on macOS and every host runs exactly as it did before the control
@@ -120,13 +120,13 @@ for the design.
 
 Because `rppal` cannot compile on macOS, two kinds of command **fail there**:
 any `--workspace` one (`cargo build --workspace`, `cargo clippy --workspace
---all-targets`), because `oxtt-pi-tools` depends on `rppal` unconditionally;
+--all-targets`), because `effectkit-pi-tools` depends on `rppal` unconditionally;
 and any command that enables `pi-controls`. **`--workspace` is a Linux and CI
 command**, not one to reach for on a development machine.
 
 Without a package selector, `cargo build`/`cargo test`/`cargo clippy` are safe
-anywhere: the workspace's `default-members` leaves `oxtt-pi-tools` out. Add
-`-p oxtt-pi-tools` on Linux when that crate is what is being changed.
+anywhere: the workspace's `default-members` leaves `effectkit-pi-tools` out. Add
+`-p effectkit-pi-tools` on Linux when that crate is what is being changed.
 
 The feature-gated module can still be type-checked from macOS by
 cross-compiling. Nothing links, so no Linux linker or sysroot is needed:
@@ -139,7 +139,7 @@ PKG_CONFIG_ALLOW_CROSS=1 cargo clippy -p oxtt --features pi-controls --all-targe
 `PKG_CONFIG_ALLOW_CROSS=1` is required because `jack-sys`'s build script
 otherwise refuses to run `pkg-config` for a foreign target. Since `cargo
 check`/`cargo clippy` never link, that is sufficient to type-check and lint
-`crates/oxtt/src/control/pi.rs` without a Pi in reach — it is not a way to produce a
+`crates/effectkit-controls-pi/src/lib.rs` without a Pi in reach — it is not a way to produce a
 runnable binary (see the next section).
 
 CI covers the feature natively on Linux in the `pi-controls` job, which lints,

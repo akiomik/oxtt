@@ -120,12 +120,12 @@ update line so you can confirm the figure converged rather than drifted.
 
 ## `pi-idle-jitter.sh` — control-surface idle jitter
 
-Captures readings from `oxtt-pi-tools` and reduces them to n/min/max/spread/sd
+Captures readings from `effectkit-pi-tools` and reduces them to n/min/max/spread/sd
 per channel (Depth, Time, Upward, Downward, InputGain, OutputGain). This is
 unrelated to the two audio scripts above: no JACK, no USB audio interface, no
 `usb-audio-setup.md`. It needs SPI0 enabled and the control surface wired per
 [`docs/raspberry-pi/control-surface-setup.md`](../docs/raspberry-pi/control-surface-setup.md),
-and builds `oxtt-pi-tools` itself via `cargo run --release -p oxtt-pi-tools`.
+and builds `effectkit-pi-tools` itself via `cargo run --release -p effectkit-pi-tools`.
 
 Move all six pots to the position being measured and leave them completely
 untouched before running — the result is only meaningful for a motionless pot.

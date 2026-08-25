@@ -226,6 +226,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectkit-controls-pi"
+version = "0.1.0"
+dependencies = [
+ "effectkit-controls",
+ "rppal",
+ "thiserror",
+]
+
+[[package]]
+name = "effectkit-pi-tools"
+version = "0.1.0"
+dependencies = [
+ "rppal",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -441,12 +457,12 @@ dependencies = [
  "ebur128",
  "effectkit",
  "effectkit-controls",
+ "effectkit-controls-pi",
  "hound",
  "jack",
  "no-panic",
  "nutype",
  "proptest",
- "rppal",
  "signal-hook",
  "thiserror",
  "triple_buffer",
@@ -460,13 +476,6 @@ dependencies = [
  "jack",
  "proptest",
  "thiserror",
-]
-
-[[package]]
-name = "oxtt-pi-tools"
-version = "0.1.0"
-dependencies = [
- "rppal",
 ]
 
 [[package]]
