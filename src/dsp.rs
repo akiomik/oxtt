@@ -9,7 +9,7 @@ pub mod smooth;
 use thiserror::Error;
 
 use crate::bands::Bands;
-use crate::params::{BandParams, ConfigError, ControlSnapshot, GlobalParams, OttParams};
+use crate::params::{BandParams, ConfigError, GlobalParams, OttParams, OttProcessorUpdate};
 use compressor::{BandDynamics, DualThresholdCompressor, effective_amount};
 use crossover::Crossover;
 use envelope::{attack_release_ms, detector_power};
@@ -300,56 +300,44 @@ impl OttProcessor {
         Ok(())
     }
 
-    /// Updates the smoothing target for parameters. Keeps the current smoothing state as-is (docs/contracts.md §2).
+    /// Applies one complete update: the parameter targets and the explicit
+    /// bypass level, together (docs/contracts.md §2).
+    ///
+    /// Keeps the current smoothing state as-is, so the targets are approached
+    /// rather than jumped to. The bypass level is applied through an
+    /// allocation-free, sample-driven crossfade, and the parameter payload
+    /// always updates the latent effect branch — including while bypass is
+    /// engaged, so disengaging lands on current values rather than stale ones.
+    ///
+    /// One operation rather than two, because there is no correct order for
+    /// two: whichever went first, a block rendered between them would be
+    /// rendered against half an update. That is also why
+    /// [`OttProcessorUpdate`] carries the bypass level explicitly instead of
+    /// leaving it to be inferred from a coincidental `depth = 0` and two
+    /// zeroed gains.
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError` if `params` fail validation against the current
-    /// sample rate (docs/contracts.md §1).
+    /// Returns `ConfigError` if the parameters are invalid for this
+    /// processor's sample rate (docs/contracts.md §1); on error no state
+    /// changes.
     // Proves this function can never panic (docs/contracts.md §6); see the
     // note on `process` below. It is held to the callback contract because the
-    // control surface applies its snapshots from inside the audio callback
+    // control surface applies its updates from inside the audio callback
     // (`AudioProcessHandler::process`), not from the control thread.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-    pub fn set_params(&mut self, params: OttParams) -> Result<(), ConfigError> {
-        params.validate(self.sample_rate)?;
-        self.global.set_targets(&params.global);
+    pub fn apply_update(&mut self, update: OttProcessorUpdate) -> Result<(), ConfigError> {
+        update.params.validate(self.sample_rate)?;
+        self.global.set_targets(&update.params.global);
         self.crossover.set_targets(
-            params.global.crossover.low_hz().get(),
-            params.global.crossover.high_hz().get(),
+            update.params.global.crossover.low_hz().get(),
+            update.params.global.crossover.high_hz().get(),
         );
-        for (band, band_params) in self.bands.iter_mut().zip(params.bands.iter()) {
+        for (band, band_params) in self.bands.iter_mut().zip(update.params.bands.iter()) {
             band.set_targets(band_params);
         }
-        self.target_params = params;
-        self.bypass.set_requested(false);
-        Ok(())
-    }
-
-    /// Applies a control-surface snapshot with an explicit bypass level.
-    ///
-    /// Unlike [`Self::set_params`], this additionally applies the explicit
-    /// bypass level through an allocation-free, sample-driven crossfade. Its
-    /// complete parameter payload always updates the latent effect branch,
-    /// including while bypass is engaged.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ConfigError` if the snapshot parameters are invalid for this
-    /// processor's sample rate; on error no state changes.
-    #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-    pub fn set_control_snapshot(&mut self, snapshot: ControlSnapshot) -> Result<(), ConfigError> {
-        snapshot.params.validate(self.sample_rate)?;
-        self.global.set_targets(&snapshot.params.global);
-        self.crossover.set_targets(
-            snapshot.params.global.crossover.low_hz().get(),
-            snapshot.params.global.crossover.high_hz().get(),
-        );
-        for (band, band_params) in self.bands.iter_mut().zip(snapshot.params.bands.iter()) {
-            band.set_targets(band_params);
-        }
-        self.target_params = snapshot.params;
-        self.bypass.set_requested(snapshot.bypass_engaged);
+        self.target_params = update.params;
+        self.bypass.set_requested(update.bypass_engaged);
         Ok(())
     }
 
@@ -592,10 +580,10 @@ mod processor_tests {
             })
     }
 
-    fn warmed_rms(params: OttParams, snapshot: ControlSnapshot) -> f32 {
+    fn warmed_rms(params: OttParams, snapshot: OttProcessorUpdate) -> f32 {
         let sample_rate = 48_000.0;
         let mut processor = OttProcessor::new(sample_rate, params).unwrap();
-        processor.set_control_snapshot(snapshot).unwrap();
+        processor.apply_update(snapshot).unwrap();
         let warm_frames = (sample_rate as usize) * 2;
         let _ = render_sine(&mut processor, 0, warm_frames, sample_rate);
         rms(&render_sine(
@@ -614,11 +602,11 @@ mod processor_tests {
         // crossover history common to both crossfade branches.
         effect.global.input_gain_db = IoGain::new_const(6.0);
         effect.global.output_gain_db = IoGain::new_const(-18.0);
-        let bypass = ControlSnapshot {
+        let bypass = OttProcessorUpdate {
             params: effect,
             bypass_engaged: true,
         };
-        let active = ControlSnapshot {
+        let active = OttProcessorUpdate {
             params: effect,
             bypass_engaged: false,
         };
@@ -634,10 +622,10 @@ mod processor_tests {
             ("bypass to effect", bypass, active),
         ] {
             let mut processor = OttProcessor::new(sample_rate, effect).unwrap();
-            processor.set_control_snapshot(initial).unwrap();
+            processor.apply_update(initial).unwrap();
             let warm_frames = (sample_rate as usize) * 2;
             let _ = render_sine(&mut processor, 0, warm_frames, sample_rate);
-            processor.set_control_snapshot(next).unwrap();
+            processor.apply_update(next).unwrap();
             let transition = render_sine(
                 &mut processor,
                 warm_frames,
@@ -662,7 +650,7 @@ mod processor_tests {
         let params = bypass_probe_params();
         let mut processor = OttProcessor::new(sample_rate, params).unwrap();
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params,
                 bypass_engaged: true,
             })
@@ -702,14 +690,14 @@ mod processor_tests {
         latest.global.output_gain_db = IoGain::new_const(-18.0);
         let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: initial,
                 bypass_engaged: true,
             })
             .unwrap();
         let _ = render_sine(&mut processor, 0, sample_rate as usize, sample_rate);
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: latest,
                 bypass_engaged: true,
             })
@@ -744,7 +732,7 @@ mod processor_tests {
             "the mid-band detector must advance while the bypass mix is settled"
         );
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: latest,
                 bypass_engaged: false,
             })
@@ -767,14 +755,14 @@ mod processor_tests {
         latest.global.output_gain_db = IoGain::new_const(-18.0);
         let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: initial,
                 bypass_engaged: true,
             })
             .unwrap();
         let _ = render_sine(&mut processor, 0, 240, sample_rate);
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: latest,
                 bypass_engaged: false,
             })
@@ -794,7 +782,7 @@ mod processor_tests {
         let params = bypass_probe_params();
         let mut processor = OttProcessor::new(48_000.0, params).unwrap();
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params,
                 bypass_engaged: true,
             })
@@ -806,20 +794,25 @@ mod processor_tests {
     }
 
     #[test]
-    fn set_params_cancels_bypass_and_targets_the_effect_branch() {
+    fn a_disengaged_update_cancels_bypass_and_targets_the_effect_branch() {
         let sample_rate = 48_000.0;
         let initial = bypass_probe_params();
         let mut params = initial;
         params.global.input_gain_db = IoGain::new_const(-6.0);
         let mut processor = OttProcessor::new(sample_rate, initial).unwrap();
         processor
-            .set_control_snapshot(ControlSnapshot {
+            .apply_update(OttProcessorUpdate {
                 params: initial,
                 bypass_engaged: true,
             })
             .unwrap();
         let _ = render_sine(&mut processor, 0, sample_rate as usize, sample_rate);
-        processor.set_params(params).unwrap();
+        processor
+            .apply_update(OttProcessorUpdate {
+                params,
+                bypass_engaged: false,
+            })
+            .unwrap();
         assert!(!processor.bypass.requested);
         assert_eq!(processor.bypass.mix.target(), 0.0);
         assert_eq!(processor.global.input_gain_db.target(), -6.0);
@@ -1267,7 +1260,11 @@ mod processor_tests {
                 CrossoverFreqLow::new_const(500.0),
                 CrossoverFreqHigh::new_const(8_000.0),
             );
-            prop_assert!(processor.set_params(invalid_params).is_err());
+            let rejected = processor.apply_update(OttProcessorUpdate {
+                params: invalid_params,
+                bypass_engaged: false,
+            });
+            prop_assert!(rejected.is_err());
 
             let mut output_l = vec![0.0; input_l.len()];
             let mut output_r = vec![0.0; input_r.len()];
@@ -1310,7 +1307,11 @@ mod processor_tests {
                         params.global.output_gain_db = IoGain::new_const(f32::from(second % 49) - 24.0);
                         params.global.depth = NormalizedF32::new_const(f32::from(first) / f32::from(u8::MAX));
                         params.global.time = NormalizedF32::new_const(f32::from(second) / f32::from(u8::MAX));
-                        prop_assert_eq!(processor.set_params(params), Ok(()));
+                        let applied = processor.apply_update(OttProcessorUpdate {
+                            params,
+                            bypass_engaged: false,
+                        });
+                        prop_assert_eq!(applied, Ok(()));
                     }
                     _ => {
                         prop_assert_eq!(processor.reset(sample_rate as f32), Ok(()));
@@ -1329,7 +1330,11 @@ mod processor_tests {
         // Change the target, then reset before it takes effect.
         let mut updated = params;
         updated.global.output_gain_db = IoGain::new_const(-6.0);
-        proc.set_params(updated).unwrap();
+        proc.apply_update(OttProcessorUpdate {
+            params: updated,
+            bypass_engaged: false,
+        })
+        .unwrap();
         proc.reset(96_000.0).unwrap();
 
         let n = 10;

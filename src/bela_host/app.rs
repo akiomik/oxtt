@@ -346,7 +346,7 @@ impl BelaApplication for OttApplication {
         // behaviour.
         self.publishes = self.publishes.saturating_add(1);
         for state in states.iter_mut() {
-            if state.processor.set_control_snapshot(snapshot).is_err() {
+            if state.processor.apply_update(snapshot).is_err() {
                 self.rejects = self.rejects.saturating_add(1);
             }
         }

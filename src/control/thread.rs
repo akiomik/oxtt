@@ -4,7 +4,7 @@
 //! An MCP3008 read is SPI traffic — a blocking `ioctl` — so it cannot happen
 //! inside `AudioProcessHandler::process` (docs/contracts.md §6). This layer is
 //! the seam that keeps it out: a plain OS thread polls the [`ControlSource`],
-//! drives [`ControlMapping`], and hands finished [`ControlSnapshot`] values to
+//! drives [`ControlMapping`], and hands finished [`OttProcessorUpdate`] values to
 //! the callback through a `triple_buffer`.
 //!
 //! The triple buffer is what makes the *reading* side legal, which is the side
@@ -12,7 +12,7 @@
 //! assignment: wait-free, allocation-free, lock-free, and constant-time, so
 //! the callback pays the same cost whether or not a knob moved. Its three
 //! buffers are allocated once when the buffer is built, and
-//! [`ControlSnapshot`] is `Copy` with no `Drop`, so publishing a snapshot
+//! [`OttProcessorUpdate`] is `Copy` with no `Drop`, so publishing a snapshot
 //! neither allocates nor frees anything on either side. This is the "bounded
 //! non-blocking queue instead of a new lock" that docs/architecture.md
 //! anticipates, with the queue bound at one: the callback wants the knob's
@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use triple_buffer::{Input, Output, TripleBuffer};
 
-use crate::params::{ControlSnapshot, OttParams};
+use crate::params::{OttParams, OttProcessorUpdate};
 
 use super::mapping::ControlMapping;
 use super::raw::ControlSource;
@@ -78,7 +78,7 @@ const FAILURE_REPORT_INTERVAL: u64 = 5_000;
 /// already returning an error, where the process is about to exit anyway.
 #[derive(Debug)]
 pub struct ControlHandle {
-    output: Option<Output<ControlSnapshot>>,
+    output: Option<Output<OttProcessorUpdate>>,
     stop: Arc<AtomicBool>,
     read_failures: Arc<AtomicU64>,
     worker: JoinHandle<()>,
@@ -113,7 +113,7 @@ impl ControlHandle {
     ) -> Self {
         let poll_interval =
             poll_interval.unwrap_or_else(|| poll_interval_for(S::CONDITIONING.nominal_poll_hz()));
-        let initial = ControlSnapshot {
+        let initial = OttProcessorUpdate {
             params: base,
             bypass_engaged: false,
         };
@@ -151,7 +151,7 @@ impl ControlHandle {
     /// single-consumer — `update` takes `&mut self` and owns the consumer's
     /// buffer index — so exactly one holder can ever exist, and moving it out
     /// is how that is enforced rather than promised.
-    pub const fn take_output(&mut self) -> Option<Output<ControlSnapshot>> {
+    pub const fn take_output(&mut self) -> Option<Output<OttProcessorUpdate>> {
         self.output.take()
     }
 
@@ -200,7 +200,7 @@ impl ControlHandle {
 fn poll_until_stopped<S: ControlSource>(
     mut source: S,
     mut mapping: ControlMapping,
-    mut publisher: Input<ControlSnapshot>,
+    mut publisher: Input<OttProcessorUpdate>,
     stop: &AtomicBool,
     read_failures: &AtomicU64,
     poll_interval: Duration,
@@ -380,7 +380,7 @@ mod tests {
     /// the thread and returns its read-failure count.
     fn with_control<S: ControlSource + Send + 'static>(
         source: S,
-        f: impl FnOnce(&mut Output<ControlSnapshot>, &ControlHandle),
+        f: impl FnOnce(&mut Output<OttProcessorUpdate>, &ControlHandle),
     ) -> u64 {
         let mut handle =
             ControlHandle::spawn(source, Preset::SafeStart.params(), TEST_POLL_INTERVAL);
@@ -564,7 +564,7 @@ mod tests {
 
     /// The chain the audio callback actually runs, minus JACK: `update` gates
     /// the work, `output_buffer` reads the snapshot without a second
-    /// swap, and `set_control_snapshot` applies it (docs/contracts.md §2,
+    /// swap, and `apply_update` applies it (docs/contracts.md §2,
     /// §6). Proves
     /// the whole control surface end to end on a development machine.
     #[test]
@@ -583,9 +583,7 @@ mod tests {
         wait_until("the processor to be handed the turned position", || {
             // Byte-for-byte the callback's snapshot step.
             if output.update() {
-                let accepted = processor
-                    .set_control_snapshot(*output.output_buffer())
-                    .is_ok();
+                let accepted = processor.apply_update(*output.output_buffer()).is_ok();
                 assert!(accepted, "a mapped snapshot must always validate");
                 applied = applied.saturating_add(1);
             }

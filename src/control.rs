@@ -6,13 +6,13 @@
 //! | Layer | Responsibility | Platform |
 //! |---|---|---|
 //! | A: raw read | produce a [`RawControls`] value | platform-specific (Raspberry Pi SPI/GPIO, Bela analog/digital inputs) |
-//! | B: mapping | jitter filtering, deadband, and turning raw controls into a complete [`ControlSnapshot`](crate::params::ControlSnapshot) | shared |
+//! | B: mapping | jitter filtering, deadband, and turning raw controls into a complete [`OttProcessorUpdate`](crate::params::OttProcessorUpdate) | shared |
 //! | C: transport | control thread plus a `triple_buffer` handoff into the audio callback | Raspberry Pi only |
 //!
 //! Layer B ([`ControlMapping`]) is pure: no I/O, no threads, no clock, no
 //! allocation, and no panic. That is the entire reason for the split. On a
 //! Raspberry Pi the audio callback cannot read SPI itself, so layer C exists
-//! to move a finished `ControlSnapshot` across the thread boundary without a
+//! to move a finished `OttProcessorUpdate` across the thread boundary without a
 //! lock (docs/contracts.md §6). On a Bela the controls are read inside its own
 //! real-time callback, which then drives layer B *directly* and skips layer C
 //! entirely — which is only possible because layer B obeys the same

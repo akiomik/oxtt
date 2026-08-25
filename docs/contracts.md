@@ -24,8 +24,7 @@ The crossover-pair and threshold-order invariants hold for every constructed `Cr
 ## 2. Processor lifecycle and updates
 
 - `OttProcessor::new(sample_rate, params)` validates its inputs. On success, parameters start at their targets and the detector starts at 0 dB gain; there is no startup parameter fade.
-- `OttProcessor::set_params(params)` validates against the current sample rate. A rejected update leaves the processor unchanged. An accepted update changes only targets: linear parameters use a 20 ms one-pole transition, crossover frequencies use the same transition in log-frequency space, and neither filter nor envelope state is reset.
-- `OttProcessor::set_control_snapshot(snapshot)` is the control-surface-only update path. It validates and applies the complete payload as ordinary smoothing targets, including while bypassed, and treats the explicit debounced `bypass_engaged` level as an independent bypass-crossfade request. It must not infer bypass from any parameter values.
+- `OttProcessor::apply_update(update)` is the only update path, and applies the parameters and the explicit bypass level together. It validates against the current sample rate; a rejected update leaves the processor unchanged. An accepted update changes only targets: linear parameters use a 20 ms one-pole transition, crossover frequencies use the same transition in log-frequency space, and neither filter nor envelope state is reset. The complete payload applies as ordinary smoothing targets including while bypassed, and the debounced `bypass_engaged` level is an independent bypass-crossfade request. It must not infer bypass from any parameter values.
 - `OttProcessor::reset(sample_rate)` validates the most recently accepted targets against the new rate. On success, it rebuilds the processor as if newly constructed with those targets; on failure, it leaves the existing processor unchanged. The host must call it after a sample-rate change.
 
 ## 3. Buffer processing
@@ -72,7 +71,7 @@ The host uses JACK's assigned sample rate and buffer size. It reports connection
 
 This section applies to a run with a physical control surface attached: six potentiometers and a latching bypass switch, requested with `--controls`. A run without one behaves exactly as sections 1–7 describe, including its exit report.
 
-The two hosts read that hardware differently and share everything after the read. What is shared is the mapping layer, whose input is a `RawControls` value and whose output is a `ControlSnapshot`: a complete `OttParams` payload plus an explicit debounced bypass level. How a `RawControls` is produced is the platform's business.
+The two hosts read that hardware differently and share everything after the read. What is shared is the mapping layer, whose input is a `RawControls` value and whose output is an `OttProcessorUpdate`: a complete `OttParams` payload plus an explicit debounced bypass level. How a `RawControls` is produced is the platform's business.
 
 Where the read happens:
 
@@ -84,7 +83,7 @@ The handoff into processing, on either host:
 - It is non-blocking, allocation-free, and lock-free in the callback's direction, and takes constant time whether or not a control moved.
 - Per cycle at most the newest snapshot is applied. Neither host drains a backlog; intermediate positions a control passed through are not queued.
 - A snapshot is applied strictly after any pending sample-rate reset in the same cycle, so a reset never discards it.
-- A snapshot rejected by `set_control_snapshot` leaves the processor unchanged (section 2). It is neither reported at the time nor retried; the next accepted snapshot supersedes it. Bela counts rejections for its exit report (section 9).
+- An update rejected by `apply_update` leaves the processor unchanged (section 2). It is neither reported at the time nor retried; the next accepted snapshot supersedes it. Bela counts rejections for its exit report (section 9).
 
 Read rate:
 
@@ -109,7 +108,7 @@ Bypass:
 
 - The bypass is an effect bypass. Its debounced level is transported separately from the complete pot snapshot; a coincidental `depth = 0`, input gain `0 dB`, output gain `0 dB` payload is never a bypass request. The DSP splits sanitized raw input once per frame. Its bypass branch is the unity sum of those raw crossover bands; its effect branch applies the current input gain to each band before detector/dynamics processing and applies output gain after the band sum. It linearly crossfades those phase-coherent branches; it never crossfades a crossover reconstruction against raw input.
 - The bypass branch has no input or output gain stage, so it is the guaranteed-unity crossover reconstruction. It is not sample-identical raw bypass; section 4's crossover reconstruction bound remains the applicable signal guarantee.
-- Every complete snapshot, including all global, crossover, and band targets, updates the latent effect branch while bypassed. Disengaging therefore fades to the current effect and its current detector state, not to a stale position. `set_params` cancels an explicit bypass request and targets the active effect branch normally.
+- Every complete snapshot, including all global, crossover, and band targets, updates the latent effect branch while bypassed. Disengaging therefore fades to the current effect and its current detector state, not to a stale position. An update carrying `bypass_engaged: false` cancels an explicit bypass request and targets the active effect branch normally.
 - The one 20 ms sample-rate-independent bypass-mix smoother has `0` for effect and `1` for bypass. It snaps to its target when the remaining weight is at most `0.001` (about -60 dB), giving a finite deterministic endpoint. A reversal simply retargets that smoother to the newest explicit level.
 - DSP regression coverage uses the issue #4 48 kHz / 1 kHz / 0.05-amplitude sine probe, warmed states, and sliding 10 ms RMS windows with a 1 ms hop. In both directions, with non-unity input and output gains, each window must stay within `+/-0.1 dB` of the two warmed endpoint levels: peak no more than `0.1 dB` above the louder endpoint and trough no more than `0.1 dB` below the quieter one.
 - The switch latches mechanically, so its debounced position *is* the bypass state; there is no press to detect and nothing to toggle. A new position is adopted once it has survived 15 consecutive reads, which is what makes the contact bounce of a single throw produce exactly one state change. That is 28 ms at the 500 Hz read rate above, so up to 30 ms between the throw and the parameters following — and it is 28 ms only for as long as the host meets its read-rate obligation.

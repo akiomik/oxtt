@@ -173,7 +173,13 @@ pub struct OttParams {
     pub bands: Bands<BandParams>,
 }
 
-/// One complete control-surface update.
+/// One atomic update to an [`OttProcessor`](crate::dsp::OttProcessor).
+///
+/// Not named for the control surface, although that is where most of them
+/// come from: this is "everything the processor is told at once", and the
+/// command line goes through exactly the same type. Splitting it would let a
+/// caller change the parameters and the bypass level in two steps, with a
+/// block of audio rendered against half an update in between.
 ///
 /// `params` always contains the current potentiometer positions, including
 /// depth and both gains. `bypass_engaged` is deliberately separate: a control
@@ -182,8 +188,8 @@ pub struct OttParams {
 /// The DSP uses the explicit level to crossfade its phase-coherent bypass and
 /// effect branches safely.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ControlSnapshot {
-    /// Complete, validated parameter snapshot from the controls.
+pub struct OttProcessorUpdate {
+    /// Complete, validated parameter snapshot.
     pub params: OttParams,
     /// Debounced level of the latching effect-bypass switch.
     pub bypass_engaged: bool,

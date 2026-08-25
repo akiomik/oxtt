@@ -11,7 +11,7 @@
 //! per millisecond, so this layer needs to know neither the poll interval nor
 //! the sample rate. The caller's poll rate sets the effective time constant.
 
-use crate::params::{ControlSnapshot, IoGain, NormalizedF32, OttParams};
+use crate::params::{IoGain, NormalizedF32, OttParams, OttProcessorUpdate};
 
 use super::conditioning::ConditioningConfig;
 use super::raw::{POT_POSITION_MAX, Pots, RawControls};
@@ -116,12 +116,12 @@ impl BypassSwitch {
 /// has to stay in counts and has to keep tracking the real pots even while
 /// bypassed, so disengaging cannot restore stale positions. The publish
 /// decision, in contrast, has to be made against what the caller was actually
-/// last handed, which is a finished [`ControlSnapshot`]. Pot movements publish
+/// last handed, which is a finished [`OttProcessorUpdate`]. Pot movements publish
 /// their current values even while bypass is engaged.
 ///
 /// Comparing whole snapshots rather than counts also includes switch-only
 /// changes. The gate's job is "is this different from what I last handed out",
-/// and [`ControlSnapshot`] is `Copy` and `PartialEq`, so asking it directly
+/// and [`OttProcessorUpdate`] is `Copy` and `PartialEq`, so asking it directly
 /// costs a struct compare and needs no third representation of the same state.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Conditioned {
@@ -133,7 +133,7 @@ struct Conditioned {
     /// counts, and always the real pot positions — never the bypassed ones.
     reference: Pots<f32>,
     /// The most recent published snapshot.
-    published: ControlSnapshot,
+    published: OttProcessorUpdate,
     /// The debounced bypass switch.
     bypass: BypassSwitch,
 }
@@ -208,7 +208,7 @@ impl ControlMapping {
     // here for the same reason: on Bela this runs inside the real-time callback.
     // The tests below already call it, so no proof-only test is needed.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-    pub fn update(&mut self, raw: RawControls) -> Option<ControlSnapshot> {
+    pub fn update(&mut self, raw: RawControls) -> Option<OttProcessorUpdate> {
         let counts = raw.pots.map(|count| f32::from(count.get()));
         // Copied out before `self.state` is borrowed mutably below: both are
         // `Copy` and neither changes, so the conversion takes them by value
@@ -222,7 +222,7 @@ impl ControlMapping {
                 // Unlike the old momentary latch, this is *not* a no-op on a
                 // freshly seeded switch: a switch resting in the bypassed
                 // position bypasses from the very first snapshot.
-                let published = ControlSnapshot {
+                let published = OttProcessorUpdate {
                     params: params_with_pots(base, counts),
                     bypass_engaged: bypass.engaged,
                 };
@@ -263,7 +263,7 @@ impl ControlMapping {
                     .bypass
                     .update(raw.bypass_engaged, conditioning.debounce_reads());
 
-                let next = ControlSnapshot {
+                let next = OttProcessorUpdate {
                     params: params_with_pots(base, state.reference),
                     bypass_engaged: state.bypass.engaged,
                 };
@@ -457,7 +457,7 @@ mod tests {
         mapping: &mut ControlMapping,
         raw: RawControls,
         reads: usize,
-    ) -> Option<ControlSnapshot> {
+    ) -> Option<OttProcessorUpdate> {
         let mut last = None;
         for _ in 0..reads {
             if let Some(params) = mapping.update(raw) {
@@ -469,7 +469,7 @@ mod tests {
 
     /// Feeds a switch position in exactly [`DEBOUNCE_READS`] times,
     /// which is the shortest run the debounce believes.
-    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<ControlSnapshot> {
+    fn settle(mapping: &mut ControlMapping, raw: RawControls) -> Option<OttProcessorUpdate> {
         feed(mapping, raw, usize::from(DEBOUNCE_READS))
     }
 
@@ -764,7 +764,7 @@ mod tests {
 
     /// Asserts that bypass is transported as an explicit level rather than
     /// encoded by a parameter triple.
-    fn assert_bypassed(snapshot: &ControlSnapshot, what: &str) {
+    fn assert_bypassed(snapshot: &OttProcessorUpdate, what: &str) {
         assert!(
             snapshot.bypass_engaged,
             "{what}: bypass level must be engaged"
