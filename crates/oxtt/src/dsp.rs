@@ -2,20 +2,17 @@
 
 pub mod compressor;
 pub mod crossover;
-pub mod decibels;
 pub mod envelope;
-pub mod filter;
-pub mod smooth;
 
+use effectkit::decibels::db_to_amp;
+use effectkit::smooth::Smoothed;
 use thiserror::Error;
 
 use crate::bands::Bands;
 use crate::params::{BandParams, ConfigError, GlobalParams, OttParams, OttProcessorUpdate};
 use compressor::{BandDynamics, DualThresholdCompressor, effective_amount};
 use crossover::Crossover;
-use decibels::db_to_amp;
 use envelope::{attack_release_ms, detector_power};
-use smooth::Smoothed;
 
 #[inline]
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

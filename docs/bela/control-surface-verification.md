@@ -269,7 +269,7 @@ of runs separated by a pause.
 
 The hold — 20000 frames, libbela's own `underrunLedDuration` — is what makes a
 21 µs clipped frame visible at all. Its arithmetic is covered by unit tests in
-`crates/oxtt/src/metering.rs`; what the board adds is that the pin follows.
+`crates/effectkit/src/metering.rs`; what the board adds is that the pin follows.
 
 ## 7. Outstanding
 

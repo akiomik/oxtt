@@ -1,8 +1,8 @@
 //! 4th-order Linkwitz-Riley crossover and the low branch's phase compensator (ADR 0001).
 
 use crate::bands::Bands;
-use crate::dsp::filter::Lr4;
-use crate::dsp::smooth::LogSmoothed;
+use effectkit::filter::Lr4;
+use effectkit::smooth::LogSmoothed;
 
 /// One channel's 3-band split plus phase compensator (ADR 0001).
 ///

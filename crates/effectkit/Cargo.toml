@@ -1,0 +1,21 @@
+[package]
+name = "effectkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Effect-independent DSP primitives: parameter smoothing, second-order filters, decibel conversions and input metering"
+readme = "../../README.md"
+# On `effectkit` alone: it is the one crate here intended for crates.io. The
+# rest carry `publish = false`, and adding these to them would advertise a
+# discoverability nobody can act on.
+keywords = ["audio", "dsp", "filter", "biquad", "realtime"]
+categories = ["multimedia::audio", "no-std"]
+
+[dev-dependencies]
+no-panic = "0.1"
+proptest = { workspace = true }
+
+[lints]
+workspace = true

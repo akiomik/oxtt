@@ -4,8 +4,8 @@
 //! threshold. 0 means no processing; 1 pins the signal to the threshold
 //! under extreme compression.
 
-use crate::dsp::decibels::db_to_amp;
 use crate::dsp::envelope::BandEnvelope;
+use effectkit::decibels::db_to_amp;
 
 /// Lower clamp for the combined gain (docs/contracts.md §4).
 pub const MIN_DYNAMIC_GAIN_DB: f32 = -60.0;

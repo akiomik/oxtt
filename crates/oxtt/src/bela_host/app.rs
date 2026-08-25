@@ -17,8 +17,8 @@ use super::controls::{ANALOG_CHANNELS_USED, PollDecimator, raw_controls};
 use crate::control::surfaces::GEM;
 use crate::control::{SixPotBypassConditioner, assign};
 use crate::dsp::OttProcessor;
-use crate::metering::{ClipIndicator, InputMeter};
 use crate::params::OttParams;
+use effectkit::metering::{ClipIndicator, InputMeter};
 
 /// Analog frame the control surface is read from.
 ///

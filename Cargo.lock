@@ -209,6 +209,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectkit"
+version = "0.1.0"
+dependencies = [
+ "no-panic",
+ "proptest",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -422,6 +430,7 @@ dependencies = [
  "bela",
  "clap",
  "ebur128",
+ "effectkit",
  "hound",
  "jack",
  "no-panic",

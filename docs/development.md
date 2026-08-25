@@ -213,11 +213,10 @@ The suite is organized by module and none of it requires a running JACK server:
 - `crates/oxtt/src/cli.rs` — CLI argument parsing
 - `crates/oxtt/src/params/` — parameter value objects, validation, and presets
 - `crates/oxtt/src/dsp.rs` — `OttProcessor` unit tests and processor-level integration tests
-- `crates/oxtt/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/oxtt/src/dsp/filter.rs` holds the biquad and `Lr4` these exercise)
+- `crates/oxtt/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/effectkit/src/filter.rs` holds the biquad and `Lr4` these exercise)
 - `crates/oxtt/src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `crates/oxtt/src/dsp/envelope.rs` — envelope follower and time-scaling tests
-- `crates/oxtt/src/dsp/decibels.rs` — the dB conversions and the floor they respect
-- `crates/oxtt/src/dsp/smooth.rs` — parameter-smoothing tests
+- `crates/effectkit/src/` — the effect-independent primitives: parameter smoothing, the biquad and `Lr4` sections, the dB conversions and the floor they respect, and the input meter
 - `crates/oxtt/src/control/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)); `assign.rs` holds the pot-to-parameter assignment and the conditioning/assignment pair driven end to end; and, only under `--features jack-host`, the control thread and its handoff; only under `--features pi-controls`, the MCP3008 command/response encoding
 - `crates/oxtt/src/bela_host/` — only under `--features bela-host`: the analog-reading-to-pot-position conversion and its boundaries, the board's own measured deadband, the read decimator, the settings the board is asked for, and the exit report's wording
 

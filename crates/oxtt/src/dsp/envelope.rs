@@ -1,6 +1,6 @@
 //! Stereo-linked power envelope follower (ADR 0002) and time conversion.
 
-use crate::dsp::decibels::{db_to_amp, power_to_db};
+use effectkit::decibels::{db_to_amp, power_to_db};
 
 /// State below this is flushed to 0 to avoid denormals.
 const DENORMAL_FLOOR: f32 = 1e-30;

@@ -7,8 +7,12 @@
 //! Two hosts, one per feature: `jack-host` (on by default) runs the DSP under
 //! a JACK server, and `bela-host` runs it under Bela's `render` callback on a
 //! Bela Gem Stereo (ADR 0011). Everything below the host adapters — the DSP,
-//! the parameters, the control surface's mapping layer and the input meter —
-//! is shared and builds with neither feature enabled.
+//! the parameters and the control surface — is shared and builds with neither
+//! feature enabled.
+//!
+//! The effect-independent primitives it is built from — parameter smoothing,
+//! the biquad and Linkwitz-Riley sections, the decibel conversions and the
+//! input meter — live in [`effectkit`].
 
 pub mod bands;
 #[cfg(feature = "bela-host")]
@@ -18,6 +22,5 @@ pub mod control;
 pub mod dsp;
 #[cfg(feature = "jack-host")]
 pub mod jack_host;
-pub mod metering;
 pub mod params;
 pub mod render;

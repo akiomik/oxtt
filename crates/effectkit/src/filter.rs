@@ -3,8 +3,8 @@
 //! The RBJ cookbook coefficients, a Direct Form I biquad, and the cascaded
 //! pair that makes a 4th-order Linkwitz-Riley section.
 //!
-//! Effect-independent on purpose. [`crossover`](super::crossover) is the only
-//! caller today and is specific to a 3-band OTT; these are not.
+//! Effect-independent on purpose. `oxtt-dsp`'s crossover is the only caller
+//! today and is specific to a 3-band OTT; these are not.
 
 use std::f32::consts::{FRAC_1_SQRT_2, PI};
 

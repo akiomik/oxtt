@@ -10,8 +10,11 @@ description = "A 3-band upward/downward multiband compressor for JACK, inspired 
 # repository's when this package moved under `crates/`. Named explicitly so
 # that `clippy::cargo_common_metadata` stays satisfied.
 readme = "../../README.md"
-keywords = ["audio", "jack", "compressor", "dsp", "multiband"]
-categories = ["multimedia::audio"]
+# The binaries are the product; the crate is not something to depend on. This
+# also keeps `clippy::cargo_common_metadata` from asking for the `keywords` and
+# `categories` that belong to `effectkit`, the one crate here meant for
+# crates.io.
+publish = false
 
 [features]
 default = ["jack-host"]
@@ -40,6 +43,7 @@ pi-controls = ["dep:rppal"]
 bela = { version = "0.7", optional = true }
 clap = { version = "4", features = ["derive"] }
 ebur128 = "0.1.10"
+effectkit = { path = "../effectkit" }
 hound = "3.5.1"
 jack = { workspace = true, optional = true }
 nutype = "0.7.0"

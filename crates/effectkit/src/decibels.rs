@@ -8,7 +8,7 @@
 //!
 //! `f32` throughout, because these run per sample inside the audio callback.
 //! Offline code that wants the precision does its own arithmetic in `f64`
-//! (`crate::render`).
+//! (`oxtt`'s offline renderer).
 
 /// The level below which a signal is treated as silence, in dBFS
 /// (docs/contracts.md §4).
