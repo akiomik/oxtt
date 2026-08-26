@@ -747,6 +747,56 @@ mod tests {
         );
     }
 
+    /// The density divisor is exact at one note. Under an octave grid the
+    /// count barely moves, so the level holds across the keyboard; under a
+    /// harmonic series the count collapses and the level goes with it.
+    ///
+    /// Both halves are pinned, because the second is a cost the geometry has
+    /// to be worth rather than a defect to be corrected in the divisor —
+    /// following the live count would bring back the ducking that
+    /// [`REFERENCE_NOTE_HZ`] exists to prevent.
+    #[test]
+    fn level_across_the_keyboard_holds_for_octaves_and_slides_for_harmonics() {
+        let level = |geometry: Geometry, note: f32| {
+            let settings = BankParams {
+                grid: Grid {
+                    geometry,
+                    ..Grid::default()
+                },
+                voices: 1,
+                ..params(0.6, 500.0)
+            };
+            let mut bank = ResonatorBank::<1024>::new();
+            bank.retune(&[note], &settings, SR);
+            20.0 * noise_rms(&mut bank, 3.0).log10()
+        };
+        let spread = |geometry: Geometry| {
+            let db: Vec<f32> = [60.0f32, 110.0, 220.0, 440.0]
+                .into_iter()
+                .map(|n| level(geometry, n))
+                .collect();
+            let (lo, hi) = db
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(*v), b.max(*v)));
+            (hi - lo, db)
+        };
+
+        let (octaves, oct_db) = spread(Geometry::Octaves);
+        assert!(
+            octaves < 1.5,
+            "an octave grid should hold its level across the keyboard, got {octaves} dB: {oct_db:?}"
+        );
+
+        let (harmonics, harm_db) = spread(Geometry::Harmonics);
+        assert!(
+            harmonics > 5.0,
+            "a harmonic series is expected to slide; if this stopped being \
+             true the divisor changed, got {harmonics} dB: {harm_db:?}"
+        );
+        // Quietest at the top, because that is where the partials run out.
+        assert!(harm_db[0] > *harm_db.last().unwrap(), "{harm_db:?}");
+    }
+
     /// A silent voice contributes nothing and does not consume capacity.
     #[test]
     fn non_positive_notes_are_skipped() {

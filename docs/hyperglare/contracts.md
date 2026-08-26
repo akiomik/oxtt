@@ -110,6 +110,19 @@ are made not to:
   the settings, so it never moves with the chord being played, and it never
   counts resonators a truncated bank does not have (section 2).
 
+  **A fixed reference is exact at one note only.** Under an octave grid that
+  costs nothing, because the point count barely moves across the keyboard.
+  Under a harmonic series it is about 9 dB over three octaves of played note,
+  quietest at the top, because a harmonic series only goes up and the band's
+  ceiling does not move.
+
+  This is not corrected in the divisor: following the live count would
+  reintroduce the ducking the fixed reference exists to prevent. It is a cost
+  charged to `Geometry::Harmonics`, and it means **a comparison between the
+  geometries is level-matched on a sustained note near the reference and is not
+  level-matched on a bass line** — the top of the line will sound thin, and
+  timbre and level cannot be told apart by ear.
+
 The decay is a third: see section 6.
 
 ## 6. The gain law

@@ -103,6 +103,28 @@ pub enum Geometry {
     /// ([`MAX_HARMONICS`]), so it is by far the expensive one; kept because
     /// "sparse but wide" and "dense but low" are different sounds and the
     /// cheap one is not automatically right.
+    ///
+    /// # Its count is not constant across the keyboard, and neither is its level
+    ///
+    /// A harmonic series only goes up, and the band's ceiling does not move,
+    /// so the number of partials that fit falls as the note rises: 159 at
+    /// E1, 148 at the reference note, 81 at A2, 20 at A4. The octave
+    /// geometries step both ways and hold at seven throughout.
+    ///
+    /// The bank divides out density at a fixed reference note
+    /// (`REFERENCE_NOTE_HZ`), which is what keeps a growing chord from ducking
+    /// — but a fixed reference is exact at one note only. Under `Octaves` the
+    /// error is nothing, because the count barely moves. Under `Harmonics` it
+    /// is about **9 dB across three octaves of played note**, quietest at the
+    /// top.
+    ///
+    /// **This is not a defect in the divisor and is deliberately not corrected
+    /// there.** Following the live count would reintroduce exactly the ducking
+    /// the fixed reference exists to prevent. It is recorded here instead,
+    /// because it is a cost this geometry has to be worth: a comparison done
+    /// on a sustained note near the reference is fair, and one done on a bass
+    /// line is not — the top of the line will sound thin, and whether that is
+    /// timbre or level cannot be told apart by ear.
     Harmonics,
 }
 
@@ -155,11 +177,14 @@ impl Grid {
     /// point would pile several resonators onto one frequency, which is both
     /// wasted work and a peak nobody asked for.
     ///
-    /// **The steps run in both directions from the note.** A grid that only
-    /// went up would put fewer points on a high note than a low one, and the
-    /// count, the CPU cost and the loudness would all then depend on which key
-    /// was pressed. Running both ways and letting the band do the limiting is
-    /// what makes those three constant.
+    /// **The octave geometries step in both directions from the note**, which
+    /// is what keeps their point count — and so their cost and their loudness
+    /// — the same whichever key is pressed. A grid that only went up would put
+    /// fewer points on a high note than a low one.
+    ///
+    /// **[`Geometry::Harmonics`] does not have that property**, because a
+    /// harmonic series only goes up. Its count falls as the note rises, and so
+    /// does its level; see that variant's documentation.
     pub fn frequencies(&self, note_hz: f32, nyquist_hz: f32, out: &mut [f32]) -> usize {
         let mut sink = Sink::new(out);
         self.generate(note_hz, nyquist_hz, |hz| sink.push(hz));
@@ -391,28 +416,63 @@ mod tests {
         assert!(n_low >= MAX_HARMONICS - 2, "stopped at {n_low} partials");
     }
 
-    /// Both directions from the note, so the count does not depend on which
-    /// key was pressed. This is what makes the CPU cost and the loudness
-    /// constant across the keyboard.
+    /// Both directions from the note, so an octave grid's count does not depend
+    /// on which key was pressed. This is what makes its CPU cost and its
+    /// loudness constant across the keyboard.
     #[test]
-    fn the_count_is_stable_across_octaves_of_the_played_note() {
-        let grid = Grid::default();
-        let counts: Vec<usize> = [32.7, 65.4, 130.8, 261.6, 523.3]
+    fn an_octave_grids_count_is_stable_across_octaves_of_the_played_note() {
+        for geometry in [Geometry::Octaves, Geometry::OctavePairs] {
+            let grid = Grid {
+                geometry,
+                ..Grid::default()
+            };
+            let counts: Vec<usize> = [32.7, 65.4, 130.8, 261.6, 523.3]
+                .into_iter()
+                .map(|hz| collect(&grid, hz).len())
+                .collect();
+            let (min, max) = (*counts.iter().min().unwrap(), *counts.iter().max().unwrap());
+            assert!(
+                max - min <= 2,
+                "{geometry:?} should not swing with the played octave, got {counts:?}"
+            );
+            // A note well above the floor only stays covered because `j` goes
+            // negative: C4 with upward-only steps would start at 261 Hz.
+            let c4 = collect(&grid, 261.6);
+            assert!(
+                *c4.first().unwrap() < 100.0,
+                "{geometry:?} should extend below the played note, got {c4:?}"
+            );
+        }
+    }
+
+    /// A harmonic series does *not* have that property, and the size of the
+    /// gap is a cost the geometry has to be worth. Pinned so that a change
+    /// which flattens it is visible as a change, and so that the claim above
+    /// is not read as covering all three.
+    #[test]
+    fn a_harmonic_grids_count_collapses_as_the_played_note_rises() {
+        let grid = Grid {
+            geometry: Geometry::Harmonics,
+            ..Grid::default()
+        };
+        let counts: Vec<usize> = [41.2, 60.0, 110.0, 220.0, 440.0]
             .into_iter()
             .map(|hz| collect(&grid, hz).len())
             .collect();
-        let (min, max) = (*counts.iter().min().unwrap(), *counts.iter().max().unwrap());
+        for pair in counts.windows(2) {
+            assert!(
+                pair[1] < pair[0],
+                "the count should fall with every rise in pitch, got {counts:?}"
+            );
+        }
+        let (first, last) = (counts[0], *counts.last().unwrap());
         assert!(
-            max - min <= 1,
-            "count should not swing with the played octave, got {counts:?}"
+            first > 6 * last,
+            "expected the count to collapse across the keyboard, got {counts:?}"
         );
-        // A note well above the floor only stays covered because `j` goes
-        // negative: C4 with upward-only steps would start at 261 Hz.
-        let c4 = collect(&grid, 261.6);
-        assert!(
-            *c4.first().unwrap() < 100.0,
-            "the grid should extend below the played note, got {c4:?}"
-        );
+        // Nothing goes below the played note, which is why it collapses.
+        let high = collect(&grid, 440.0);
+        assert!(*high.first().unwrap() >= 440.0, "got {high:?}");
     }
 
     /// The detune's unit is per octave, so widening the band must not change
