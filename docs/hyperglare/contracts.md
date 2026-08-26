@@ -140,6 +140,26 @@ are made not to:
 
 The decay is a third: see section 6.
 
+## 5.1 Stereo
+
+**The wet path is mono under `SearPlacement::AfterSum`.** Once the resonators
+have been summed they cannot be separated again, so a waveshaper placed after
+the sum has one signal to work on and produces one.
+
+**What that costs depends on `color`, and at the top of its range it is the
+whole stereo image.** Below one the dry survives and carries the width it
+arrived with; at one and above there is no dry, so the output is mono however
+wide the input was. Measured on a stereo source: 0.56 in, 0.00 out.
+
+`SearPlacement::BeforeSplit` keeps the image, because it splits before it
+shapes. A decorrelator would let `AfterSum` keep it too, and is deliberately
+not built: it would change the width of one arm of a comparison whose subject
+is the waveshaper's position rather than the width.
+
+**Which of those is worth it is an M0 question**, and the cost above is one of
+the things it has to weigh. It is recorded here rather than left to be found on
+a stereo source, which is how it was found.
+
 ## 6. The gain law
 
 ```text

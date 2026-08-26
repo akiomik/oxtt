@@ -36,7 +36,17 @@
 //! decorrelator, which is a delay line and a component of its own; it is left
 //! out deliberately, because it would change the width of one arm of a
 //! comparison whose subject is the waveshaper's position and not the width.
-//! The dry path stays stereo either way, so the output is stereo in both.
+//!
+//! **What that costs depends on [`HyperglareParams::color`], and at the top of
+//! its range it costs the stereo image entirely.** Below one the dry survives
+//! and carries the width it arrived with; at one and above the dry is gone, so
+//! under `AfterSum` the output is fully mono however wide the input was.
+//! Measured on a stereo source: a width of 0.56 in, and 0.00 out.
+//!
+//! That is a real cost rather than a curiosity, and it is one of the things
+//! the comparison has to weigh — `BeforeSplit` keeps the image, and paying for
+//! a decorrelator would let `AfterSum` keep it too. Which is worth it is not
+//! decidable from here.
 
 use effectkit::decibels::db_to_amp;
 use effectkit::filter::{Biquad, biquad_coeffs};
@@ -96,8 +106,9 @@ pub struct HyperglareParams {
     pub sear: f32,
     /// Stereo spread of the bank, `0.0` to `1.0`.
     ///
-    /// Only reaches the output under [`SearPlacement::BeforeSplit`]; see the
-    /// module documentation for why the other arm is mono.
+    /// Only reaches the output under [`SearPlacement::BeforeSplit`]. Under
+    /// `AfterSum` the wet is mono, so whatever width the output has is the
+    /// dry's — and at a `color` of one or more there is no dry.
     pub width: f32,
     /// Dry/wet, `0.0` to `2.0`.
     ///
@@ -476,10 +487,10 @@ mod tests {
         assert_eq!(render(37), render(4_800));
     }
 
-    /// The two placements are different sounds — which is why the choice is a
-    /// parameter — and both are stereo at the output.
+    /// The two placements are different sounds, which is why the choice is a
+    /// parameter rather than a decision.
     #[test]
-    fn the_two_sear_placements_differ_and_both_produce_stereo() {
+    fn the_two_sear_placements_are_different_sounds() {
         let base = HyperglareParams {
             sear: 0.8,
             color: 1.0,
@@ -498,18 +509,8 @@ mod tests {
             processor.process(&mut l, &mut r);
             (l, r)
         };
-        let (al, ar) = render(SearPlacement::AfterSum);
-        let (bl, br) = render(SearPlacement::BeforeSplit);
-
-        // Shaping the sum leaves nothing to separate, so its wet path is mono;
-        // the dry is identical in both channels here, so the output is too.
-        #[allow(clippy::float_cmp)]
-        {
-            assert_eq!(al, ar, "shaping the sum should give a mono wet path");
-        }
-        let spread: f32 = bl.iter().zip(&br).map(|(a, b)| (a - b).abs()).sum();
-        assert!(spread > 1.0, "splitting first should give width: {spread}");
-
+        let (al, _) = render(SearPlacement::AfterSum);
+        let (bl, _) = render(SearPlacement::BeforeSplit);
         let difference: f32 = al.iter().zip(&bl).map(|(a, b)| (a - b).abs()).sum();
         assert!(
             difference > 1.0,
@@ -517,6 +518,53 @@ mod tests {
         );
     }
 
+    /// What the mono wet path actually costs, and where.
+    ///
+    /// Below a colour of one the dry survives and carries the width it arrived
+    /// with. At one and above there is no dry, so under `AfterSum` the output
+    /// is mono however wide the input was — which on a stereo source is the
+    /// whole image. `BeforeSplit` keeps it.
+    ///
+    /// Driven with a genuinely stereo input, because a mono one cannot tell
+    /// the two apart and an earlier version of this test used one.
+    #[test]
+    fn the_mono_wet_path_costs_the_image_only_when_the_dry_is_gone() {
+        let width_of = |placement: SearPlacement, color: f32| {
+            let params = HyperglareParams {
+                sear_placement: placement,
+                color,
+                width: 1.0,
+                ..HyperglareParams::default()
+            };
+            let mut processor = Processor::new(params, SR);
+            processor.apply_params(&params, &[55.0, 82.4, 110.0]);
+            // Different content in each channel: an octave apart.
+            let mut l: Vec<f32> = (0..9_600).map(|i| tone(i, 55.0)).collect();
+            let mut r: Vec<f32> = (0..9_600).map(|i| tone(i, 110.0)).collect();
+            processor.process(&mut l, &mut r);
+            let side: f32 = l.iter().zip(&r).map(|(a, b)| (a - b).abs()).sum();
+            let mid: f32 = l.iter().map(|a| a.abs()).sum();
+            side / mid.max(1e-9)
+        };
+
+        // The dry is still there, so the image is.
+        assert!(
+            width_of(SearPlacement::AfterSum, 0.5) > 0.2,
+            "a half-open colour should keep the dry's width"
+        );
+        // It is not, so it is not.
+        assert!(
+            width_of(SearPlacement::AfterSum, 1.0) < 1e-6,
+            "shaping the sum with no dry left should give a mono output"
+        );
+        // And the other placement keeps it either way.
+        assert!(
+            width_of(SearPlacement::BeforeSplit, 1.0) > 0.2,
+            "splitting before the shaper should keep an image without the dry"
+        );
+    }
+
+    /// Nothing the processor can be asked for escapes into a host as a
     /// Nothing the processor can be asked for escapes into a host as a
     /// non-finite sample or as an unbounded one.
     #[test]
