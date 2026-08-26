@@ -305,6 +305,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
+name = "hyperglare-dsp"
+version = "0.1.0"
+dependencies = [
+ "effectkit",
+ "no-panic",
+ "nutype",
+ "proptest",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

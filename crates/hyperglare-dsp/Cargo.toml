@@ -1,0 +1,21 @@
+[package]
+name = "hyperglare-dsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "The DSP core of hyperglare: a tuned resonator bank that colours an input with a chord, free of any audio host"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+effectkit = { path = "../effectkit" }
+nutype = "0.7.0"
+
+[dev-dependencies]
+no-panic = "0.1"
+proptest = { workspace = true }
+
+[lints]
+workspace = true
