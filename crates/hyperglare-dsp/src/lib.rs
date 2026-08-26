@@ -7,6 +7,7 @@
 //! prohibitions (`docs/effectkit/realtime.md`), because that is where it runs.
 
 pub mod bank;
+pub mod exciter;
 pub mod grid;
 
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod proofs {
     //! by `cargo test --release` and are inert in a debug build.
 
     use crate::bank::{BankParams, ResonatorBank};
+    use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams};
     use crate::grid::{Geometry, Grid};
 
     /// The grid is rebuilt whenever a chord or a knob moves, which under Bela
@@ -102,6 +104,39 @@ mod proofs {
             &[55.0, 65.4, 82.4, 110.0, 130.8, 164.8, 220.0][..],
         ] {
             run(&mut bank, notes, &BankParams::default());
+        }
+    }
+
+    /// The exciter is the first thing every sample meets, so it is on the
+    /// per-sample path with the bank.
+    #[test]
+    fn the_exciters_sample_path_cannot_panic() {
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn run(exciter: &mut Exciter, params: ExciterParams, coeffs: ExciterCoeffs, x: f32) -> f32 {
+            exciter.process(x, &params, &coeffs)
+        }
+
+        let coeffs = ExciterCoeffs::new(48_000.0);
+        let mut exciter = Exciter::new();
+        for params in [
+            ExciterParams {
+                drive: 0.0,
+                noise_amount: 0.0,
+            },
+            ExciterParams {
+                drive: 1.0,
+                noise_amount: 1.0,
+            },
+            // Out of range on purpose: the shaper clamps rather than trusting.
+            ExciterParams {
+                drive: 9.0,
+                noise_amount: -1.0,
+            },
+        ] {
+            for x in [0.0, 0.5, -1.0, f32::MAX, f32::MIN, f32::NAN] {
+                let _ = run(&mut exciter, params, coeffs, x);
+            }
+            exciter.reset();
         }
     }
 }

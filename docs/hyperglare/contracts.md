@@ -82,11 +82,17 @@ These hold for every sample, at any settings:
 
   **This is not structural, and that is a difference from `oxtt`.** `oxtt` only
   ever scales what arrived, so silence out of silence is a property of its
-  shape. `hyperglare` will have an internal noise source in its excitation
-  stage, and once it does, the gate on that source is the *only* thing holding
-  this invariant up. The test for it is therefore not "silence produces
-  silence" but "silence produces silence with the excitation and the decay at
-  maximum".
+  shape. `hyperglare` has an internal noise source in `Exciter`, and the gate
+  on it is the *only* thing holding this invariant up.
+
+  For the exciter the guarantee is exact and has a stated arrival: **once the
+  gate's envelope crosses `effectkit`'s silence floor, the output is exactly
+  zero**, with the drive and the noise at maximum. Not "after the release" —
+  a one-pole release reaches 120 dB down after about fourteen of its own time
+  constants, a bit under half a second — and not "small", because a tolerance
+  would pass for a gate that had been deleted. The test derives its wait from
+  the release and the floor, and it has been checked against a build with the
+  gate removed: it is the only test in the module that fails there.
 - **The output is bounded.** Q reaches into the thousands, so the bound is
   worth stating separately from finiteness. It is currently a consequence of
   the per-filter normalisation and the density divisor rather than of a
