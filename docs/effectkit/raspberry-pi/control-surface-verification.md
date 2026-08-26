@@ -3,28 +3,28 @@
 This is the hardware verification for `oxtt`'s physical control surface: six
 potentiometers on an MCP3008 SPI ADC driving `depth`/`time`/`upward`/`downward`
 and the input/output gains, plus a latching bypass switch. It assumes the
-environment from [`usb-audio-setup.md`](usb-audio-setup.md) — the same
+environment from [`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md) — the same
 Raspberry Pi 5, the same native build, the same JACK server over a
 class-compliant USB audio interface — and it assumes the surface itself is
 already assembled and enabled per
 [`control-surface-setup.md`](control-surface-setup.md): the wiring, the
 electrical rules, enabling SPI0 on the 40-pin header, and confirming that
 `/dev/spidev0.0` is genuinely the header's bus. The design being verified is
-[ADR 0010](../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md);
-the guarantees it must satisfy are `docs/contracts.md` §8.
+[ADR 0010](../../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md);
+the guarantees it must satisfy are `docs/oxtt/contracts.md` §8.
 
 Concrete card names, host names, and port numbers are examples from the
-validation environment (see [`usb-audio-setup.md`](usb-audio-setup.md));
+validation environment (see [`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md));
 substitute your own.
 
 Two things are deliberately *not* verified here. The audio path itself is
-covered by [`usb-audio-verification.md`](usb-audio-verification.md) and its
+covered by [`../../oxtt/raspberry-pi/usb-audio-verification.md`](../../oxtt/raspberry-pi/usb-audio-verification.md) and its
 `128×3` baseline is reused unchanged; the pure conditioning logic (filter,
 deadband, debounce, explicit bypass-level transport) is covered by the unit and property tests
 in `crates/effectkit-controls/src/conditioning.rs` and needs no hardware. What this document verifies
 is the part that only real hardware can show: what the assembled surface
 actually reads, and whether the whole chain from a knob to the audio callback
-behaves as `docs/contracts.md` §8 says it must.
+behaves as `docs/oxtt/contracts.md` §8 says it must.
 
 ## 1. Hardware under test
 
@@ -166,8 +166,8 @@ The value itself lives in `crates/effectkit-controls-pi/src/lib.rs`, next to the
 measured on, rather than in the mapping layer: it is a property of this
 converter and not of the conditioning, and a second host measured an order of
 magnitude quieter
-([ADR 0012](../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md),
-[`docs/bela/control-surface-verification.md`](../bela/control-surface-verification.md)).
+([ADR 0012](../../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md),
+[`docs/effectkit/bela/control-surface-verification.md`](../bela/control-surface-verification.md)).
 Nothing about this measurement or the figure it justifies changed with that
 move.
 
@@ -182,7 +182,7 @@ under the roughly 1 dB step a listener picks out on programme material.
 ### Procedure
 
 1. Start JACK at the `128×3` baseline established by
-   [`usb-audio-verification.md`](usb-audio-verification.md), replacing the
+   [`../../oxtt/raspberry-pi/usb-audio-verification.md`](../../oxtt/raspberry-pi/usb-audio-verification.md), replacing the
    card name with yours:
 
    ```sh
@@ -250,7 +250,7 @@ endpoint, peak, and trough levels before marking this follow-up passed.
 ### Regression check
 
 `scripts/pi-jack-usb-soak-test.sh` was run at `--duration 60` — not the
-1800-second baseline [`usb-audio-verification.md`](usb-audio-verification.md)
+1800-second baseline [`../../oxtt/raspberry-pi/usb-audio-verification.md`](../../oxtt/raspberry-pi/usb-audio-verification.md)
 established — and passed:
 
 ```
@@ -261,10 +261,10 @@ This script invokes `oxtt` without `--controls`, so none of the
 control-surface code executes during this check at all: no control thread, no
 SPI or GPIO access. The question this check answers for this document is
 narrowly whether adding the (dormant, unactivated) control-surface code to the
-binary disturbed the audio-stability guarantee `usb-audio-verification.md`
+binary disturbed the audio-stability guarantee `../../oxtt/raspberry-pi/usb-audio-verification.md`
 established — and that question does not depend on run length, because
 control-surface code does not run in this configuration regardless of
-duration. The 30-minute duration `usb-audio-verification.md` uses exists to
+duration. The 30-minute duration `../../oxtt/raspberry-pi/usb-audio-verification.md` uses exists to
 catch slow-onset audio-hardware phenomena (thermal drift, USB clock slip) that
 are unrelated to whether control-surface code is present in the binary, so a
 short run is adequate evidence here.

@@ -1,7 +1,7 @@
-//! `Bands<T>`: exactly one `T` per band (docs/architecture.md, ADR 0001).
+//! `Bands<T>`: exactly one `T` per band (docs/oxtt/architecture.md, ADR 0001).
 //!
 //! oxtt is architecturally a 3-band compressor, not a generic N-band
-//! design (docs/architecture.md), so this fixes the arity at exactly three
+//! design (docs/oxtt/architecture.md), so this fixes the arity at exactly three
 //! named fields rather than `[T; 3]`/`Vec<T>`: `.low`/`.mid`/`.high` access
 //! can't go out of range the way an array index can. Used consistently from
 //! config (`OttParams::bands`) through to the real-time DSP core
@@ -32,7 +32,7 @@ impl<T> Bands<T> {
 }
 
 #[cfg(test)]
-// `vec!` is fine in tests; the real-time-callback contract (docs/contracts.md
+// `vec!` is fine in tests; the real-time-callback contract (docs/oxtt/contracts.md
 // §6) only applies to the DSP/audio-callback path.
 #[allow(clippy::disallowed_macros)]
 mod tests {

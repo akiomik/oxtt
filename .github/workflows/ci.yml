@@ -41,7 +41,7 @@ jobs:
       # Named crate by crate rather than left to `--workspace` or to
       # `default-members`, because this step proves something specific: the
       # `#[no_panic]` attributes that only hold under full optimisation
-      # (docs/contracts.md §6). The list is every crate that carries one.
+      # (docs/effectkit/realtime.md). The list is every crate that carries one.
       #
       # `oxtt-controls` is on it because `assign` runs inside Bela's audio
       # callback. `oxtt` is not: the composition of conditioning, assignment
@@ -49,7 +49,7 @@ jobs:
       # the crate that owns it, which is what makes a failure attributable.
       #
       # Add a crate here when it gains a `#[no_panic]`.
-      - name: cargo test --release (no-panic proofs, docs/contracts.md §6)
+      - name: cargo test --release (no-panic proofs, docs/effectkit/realtime.md)
         run: >-
           cargo test --release --locked
           -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls
@@ -91,7 +91,7 @@ jobs:
     # `cargo clippy` does not link, so this needs neither `libbela` nor the
     # 800 MB sysroot a real device build copies off the board — only the
     # target's standard library. Producing an actual binary is a
-    # cross-compile from a development machine (docs/bela/cross-compile.md).
+    # cross-compile from a development machine (docs/cross-compile.md).
     #
     # The no-panic proof cannot follow it here: proving it needs
     # `cargo test --release`, which needs to run the tests, which needs the

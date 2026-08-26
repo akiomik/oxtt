@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::value::SampleRateError;
 
-/// Validation error when constructing or updating parameters (docs/contracts.md §1).
+/// Validation error when constructing or updating parameters (docs/oxtt/contracts.md §1).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ConfigError {
     /// `high_crossover_hz` was less than one octave above `low_crossover_hz`.

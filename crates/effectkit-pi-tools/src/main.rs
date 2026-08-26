@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         // One sample per line, with every value as `Name=raw`, so the awk
-        // reduction in docs/raspberry-pi/control-surface-verification.md can
+        // reduction in docs/effectkit/raspberry-pi/control-surface-verification.md can
         // pick out any channel by name.
         let wrote = writeln!(
             out,

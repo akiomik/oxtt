@@ -58,9 +58,9 @@ and the two converters are not in the same class:
 | Worst case | σ ≈ 6.4 | whole excursion ≤ 2.5 counts |
 
 The measurements are in
-[`docs/raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
+[`docs/effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md)
 and
-[`docs/bela/control-surface-verification.md`](../bela/control-surface-verification.md).
+[`docs/effectkit/bela/control-surface-verification.md`](../effectkit/bela/control-surface-verification.md).
 
 Eight counts on a Gem is not wrong — it is silent there too, by a wide
 margin — it is simply eight counts spent on jitter that measures under three.
@@ -134,9 +134,9 @@ publish from a motionless pot by construction.
   the three-layer split, and where the deadband was put.
 - [ADR 0011](0011-bela-gem-stereo-as-the-second-host.md) — the port that
   reused layer B verbatim, and the rejected alternative this ADR revisits.
-- [`docs/raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
+- [`docs/effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md)
   — the MCP3008 measurement behind 8.0.
-- [`docs/bela/control-surface-verification.md`](../bela/control-surface-verification.md)
+- [`docs/effectkit/bela/control-surface-verification.md`](../effectkit/bela/control-surface-verification.md)
   — the Gem measurement behind 3.0.
-- [`docs/contracts.md` §8](../contracts.md#8-control-surface) — the guarantees
+- [`docs/oxtt/contracts.md` §8](../oxtt/contracts.md#8-control-surface) — the guarantees
   the deadband is one half of.

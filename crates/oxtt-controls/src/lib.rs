@@ -23,7 +23,7 @@ use effectkit_controls::{ConditionedControls, PotTravel};
 /// The dB value the gain pots produce at their lower stop.
 ///
 /// This is [`IoGain`]'s own lower bound, not a narrowing of it: the pots sweep
-/// the whole range the parameter admits (docs/contracts.md §1). Deliberately
+/// the whole range the parameter admits (docs/oxtt/contracts.md §1). Deliberately
 /// no cap tighter than the type's — a smaller number would change the knob's
 /// dB-per-degree on nothing more than a guess about how far anyone would want
 /// to turn it.
@@ -52,7 +52,7 @@ const GAIN_SPAN_DB: f32 = 48.0;
 /// folded into the parameters. The DSP crossfades its phase-coherent effect
 /// and guaranteed-unity bypass branches; a control layer must never express
 /// "bypassed" as a coincidental `depth = 0` and two zeroed gains
-/// (docs/contracts.md §8).
+/// (docs/oxtt/contracts.md §8).
 ///
 /// # Contract
 ///
@@ -61,7 +61,7 @@ const GAIN_SPAN_DB: f32 = 48.0;
 /// [`SixPotBypassConditioner::update`](effectkit_controls::SixPotBypassConditioner::update):
 /// the first because its publish gate assumes equal inputs assign equal
 /// outputs, the second because on a Bela this runs inside the audio callback
-/// (docs/contracts.md §6).
+/// (docs/oxtt/contracts.md §6).
 // Proves the second half of that contract, checked by `cargo test --release`
 // the same way `OttProcessor::process` is. The tests below already call it, so
 // no proof-only test is needed.
@@ -93,7 +93,7 @@ pub fn assign(base: OttParams, controls: ConditionedControls) -> OttProcessorUpd
 /// `travel` is within `0.0..=1.0` by its type, so `NormalizedF32`
 /// construction cannot fail. The error arm is unreachable; it falls back to
 /// the base value rather than unwrapping, because this runs on Bela's
-/// real-time callback path, where a panic is prohibited (docs/contracts.md §6).
+/// real-time callback path, where a panic is prohibited (docs/oxtt/contracts.md §6).
 fn normalized_or(travel: PotTravel, base: NormalizedF32) -> NormalizedF32 {
     NormalizedF32::try_new(travel.get()).unwrap_or(base)
 }
@@ -110,7 +110,7 @@ fn normalized_or(travel: PotTravel, base: NormalizedF32) -> NormalizedF32 {
 /// `[GAIN_MIN_DB, GAIN_MIN_DB + GAIN_SPAN_DB]`, which is `IoGain`'s range
 /// exactly, and construction cannot fail. The error arm is unreachable for the
 /// same reason as [`normalized_or`]'s, and is handled the same way rather than
-/// unwrapped (docs/contracts.md §6).
+/// unwrapped (docs/oxtt/contracts.md §6).
 fn gain_db_or(travel: PotTravel, base: IoGain) -> IoGain {
     IoGain::try_new(travel.get().mul_add(GAIN_SPAN_DB, GAIN_MIN_DB)).unwrap_or(base)
 }
@@ -899,7 +899,7 @@ mod tests {
         /// the handful an example test can name.
         ///
         /// The arm falls back to the base value rather than unwrapping
-        /// (docs/contracts.md §6), so taking it would be *silent*: the pot
+        /// (docs/oxtt/contracts.md §6), so taking it would be *silent*: the pot
         /// would simply stop working and the preset's gain would stand. That
         /// is what this checks for — `SafeStart`'s -18 dB output gain and 0 dB
         /// input gain are whole dB away from anything the map produces, so a

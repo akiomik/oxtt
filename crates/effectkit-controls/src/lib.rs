@@ -24,7 +24,7 @@
 //! [`SixPotBypassConditioner`] is pure: no I/O, no threads, no clock, no
 //! allocation and no panic. That is what lets a Bela drive it from inside the
 //! audio callback with no transport layer in between (ADR 0011,
-//! `docs/contracts.md` §6). Layer A implementations are not held to that —
+//! `docs/effectkit/realtime.md`). Layer A implementations are not held to that —
 //! `ControlSource::read` is free to block, because on the platform that has
 //! one it is polled from a thread of its own.
 

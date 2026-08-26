@@ -55,7 +55,9 @@ During a transition, coefficients may be updated as needed. Once both cutoffs ar
 
 ## 6. Real-time callback
 
-Every host callback that runs while audio is flowing, and its transitive DSP calls, must not allocate or free heap memory; acquire or wait on a lock; use a blocking channel operation; perform file or standard-stream I/O; spawn, join, or sleep a thread; panic or unwind; or take more than time proportional to the callback's frame count. This covers `AudioProcessHandler::process` under JACK, and `render_pre` and `render` under Bela.
+The prohibitions themselves are not restated here. They are the one contract shared across every effect in this family rather than duplicated per project, and they live in [`docs/effectkit/realtime.md`](../effectkit/realtime.md) ([ADR 0015](../decisions/0015-documentation-is-namespaced-by-project.md) §3). This section says where they land in `oxtt`.
+
+**They land on `AudioProcessHandler::process` under JACK, and on `render_pre` and `render` under Bela** — each together with its transitive DSP calls.
 
 The callbacks that run *outside* audio are not bound by it: a host's setup and its post-stop reporting may allocate and may write to stderr. Under Bela that is `validate_settings`, `setup`, `create_render_state` and `cleanup`, the last of which is where a run's diagnostics are printed (section 9).
 

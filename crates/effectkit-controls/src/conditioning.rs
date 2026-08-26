@@ -162,8 +162,8 @@ impl PollHz {
 /// > `sqrt(a / (2 - a))`, which is exactly 1/3 at 0.2, so three sigma of
 /// > margin on the filtered signal reduces to one sigma of the raw. That is
 /// > the form to re-check against when the pots, the wiring or the converter
-/// > change (`docs/raspberry-pi/control-surface-verification.md`,
-/// > `docs/bela/control-surface-verification.md`, ADR 0012).
+/// > change (`docs/effectkit/raspberry-pi/control-surface-verification.md`,
+/// > `docs/effectkit/bela/control-surface-verification.md`, ADR 0012).
 ///
 /// # There is no `Default`
 ///
@@ -267,7 +267,7 @@ impl ConditioningConfig {
 ///
 /// Construction saturates rather than failing. Assignment runs inside Bela's
 /// audio callback, where a panic aborts the process and there is nothing to
-/// fall back to (docs/contracts.md §6), so
+/// fall back to (docs/effectkit/realtime.md), so
 /// [`from_counts`](Self::from_counts) clamps and the invariant that the clamp
 /// never actually fires is a test rather than a contract. `try_new` is
 /// deliberately not public; `new_const` is for literals, as everywhere else
@@ -327,7 +327,7 @@ impl PotTravel {
         let travel = (counts / f32::from(POT_POSITION_MAX)).max(0.0).min(1.0);
         // Unreachable: the saturation above lands inside the range this type
         // validates. Falling back rather than unwrapping keeps the panic path
-        // off Bela's callback (docs/contracts.md §6).
+        // off Bela's callback (docs/effectkit/realtime.md).
         Self::try_new(travel).unwrap_or(Self::BOTTOM)
     }
 }
@@ -441,7 +441,7 @@ struct Conditioned {
 /// panic, because a Bela host drives it directly from its real-time `render()`
 /// callback with no transport layer in between (ADR 0009). It therefore holds
 /// itself to the same prohibitions as the audio callback in
-/// docs/contracts.md §6.
+/// docs/effectkit/realtime.md.
 ///
 /// Having no clock is deliberate: the filter is defined per *read*, not per
 /// millisecond, so this layer needs to know neither the poll interval nor the
@@ -475,7 +475,7 @@ impl SixPotBypassConditioner {
     /// The very first call seeds the filter from the reading itself and
     /// publishes immediately, rather than starting from zero and fading in —
     /// the same reasoning as `OttProcessor::new` snapping its smoothers to
-    /// their targets (docs/contracts.md §2). It seeds the switch the same way,
+    /// their targets (docs/oxtt/contracts.md §2). It seeds the switch the same way,
     /// by believing where it is resting (see [`BypassSwitch::seeded`]), so a
     /// run that starts with the switch in the bypassed position comes up
     /// bypassed.
@@ -487,7 +487,7 @@ impl SixPotBypassConditioner {
     ///    the assigned parameters. That is sound only if equal inputs assign
     ///    equal outputs; an assignment that carried state of its own could be
     ///    gated out of a change it wanted to make.
-    /// 2. **It must not panic and must not allocate** (docs/contracts.md §6).
+    /// 2. **It must not panic and must not allocate** (docs/effectkit/realtime.md).
     ///    On a Bela the assignment runs inside the audio callback, on the far
     ///    side of this seam. Nothing here can enforce that, so each effect's
     ///    assignment carries its own no-panic proof.
@@ -500,7 +500,7 @@ impl SixPotBypassConditioner {
     /// would have come out identical, is possible and harmless: applying an
     /// update is idempotent.
     // Proves this function can never panic, the same way
-    // `OttProcessor::process` does (docs/contracts.md §6), checked by
+    // `OttProcessor::process` does (docs/effectkit/realtime.md), checked by
     // `cargo test --release`. It matters here for the same reason: on Bela
     // this runs inside the real-time callback.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
@@ -709,7 +709,7 @@ mod tests {
 
     /// `update` runs inside Bela's audio callback, so it must be provably
     /// panic-free on its own — not merely as part of whatever an effect's
-    /// assignment does with the result (docs/contracts.md §6).
+    /// assignment does with the result (docs/effectkit/realtime.md).
     ///
     /// A proof-only test: `#[no_panic]` is checked at link time under
     /// `cargo test --release`, so what this body does matters far less than

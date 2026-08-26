@@ -3,16 +3,22 @@
 This is the wiring for `oxtt`'s physical control surface on a Bela Gem Stereo —
 six potentiometers driving `depth`/`time`/`upward`/`downward` and the
 input/output gains, plus a latching bypass switch. It is the counterpart of
-[`docs/raspberry-pi/control-surface-setup.md`](../raspberry-pi/control-surface-setup.md),
+[`docs/effectkit/raspberry-pi/control-surface-setup.md`](../raspberry-pi/control-surface-setup.md),
 and it is a much shorter document for one reason: a Gem has the converter and
 the GPIO on the board already, so there is no ADC to wire, no SPI bus to
 enable, and no ADC reference to get right.
 
+> **The knob names in this document are `oxtt`'s.** The wiring, the deadband
+> and the verification below are effect-independent and belong to
+> `effectkit`; what each pot *means* is decided by the assignment step in
+> [`docs/oxtt/`](../../oxtt/) and is not general
+> ([ADR 0015](../../decisions/0015-documentation-is-namespaced-by-project.md)).
+
 For the design, see
-[ADR 0010](../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
-and [ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md); for the
-guarantees it must satisfy, [`contracts.md` §8](../contracts.md#8-control-surface).
-For building and deploying, [`cross-compile.md`](cross-compile.md).
+[ADR 0010](../../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
+and [ADR 0011](../../decisions/0011-bela-gem-stereo-as-the-second-host.md); for the
+guarantees it must satisfy, [`contracts.md` §8](../../oxtt/contracts.md#8-control-surface).
+For building and deploying, [`../../cross-compile.md`](../../cross-compile.md).
 
 Vendor part numbers are deliberately absent: which specific pot, switch or
 resistor you buy is environment-specific.
@@ -167,7 +173,7 @@ scripts/bela-deploy.sh -- --controls --preset safe-start --report-on-exit
 `--controls` is opt-in, so the same binary still runs on a board with nothing
 wired to its headers. Without the six analog inputs and one digital input the
 surface needs, the run is refused *before* the audio system is built, with a
-reason — see [`contracts.md` §9](../contracts.md#9-bela-host-lifecycle).
+reason — see [`contracts.md` §9](../../oxtt/contracts.md#9-bela-host-lifecycle).
 
 The switch position is the bypass state from the first reading onward, so a
 board started with the switch in the bypassed position comes up bypassed.

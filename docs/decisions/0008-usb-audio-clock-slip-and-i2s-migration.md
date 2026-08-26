@@ -24,14 +24,14 @@ audio interface can reach the latency and stability a playable effect needs. The
 reference interface for these measurements is an RME Babyface Pro FS in
 class-compliant mode; the concrete card names, host names, and port numbers in
 this ADR and its companion
-[`docs/raspberry-pi/usb-audio-verification.md`](../raspberry-pi/usb-audio-verification.md)
+[`docs/oxtt/raspberry-pi/usb-audio-verification.md`](../oxtt/raspberry-pi/usb-audio-verification.md)
 are examples from that setup, not fixed requirements.
 
 JACK settings are written `frames×periods` (e.g. `128×3` is 128 frames per period
 over 3 periods). The soak procedure lowers the setting one step at a time and
 requires each candidate to pass three independent 30-minute audio-stability runs
 from a fresh boot. The full procedure, pass criteria, and raw findings are in
-`docs/raspberry-pi/usb-audio-verification.md`.
+`docs/oxtt/raspberry-pi/usb-audio-verification.md`.
 
 The measurements produced two results that drive this decision:
 
@@ -74,7 +74,7 @@ USB host path, not the DSP.
 - **Confirm `128×3` as the JACK setting for this configuration and reject
   `128×2`.** A
   zero-xrun count alone does not qualify a setting; the audio-quality criteria in
-  `docs/raspberry-pi/usb-audio-verification.md` (bounded silent-gap length and no
+  `docs/oxtt/raspberry-pi/usb-audio-verification.md` (bounded silent-gap length and no
   full-scale clipping) apply equally. `128×2` fails those criteria, so the
   lower-latency `64×3` and `64×2` settings are not pursued over USB.
 - **Stop further `128×2` root-cause work over USB.** The seven eliminated causes
@@ -153,14 +153,14 @@ The closest related reports, and why none of them match:
 No public report describes the few-ppm clock-recovery/crystal-difference
 mechanism this ADR attributes the `128×2` failure to, specific to the Pi 5's
 RP1 xHCI controller. The soak-test findings in
-`docs/raspberry-pi/usb-audio-verification.md` may be the first documented
+`docs/oxtt/raspberry-pi/usb-audio-verification.md` may be the first documented
 isolation of this pattern; if reporting it upstream, that document's
 cause-elimination list and period-length match are the primary evidence to
 cite.
 
 ## References
 
-- `docs/raspberry-pi/usb-audio-verification.md` — the full procedure, pass
+- `docs/oxtt/raspberry-pi/usb-audio-verification.md` — the full procedure, pass
   criteria, `128×3`/`128×2` results, the seven-cause elimination, and the
   round-trip latency measurements this ADR summarizes.
 - [Raspberry Pi periodic USB-audio dropout reports](https://github.com/raspberrypi/linux/issues/3795)

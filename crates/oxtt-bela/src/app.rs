@@ -1,5 +1,5 @@
 //! The [`BelaApplication`] oxtt runs under: what each callback does, and
-//! where the state lives (docs/architecture.md, docs/contracts.md §6, §9).
+//! where the state lives (docs/oxtt/architecture.md, docs/oxtt/contracts.md §6, §9).
 //!
 //! Nothing in this module touches libbela, so it compiles, lints and tests on
 //! a development machine — `bela`'s device code is behind a `bela_device` cfg
@@ -35,7 +35,7 @@ const POLL_FRAME: usize = 0;
 ///
 /// Unlike the Raspberry Pi's GPIO17 this pin has no internal pull-up, so the
 /// wiring supplies an external one to 3.3 V with the switch shorting to
-/// ground (docs/bela/control-surface-setup.md). The active-low convention is
+/// ground (docs/effectkit/bela/control-surface-setup.md). The active-low convention is
 /// then identical to the Pi's, and a broken connection reads as "not
 /// bypassed" — the effect keeps working rather than silently dropping out.
 const BYPASS_CHANNEL: usize = 0;
@@ -120,7 +120,7 @@ impl OttApplication {
     /// `clip_led` is the digital channel an indicator LED is wired to, if
     /// there is one. Nothing on this board reports input clipping, so this is
     /// the only way to see it while playing rather than after the run
-    /// (`docs/bela/control-surface-setup.md`).
+    /// (`docs/effectkit/bela/control-surface-setup.md`).
     ///
     /// `report_on_exit` prints [`RunDiagnostics`] once the run has finished.
     /// The host cannot print them for us: [`bela::Bela::until_stopped`]
@@ -267,7 +267,7 @@ impl BelaApplication for OttApplication {
         }
 
         // The rate the board settled on, which is what the processor's filter
-        // coefficients have to be built for (docs/contracts.md §2).
+        // coefficients have to be built for (docs/oxtt/contracts.md §2).
         if self.processor.reset(context.audio_sample_rate()).is_err() {
             return false;
         }
@@ -305,7 +305,7 @@ impl BelaApplication for OttApplication {
     ///
     /// Real-time safe: reading a slice, six float conversions, the mapping
     /// layer (itself proven panic-free), and a validated assignment. No
-    /// allocation, no lock, no I/O (docs/contracts.md §6).
+    /// allocation, no lock, no I/O (docs/oxtt/contracts.md §6).
     fn render_pre(&mut self, states: &mut [OttRenderState], context: &mut BlockContext) {
         // Before the decimator, and not behind it: the indicator is not a
         // control, it belongs to every block, and it has to work on a run
@@ -351,7 +351,7 @@ impl BelaApplication for OttApplication {
             return;
         };
         let update = assign(self.params, controls);
-        // Saturating for `clippy::arithmetic_side_effects` (docs/contracts.md
+        // Saturating for `clippy::arithmetic_side_effects` (docs/oxtt/contracts.md
         // §6). A `u64` at 500 publishes a second would take half a billion
         // years to reach the ceiling, so this is a lint's shape rather than a
         // behaviour.
@@ -380,7 +380,7 @@ impl BelaApplication for OttApplication {
     ///
     /// Real-time safe: no allocation, no lock, no I/O, and no index — the
     /// slice patterns below cannot go out of bounds, and `process_frame` is
-    /// proven panic-free (docs/contracts.md §6).
+    /// proven panic-free (docs/oxtt/contracts.md §6).
     fn render(&self, state: &mut OttRenderState, context: &mut RenderContext) {
         let mut io = context.audio_io();
         for (input, output) in io.frames() {
@@ -406,10 +406,10 @@ impl BelaApplication for OttApplication {
     /// the API — [`bela::Bela::until_stopped`] consumes the audio system and
     /// does not return the application — but it is safe: `cleanup` runs after
     /// audio has stopped, outside every real-time callback, so the no-I/O
-    /// rule in docs/contracts.md §6 does not reach it.
+    /// rule in docs/oxtt/contracts.md §6 does not reach it.
     #[expect(
         clippy::disallowed_macros,
-        reason = "cleanup runs after audio has stopped, outside the real-time callbacks docs/contracts.md §6 governs; same exemption as src/main.rs"
+        reason = "cleanup runs after audio has stopped, outside the real-time callbacks docs/oxtt/contracts.md §6 governs; same exemption as src/main.rs"
     )]
     fn cleanup(&mut self, states: &mut [OttRenderState], context: &CleanupContext) {
         if self.report_on_exit {
@@ -453,7 +453,7 @@ impl RunDiagnostics {
     /// about the hardware in front of them rather than about the hosts —
     /// [`InputMeter`] has it. What it buys here is that `--adc-gain-db` can be
     /// chosen from a number instead of by ear
-    /// (`docs/bela/cross-compile.md`), which nothing on this board otherwise
+    /// (`docs/cross-compile.md`), which nothing on this board otherwise
     /// allows.
     #[must_use]
     pub const fn input(self) -> InputMeter {

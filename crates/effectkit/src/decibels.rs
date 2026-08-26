@@ -11,7 +11,7 @@
 //! (`oxtt`'s offline renderer).
 
 /// The level below which a signal is treated as silence, in dBFS
-/// (docs/contracts.md §4).
+/// (docs/oxtt/contracts.md §4).
 ///
 /// Prevents `log(0)`, division by zero, and the NaN that follows either.
 /// -120 dBFS is about 20 dB below the noise floor of 16-bit audio, so nothing

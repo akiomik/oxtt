@@ -11,9 +11,9 @@ A 3-band upward/downward multiband compressor for JACK, inspired by Xfer Records
 `oxtt` runs under two hosts, selected by Cargo feature:
 
 - **JACK** (the `oxtt` package) — the `oxtt` binary. Verified on a Raspberry Pi 5 with a class-compliant USB audio interface, and the way the DSP is developed and tested on a desktop.
-- **Bela Gem Stereo** (the `oxtt-bela` package) — the `oxtt-bela` binary, cross-compiled and copied to the board. [ADR 0011](docs/decisions/0011-bela-gem-stereo-as-the-second-host.md) adds this host for the reasons ADR 0009 left on the table: roughly 1 ms round-trip latency, fanless, and full Linux, so the DSP runs unchanged. It runs on the board at 48 kHz with no underruns and about 19% of one core. It has also been listened to, which is how the board's converter noise floor turned up: the presets are calibrated for a studio interface, and on this board's converters upward compression makes that audible ([`docs/bela/noise-floor.md`](docs/bela/noise-floor.md)). **ADR 0011 adds the host; it does not settle that this is the platform** — that waits on presets calibrated for these converters. See [`docs/bela/audio-verification.md`](docs/bela/audio-verification.md) for exactly what is and is not established.
+- **Bela Gem Stereo** (the `oxtt-bela` package) — the `oxtt-bela` binary, cross-compiled and copied to the board. [ADR 0011](docs/decisions/0011-bela-gem-stereo-as-the-second-host.md) adds this host for the reasons ADR 0009 left on the table: roughly 1 ms round-trip latency, fanless, and full Linux, so the DSP runs unchanged. It runs on the board at 48 kHz with no underruns and about 19% of one core. It has also been listened to, which is how the board's converter noise floor turned up: the presets are calibrated for a studio interface, and on this board's converters upward compression makes that audible ([`docs/oxtt/bela/noise-floor.md`](docs/oxtt/bela/noise-floor.md)). **ADR 0011 adds the host; it does not settle that this is the platform** — that waits on presets calibrated for these converters. See [`docs/oxtt/bela/audio-verification.md`](docs/oxtt/bela/audio-verification.md) for exactly what is and is not established.
 
-Either host can drive six potentiometers and a latching bypass switch instead of the CLI (`--controls`): the pots drive depth/time/upward/downward and the input/output gains, and the switch bypasses the effect. Both surfaces have been verified on real hardware — the Raspberry Pi's in [`docs/raspberry-pi/control-surface-verification.md`](docs/raspberry-pi/control-surface-verification.md), the Bela's in [`docs/bela/control-surface-verification.md`](docs/bela/control-surface-verification.md).
+Either host can drive six potentiometers and a latching bypass switch instead of the CLI (`--controls`): the pots drive depth/time/upward/downward and the input/output gains, and the switch bypasses the effect. Both surfaces have been verified on real hardware — the Raspberry Pi's in [`docs/effectkit/raspberry-pi/control-surface-verification.md`](docs/effectkit/raspberry-pi/control-surface-verification.md), the Bela's in [`docs/effectkit/bela/control-surface-verification.md`](docs/effectkit/bela/control-surface-verification.md).
 
 What is not done: the control surface is a breadboard rather than a pedal; the presets are calibrated for a studio interface rather than for the Gem's converters; and the round-trip latency that motivated the board is still the vendor's figure rather than a measurement of oxtt's.
 
@@ -27,8 +27,8 @@ Each stereo input is split into three bands (low / mid / high) using 4th-order L
 
 - Rust, edition 2024 (rustc >= 1.88)
 - For the JACK host: a JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary — not required to build the crate or run `cargo test`
-- For the Bela host: a Bela Gem Stereo, a cross toolchain, and a sysroot synced off the board, as described in [`docs/bela/cross-compile.md`](docs/bela/cross-compile.md)
-- For the Raspberry Pi control surface (`--controls`, the `pi-controls` Cargo feature): a Raspberry Pi 5 wired up as described in [`docs/raspberry-pi/`](docs/raspberry-pi/)
+- For the Bela host: a Bela Gem Stereo, a cross toolchain, and a sysroot synced off the board, as described in [`docs/cross-compile.md`](docs/cross-compile.md)
+- For the Raspberry Pi control surface (`--controls`, the `pi-controls` Cargo feature): a Raspberry Pi 5 wired up as described in [`docs/effectkit/raspberry-pi/`](docs/effectkit/raspberry-pi/)
 
 ## Build
 
@@ -49,7 +49,7 @@ The Raspberry Pi control surface is behind the `oxtt` package's optional `pi-con
 scripts/pi-build.sh --controls
 ```
 
-See [`docs/development.md`](docs/development.md) for local setup details, including macOS-specific notes, and [`docs/bela/cross-compile.md`](docs/bela/cross-compile.md) for the Bela toolchain.
+See [`docs/development.md`](docs/development.md) for local setup details, including macOS-specific notes, and [`docs/cross-compile.md`](docs/cross-compile.md) for the Bela toolchain.
 
 ## Run
 
@@ -99,7 +99,7 @@ scripts/pi-build.sh --controls
 ./target/release/oxtt --controls
 ```
 
-The flag does not exist at all without that feature. See [`docs/raspberry-pi/`](docs/raspberry-pi/) for the wiring and setup.
+The flag does not exist at all without that feature. See [`docs/effectkit/raspberry-pi/`](docs/effectkit/raspberry-pi/) for the wiring and setup.
 
 On a Bela Gem Stereo — six pots on `A0`–`A5`, latching switch on `D0`, using the board's own converter and GPIO rather than an external ADC:
 
@@ -107,15 +107,14 @@ On a Bela Gem Stereo — six pots on `A0`–`A5`, latching switch on `D0`, using
 scripts/bela-deploy.sh -- --controls
 ```
 
-See [`docs/bela/control-surface-setup.md`](docs/bela/control-surface-setup.md) for the wiring, including the one difference from the Pi: Bela's digital pins have no internal pull-up, so the switch needs an external one. [`docs/bela/control-surface-verification.md`](docs/bela/control-surface-verification.md) records what the assembled surface measured — including the idle jitter that gives this board its own deadband ([ADR 0012](docs/decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)).
+See [`docs/effectkit/bela/control-surface-setup.md`](docs/effectkit/bela/control-surface-setup.md) for the wiring, including the one difference from the Pi: Bela's digital pins have no internal pull-up, so the switch needs an external one. [`docs/effectkit/bela/control-surface-verification.md`](docs/effectkit/bela/control-surface-verification.md) records what the assembled surface measured — including the idle jitter that gives this board its own deadband ([ADR 0012](docs/decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)).
 
 ## Documentation
 
-Technical documentation lives under `docs/`:
+Technical documentation lives under `docs/`, namespaced by project ([ADR 0015](docs/decisions/0015-documentation-is-namespaced-by-project.md)):
 
-- [`docs/architecture.md`](docs/architecture.md) — component structure, signal flow, state ownership, real-time boundaries
-- [`docs/contracts.md`](docs/contracts.md) — normative DSP and real-time audio-callback contracts
-- [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs)
+- [`docs/oxtt/`](docs/oxtt/) — this effect. [`architecture.md`](docs/oxtt/architecture.md) is the component structure, signal flow, state ownership and real-time boundaries; [`contracts.md`](docs/oxtt/contracts.md) is the normative DSP and audio-callback contracts. Under it, what `oxtt` measured on each board: JACK-over-USB setup and audio-stability/latency verification on a [Raspberry Pi 5](docs/oxtt/raspberry-pi/), audio verification and the converter noise floor on a [Bela Gem](docs/oxtt/bela/)
+- [`docs/effectkit/`](docs/effectkit/) — the effect-independent half: the six-pot control surface's wiring and hardware verification, on [both](docs/effectkit/bela/) [boards](docs/effectkit/raspberry-pi/)
+- [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs). Flat across all three projects, and append-only
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes
-- [`docs/raspberry-pi/`](docs/raspberry-pi/) — running and verifying `oxtt` on a Raspberry Pi 5: JACK-over-USB setup, audio-stability and latency verification, and the physical control surface's wiring/SPI setup and hardware verification
-- [`docs/bela/`](docs/bela/) — running `oxtt` on a Bela Gem Stereo: cross-compilation setup, the control surface's wiring, and what has been measured on the board
+- [`docs/cross-compile.md`](docs/cross-compile.md) — the Bela cross toolchain and sysroot

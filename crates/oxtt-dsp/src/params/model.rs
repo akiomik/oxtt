@@ -1,4 +1,4 @@
-//! The parameter aggregates passed to `OttProcessor` (docs/contracts.md §1).
+//! The parameter aggregates passed to `OttProcessor` (docs/oxtt/contracts.md §1).
 
 use crate::bands::Bands;
 
@@ -6,10 +6,10 @@ use super::error::ConfigError;
 use super::value::{IoGain, MakeupGain, NormalizedF32, PositiveF32, SampleRate, Threshold};
 use super::{CrossoverFreqHigh, CrossoverFreqLow};
 
-/// Upper-bound coefficient on the Nyquist side that crossover frequencies must respect (docs/contracts.md §1).
+/// Upper-bound coefficient on the Nyquist side that crossover frequencies must respect (docs/oxtt/contracts.md §1).
 pub const CROSSOVER_NYQUIST_RATIO: f32 = 0.45;
 
-/// A validated low/high crossover pair, at least one octave apart (docs/contracts.md §1).
+/// A validated low/high crossover pair, at least one octave apart (docs/oxtt/contracts.md §1).
 ///
 /// `low_hz`/`high_hz` are always consumed together (`Crossover::new`,
 /// `Crossover::set_targets`), so the octave-separation invariant that spans
@@ -71,7 +71,7 @@ impl CrossoverSplit {
     }
 }
 
-/// A validated ascending threshold pair for one band (docs/contracts.md §1).
+/// A validated ascending threshold pair for one band (docs/oxtt/contracts.md §1).
 ///
 /// `lower_db`/`upper_db` are always consumed together
 /// (`DualThresholdCompressor::new`, `BandEnvelope::new`), so the ordering
@@ -128,7 +128,7 @@ impl ThresholdRange {
     }
 }
 
-/// Global parameters shared across all bands (docs/contracts.md §1).
+/// Global parameters shared across all bands (docs/oxtt/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlobalParams {
     /// Input gain applied to each raw crossover band in the effect branch, in dB.
@@ -147,7 +147,7 @@ pub struct GlobalParams {
     pub crossover: CrossoverSplit,
 }
 
-/// Per-band parameters (docs/contracts.md §1).
+/// Per-band parameters (docs/oxtt/contracts.md §1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandParams {
     /// Downward/upward compression threshold pair in dB.
@@ -203,7 +203,7 @@ impl OttParams {
     /// Every other cross-field invariant (crossover octave separation, each
     /// band's threshold ordering) is already guaranteed by construction: a
     /// `CrossoverSplit`/`ThresholdRange` cannot exist in an invalid state, so
-    /// there is nothing left to check for them here (docs/contracts.md §1).
+    /// there is nothing left to check for them here (docs/oxtt/contracts.md §1).
     ///
     /// # Errors
     ///

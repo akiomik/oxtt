@@ -11,7 +11,7 @@
 # `scripts/pi-build.sh`, which is the other half of the same arrangement.
 #
 # For the one-time toolchain and sysroot setup, see
-# docs/bela/cross-compile.md.
+# docs/cross-compile.md.
 set -euo pipefail
 
 TARGET=aarch64-unknown-linux-gnu
@@ -26,7 +26,7 @@ Any extra arguments are passed through to `cargo build`.
 
 Required:
   BELA_SYSROOT   A copy of the board's filesystem, synced as described in
-                 docs/bela/cross-compile.md. `bela-sys` derives the linker's
+                 docs/cross-compile.md. `bela-sys` derives the linker's
                  --sysroot, -B and -Wl,-rpath-link from it.
 
 Optional:
@@ -47,7 +47,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 if [[ -z "${BELA_SYSROOT:-}" ]]; then
-  echo "bela-build: BELA_SYSROOT is not set; see docs/bela/cross-compile.md" >&2
+  echo "bela-build: BELA_SYSROOT is not set; see docs/cross-compile.md" >&2
   exit 1
 fi
 if [[ ! -d "$BELA_SYSROOT" ]]; then
@@ -58,7 +58,7 @@ fi
 BELA_LINKER="${BELA_LINKER:-aarch64-unknown-linux-gnu-gcc}"
 if ! command -v "$BELA_LINKER" >/dev/null 2>&1; then
   echo "bela-build: linker not found: $BELA_LINKER" >&2
-  echo "bela-build: install a cross toolchain, or set BELA_LINKER; see docs/bela/cross-compile.md" >&2
+  echo "bela-build: install a cross toolchain, or set BELA_LINKER; see docs/cross-compile.md" >&2
   exit 1
 fi
 

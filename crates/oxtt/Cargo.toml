@@ -35,7 +35,7 @@ oxtt-dsp = { path = "../oxtt-dsp" }
 signal-hook = "0.4"
 thiserror = { workspace = true }
 # Hands whole `OttProcessorUpdate` values from the control thread to the audio
-# callback without a lock or an allocation (docs/contracts.md §6).
+# callback without a lock or an allocation (docs/oxtt/contracts.md §6).
 triple_buffer = "9"
 
 [lints]

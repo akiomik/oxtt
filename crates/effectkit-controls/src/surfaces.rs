@@ -17,13 +17,13 @@ use super::conditioning::{
 };
 
 /// The Bela Gem Stereo's control surface, six pots on `A0`-`A5` and a latching
-/// switch on `D0` (`docs/bela/control-surface-setup.md`).
+/// switch on `D0` (`docs/effectkit/bela/control-surface-setup.md`).
 ///
 /// **`deadband_counts = 3.0`** — the Gem's converter is far quieter than the
 /// Raspberry Pi's MCP3008 on the same pots: measured over 60 seconds at each
 /// of full and mid travel, no channel's reading spanned more than **2.5
 /// counts** end to end, against a raw σ of 6.39 on the Pi
-/// (`docs/bela/control-surface-verification.md`).
+/// (`docs/effectkit/bela/control-surface-verification.md`).
 ///
 /// Three counts is chosen against that measured span rather than against an
 /// estimated σ, and it is the stronger statement of the two: the whole

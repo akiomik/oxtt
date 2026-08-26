@@ -83,7 +83,7 @@ pub struct BandEnvelope {
 impl BandEnvelope {
     /// Initial construction. Snaps immediately to the boundary power,
     /// preventing startup at maximum gain from a state with no history
-    /// (docs/contracts.md §2).
+    /// (docs/oxtt/contracts.md §2).
     #[must_use]
     pub fn new(lower_threshold_db: f32, upper_threshold_db: f32) -> Self {
         let mut e = Self {
@@ -94,7 +94,7 @@ impl BandEnvelope {
         e
     }
 
-    /// Immediate reset on `reset` or a sample-rate change (docs/contracts.md §2).
+    /// Immediate reset on `reset` or a sample-rate change (docs/oxtt/contracts.md §2).
     /// The normal `set_params` path does not call this; it lets state converge
     /// via `update` instead.
     pub fn reset(&mut self, lower_threshold_db: f32, upper_threshold_db: f32) {
@@ -102,7 +102,7 @@ impl BandEnvelope {
         self.high_env = db_to_amp(upper_threshold_db).powi(2);
     }
 
-    /// Returns `false` if either envelope has gone non-finite (docs/contracts.md §4).
+    /// Returns `false` if either envelope has gone non-finite (docs/oxtt/contracts.md §4).
     #[must_use]
     pub const fn is_finite(&self) -> bool {
         self.low_env.is_finite() && self.high_env.is_finite()

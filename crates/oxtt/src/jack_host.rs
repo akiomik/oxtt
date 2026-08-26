@@ -1,4 +1,4 @@
-//! JACK port registration, `ProcessHandler`, and `NotificationHandler` (docs/architecture.md, docs/contracts.md §6, §7).
+//! JACK port registration, `ProcessHandler`, and `NotificationHandler` (docs/oxtt/architecture.md, docs/oxtt/contracts.md §6, §7).
 
 use std::io;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use crate::control::ControlHandle;
 use oxtt_dsp::dsp::OttProcessor;
 use oxtt_dsp::params::{ConfigError, OttParams, OttProcessorUpdate};
 
-/// JACK client name and the port names it registers (docs/contracts.md §7).
+/// JACK client name and the port names it registers (docs/oxtt/contracts.md §7).
 const CLIENT_NAME: &str = "oxtt";
 const PORT_INPUT_L: &str = "input_l";
 const PORT_INPUT_R: &str = "input_r";
@@ -64,11 +64,11 @@ impl RunSummary {
     }
 }
 
-/// Receives JACK shutdown notifications and sample-rate changes (docs/contracts.md §7).
+/// Receives JACK shutdown notifications and sample-rate changes (docs/oxtt/contracts.md §7).
 ///
 /// These callbacks may be invoked from a thread other than the process
 /// callback, so they hand off state safely via Atomics instead of a lock
-/// (docs/contracts.md §6).
+/// (docs/oxtt/contracts.md §6).
 struct Notifications {
     shutdown_requested: Arc<AtomicBool>,
     pending_sample_rate: Arc<AtomicU32>,
@@ -96,7 +96,7 @@ impl jack::NotificationHandler for Notifications {
     }
 }
 
-/// The audio callback. Prohibits heap allocation, locks, I/O, and panics (docs/contracts.md §6).
+/// The audio callback. Prohibits heap allocation, locks, I/O, and panics (docs/oxtt/contracts.md §6).
 struct AudioProcessHandler {
     processor: OttProcessor,
     input_l: Port<AudioIn>,
@@ -106,7 +106,7 @@ struct AudioProcessHandler {
     pending_sample_rate: Arc<AtomicU32>,
     /// The reading end of the control thread's handoff, absent for a build
     /// with no control surface attached. Reading it is wait-free and
-    /// allocation-free, so it is legal here (docs/contracts.md §6).
+    /// allocation-free, so it is legal here (docs/oxtt/contracts.md §6).
     control: Option<triple_buffer::Output<OttProcessorUpdate>>,
 }
 
@@ -115,15 +115,15 @@ impl jack::ProcessHandler for AudioProcessHandler {
         let pending = self.pending_sample_rate.swap(0, Ordering::AcqRel);
         if pending != 0 {
             // On a sample-rate change: recompute all filter coefficients and
-            // time coefficients, and reset state (docs/contracts.md §7). Never
-            // panics inside the callback, even on failure (docs/contracts.md §6).
+            // time coefficients, and reset state (docs/oxtt/contracts.md §7). Never
+            // panics inside the callback, even on failure (docs/oxtt/contracts.md §6).
             // JACK sample rates stay far below f32's 16.7M exact-integer range.
             #[allow(clippy::cast_precision_loss)]
             let _ = self.processor.reset(pending as f32);
         }
 
         // Strictly after the reset above: `reset` rebuilds the processor from
-        // the targets it already holds (docs/contracts.md §2), so a snapshot
+        // the targets it already holds (docs/oxtt/contracts.md §2), so a snapshot
         // applied before it would be thrown away on a sample-rate change.
         if let Some(control) = self.control.as_mut() {
             // `update` is the swap; it returns whether a new snapshot actually
@@ -132,8 +132,8 @@ impl jack::ProcessHandler for AudioProcessHandler {
             // just swapped in without swapping again.
             if control.update() {
                 // A rejected update leaves the processor unchanged
-                // (docs/contracts.md §2), and the callback has no way to
-                // report an error in any case (docs/contracts.md §6) — so
+                // (docs/oxtt/contracts.md §2), and the callback has no way to
+                // report an error in any case (docs/oxtt/contracts.md §6) — so
                 // there is nothing to do with the result but drop it. Every
                 // snapshot the mapping layer produces is built from validated
                 // base parameters, so a rejection would mean the sample rate
@@ -154,7 +154,7 @@ impl jack::ProcessHandler for AudioProcessHandler {
         if !ok {
             // JACK always passes the same frame count to every port, so this
             // practically never happens, but even if lengths ever mismatch,
-            // output silence instead of panicking (docs/contracts.md §6).
+            // output silence instead of panicking (docs/oxtt/contracts.md §6).
             for s in self.output_l.as_mut_slice(ps).iter_mut() {
                 *s = 0.0;
             }
@@ -168,7 +168,7 @@ impl jack::ProcessHandler for AudioProcessHandler {
 }
 
 /// Connects to JACK and starts `oxtt`. Blocks until SIGINT/SIGTERM/JACK
-/// shutdown is received, then stops safely (docs/contracts.md §7).
+/// shutdown is received, then stops safely (docs/oxtt/contracts.md §7).
 ///
 /// `control` is an already-running control thread, or `None` for a build with
 /// no control surface — a plain desktop JACK client, or any host without the
@@ -184,13 +184,13 @@ impl jack::ProcessHandler for AudioProcessHandler {
 pub fn run(params: OttParams, mut control: Option<ControlHandle>) -> Result<RunSummary, HostError> {
     let (client, _status) = Client::new(CLIENT_NAME, ClientOptions::default())?;
 
-    // Never auto-connects to physical ports (docs/contracts.md §7).
+    // Never auto-connects to physical ports (docs/oxtt/contracts.md §7).
     let input_l = client.register_port(PORT_INPUT_L, AudioIn::default())?;
     let input_r = client.register_port(PORT_INPUT_R, AudioIn::default())?;
     let output_l = client.register_port(PORT_OUTPUT_L, AudioOut::default())?;
     let output_r = client.register_port(PORT_OUTPUT_R, AudioOut::default())?;
 
-    // Use the sample rate assigned by JACK (docs/contracts.md §7). JACK
+    // Use the sample rate assigned by JACK (docs/oxtt/contracts.md §7). JACK
     // sample rates stay far below f32's 16.7M exact-integer range.
     #[allow(clippy::cast_precision_loss)]
     let sample_rate = client.sample_rate() as f32;
@@ -222,7 +222,7 @@ pub fn run(params: OttParams, mut control: Option<ControlHandle>) -> Result<RunS
 
     while !shutdown_requested.load(Ordering::Acquire) {
         // Main thread's shutdown-poll loop, not the audio callback: the
-        // real-time callback contract (docs/contracts.md §6) doesn't apply here.
+        // real-time callback contract (docs/oxtt/contracts.md §6) doesn't apply here.
         #[allow(clippy::disallowed_methods)]
         thread::sleep(Duration::from_millis(50));
     }

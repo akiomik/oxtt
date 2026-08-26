@@ -2,7 +2,7 @@
 //! the audio callback (see [`crate::control`] for the layering).
 //!
 //! An MCP3008 read is SPI traffic — a blocking `ioctl` — so it cannot happen
-//! inside `AudioProcessHandler::process` (docs/contracts.md §6). This layer is
+//! inside `AudioProcessHandler::process` (docs/oxtt/contracts.md §6). This layer is
 //! the seam that keeps it out: a plain OS thread polls the [`ControlSource`],
 //! conditions and assigns what it reads, and hands finished
 //! [`OttProcessorUpdate`] values to the callback through a `triple_buffer`.
@@ -20,13 +20,13 @@
 //! buffers are allocated once when the buffer is built, and
 //! [`OttProcessorUpdate`] is `Copy` with no `Drop`, so publishing a snapshot
 //! neither allocates nor frees anything on either side. This is the "bounded
-//! non-blocking queue instead of a new lock" that docs/architecture.md
+//! non-blocking queue instead of a new lock" that docs/oxtt/architecture.md
 //! anticipates, with the queue bound at one: the callback wants the knob's
 //! newest position, never a backlog of the positions it passed through.
 //!
 //! Nothing here is on the real-time path — the thread is free to block, sleep,
 //! and write to stderr — which is why the crate-wide lints that encode
-//! docs/contracts.md §6 are locally allowed below rather than obeyed.
+//! docs/oxtt/contracts.md §6 are locally allowed below rather than obeyed.
 
 use core::fmt;
 use std::sync::Arc;
@@ -69,7 +69,7 @@ fn poll_interval_for(nominal_poll_hz: f32) -> Duration {
 /// works out to one line every 10 seconds — enough to show the fault is
 /// ongoing, quiet enough to leave the terminal usable. The exact total is
 /// reported once at shutdown from [`ControlHandle::stop_and_join`], the same
-/// way xrun counts are (docs/contracts.md §7).
+/// way xrun counts are (docs/oxtt/contracts.md §7).
 const FAILURE_REPORT_INTERVAL: u64 = 5_000;
 
 /// A running control thread, and the audio callback's end of its handoff.
@@ -109,7 +109,7 @@ impl ControlHandle {
     #[must_use]
     // `thread::spawn` and the `thread::sleep` in the poll loop are the two
     // things this layer exists to do, on a thread that is not the audio
-    // callback; the crate-wide bans encode docs/contracts.md §6, which applies
+    // callback; the crate-wide bans encode docs/oxtt/contracts.md §6, which applies
     // to the callback only.
     #[allow(clippy::disallowed_methods)]
     pub fn spawn<S: ControlSource + Send + 'static>(
@@ -180,7 +180,7 @@ impl ControlHandle {
     /// the flag, and exits without another read.
     ///
     /// Joining blocks, so this belongs on the host's shutdown path and never
-    /// in the audio callback (docs/contracts.md §6).
+    /// in the audio callback (docs/oxtt/contracts.md §6).
     // Deliberately not `#[must_use]`: stopping the thread is the reason to
     // call this, and the count is a diagnostic a caller may reasonably ignore.
     #[allow(clippy::must_use_candidate)]
@@ -238,7 +238,7 @@ fn poll_until_stopped<S: ControlSource>(
 /// `failures_before` is the count *excluding* this failure, so the first one
 /// always reports.
 // stderr from the control thread, which is not the audio callback; the
-// crate-wide ban on these macros encodes docs/contracts.md §6, which applies
+// crate-wide ban on these macros encodes docs/oxtt/contracts.md §6, which applies
 // to the callback only. The same reasoning as `main.rs`.
 #[allow(clippy::disallowed_macros)]
 fn report_read_failure(failures_before: u64, error: &impl fmt::Display) {
@@ -573,7 +573,7 @@ mod tests {
 
     /// The chain the audio callback actually runs, minus JACK: `update` gates
     /// the work, `output_buffer` reads the snapshot without a second
-    /// swap, and `apply_update` applies it (docs/contracts.md §2,
+    /// swap, and `apply_update` applies it (docs/oxtt/contracts.md §2,
     /// §6). Proves
     /// the whole control surface end to end on a development machine.
     #[test]

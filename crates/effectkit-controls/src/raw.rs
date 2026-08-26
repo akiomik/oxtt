@@ -61,7 +61,7 @@ impl PotPosition {
     /// to fall back to when a reading means nothing, and it needs it inside
     /// the audio callback, where `try_new(0).unwrap()` would put a panic path
     /// on the real-time path to express something already known at compile
-    /// time (docs/contracts.md §6).
+    /// time (docs/effectkit/realtime.md).
     ///
     /// # Panics
     ///

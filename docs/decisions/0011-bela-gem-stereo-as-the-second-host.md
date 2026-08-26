@@ -10,7 +10,7 @@ though it was first written as if it did, and this section has been narrowed in
 place to say what it actually settles. What changed the reading is a
 measurement that came after it: the board's converters are about 30 dB narrower
 than the environment oxtt's presets were calibrated in, which `safe-start`
-turns into audible hiss ([`docs/bela/noise-floor.md`](../bela/noise-floor.md)).
+turns into audible hiss ([`docs/oxtt/bela/noise-floor.md`](../oxtt/bela/noise-floor.md)).
 The fix is predicted and not yet heard, so "the effect is usable on this board"
 is not yet established — and neither is the platform. See "What is not
 decided".
@@ -94,7 +94,7 @@ so this is well inside what the hardware does.
 range, and every filter and envelope oxtt has carries state from one frame to
 the next; the crossover alone is twelve biquads per channel (ADR 0001). A
 second render thread would start mid-signal from a state that never saw the
-frames before it. The contract in `docs/contracts.md` §3 — that output is
+frames before it. The contract in `docs/oxtt/contracts.md` §3 — that output is
 bit-identical however the input is partitioned — is a property of one state
 being carried through one stream, not a licence to split the stream.
 
@@ -192,13 +192,13 @@ type-checks the device half with.
 - **Layer B is untouched — and now has a documented duty attached.** Not one
   constant changed. In exchange, "a host may drive layer B directly" now comes
   with "and owes it reads at the rate its constants were calibrated for"
-  (`docs/contracts.md` §8).
+  (`docs/oxtt/contracts.md` §8).
 - The offline renderer keeps using the block API and is unaffected. Two entry
   points into the DSP now exist; §3 states that they agree.
 - **What is not decided: whether this board is the platform.** The Gem's
   converters measure about 30 dB narrower than the environment oxtt's presets
   were calibrated in, and upward compression converts that difference into
-  audible hiss ([`docs/bela/noise-floor.md`](../bela/noise-floor.md)). The
+  audible hiss ([`docs/oxtt/bela/noise-floor.md`](../oxtt/bela/noise-floor.md)). The
   mitigation — spending the same noise budget per band instead of globally — is
   a prediction that has not been listened to, because the per-band amounts are
   preset data and not reachable from the command line. Until it has been, the
@@ -236,11 +236,12 @@ type-checks the device half with.
   (closed; the slice accessors made it unnecessary here).
 - [ADR 0009](0009-hardware-platform-choice-reopened.md) — the candidates, the
   power and thermal evidence, and the platform question that stays open.
-- [`docs/bela/noise-floor.md`](../bela/noise-floor.md) — what the board's
+- [`docs/oxtt/bela/noise-floor.md`](../oxtt/bela/noise-floor.md) — what the board's
   converters measure, and what upward compression costs on them.
 - [ADR 0010](0010-three-layer-control-surface-and-newest-value-handoff.md) —
   the three-layer split this port is the test of.
 - [ADR 0008](0008-usb-audio-clock-slip-and-i2s-migration.md) — where 48 kHz
   comes from.
-- [`docs/bela/`](../bela/) — the cross-compilation setup and the control
-  surface's wiring.
+- [`docs/cross-compile.md`](../cross-compile.md) — the cross-compilation
+  setup.
+- [`docs/effectkit/bela/`](../effectkit/bela/) — the control surface's wiring.

@@ -1,5 +1,5 @@
 //! Layer A for a Bela Gem Stereo: turning one frame of analog readings and one
-//! switch level into a [`RawControls`] (docs/architecture.md, ADR 0011).
+//! switch level into a [`RawControls`] (docs/oxtt/architecture.md, ADR 0011).
 //!
 //! Named for the board, not for the shape of the data, because the board is in
 //! here: `POT_SUPPLY_FRACTION` is the ratio between the ADS8166's 4.096 V
@@ -78,7 +78,7 @@ pub fn pot_position(reading: f32) -> PotPosition {
     let position = (fraction * f32::from(POT_POSITION_MAX)).round() as u16;
     // Unreachable in practice — the clamp guarantees the range — so this
     // falls back rather than unwrapping: it runs inside the audio callback,
-    // where a panic aborts the process (docs/contracts.md §6). The same
+    // where a panic aborts the process (docs/effectkit/realtime.md). The same
     // pattern as `PotTravel::from_counts` in `src/control/conditioning.rs`.
     PotPosition::try_new(position).unwrap_or(POT_POSITION_FLOOR)
 }
@@ -186,7 +186,7 @@ impl PollDecimator {
     pub const fn tick(&mut self) -> bool {
         let due = self.counter == 0;
         // Saturating rather than plain, for `clippy::arithmetic_side_effects`
-        // (docs/contracts.md §6): the wrap below keeps the counter under
+        // (docs/effectkit/realtime.md): the wrap below keeps the counter under
         // `every`, so saturation is unreachable and costs nothing.
         self.counter = self.counter.saturating_add(1);
         if self.counter >= self.every {

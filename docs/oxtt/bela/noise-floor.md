@@ -71,7 +71,7 @@ so the condition belongs in the method rather than in a footnote. And a pedal
 whose input jack can be empty inherits the same 3.9 dB — the usual answer is a
 switching jack that grounds the input when nothing is in it, which is the same
 reasoning that grounds the unused analog inputs in
-[`control-surface-setup.md`](control-surface-setup.md).
+[`../../effectkit/bela/control-surface-setup.md`](../../effectkit/bela/control-surface-setup.md).
 
 ### Shorting the input, when the source has to be taken out of the answer
 
@@ -647,8 +647,8 @@ it is a listening question rather than a measurement one.
   buys enough audible compression to be worth having at the same floor.
 - **Whether this board is the platform.** This measurement is the reason that
   is still open: it postdates
-  [ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md), which
+  [ADR 0011](../../decisions/0011-bela-gem-stereo-as-the-second-host.md), which
   adds the host but does not answer the hardware question
-  [ADR 0009](../decisions/0009-hardware-platform-choice-reopened.md) reopened.
+  [ADR 0009](../../decisions/0009-hardware-platform-choice-reopened.md) reopened.
   Until the per-band allocation above has been listened to, "the effect is
   usable here" is unestablished.

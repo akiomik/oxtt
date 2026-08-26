@@ -160,7 +160,7 @@ mod tests {
         // Single-field ranges are checked at parse time; the octave
         // separation between low/high crossover spans two fields but no
         // longer needs the sample rate, so it is enforced right here too,
-        // before a binary has touched an audio system (docs/contracts.md §1).
+        // before a binary has touched an audio system (docs/oxtt/contracts.md §1).
         let args = TestCli::parse_from([
             "oxtt",
             "--low-crossover",

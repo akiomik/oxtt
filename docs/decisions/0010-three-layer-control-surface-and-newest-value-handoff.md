@@ -22,14 +22,14 @@ The end goal is a pedal, so the parameters have to come off a panel rather than
 off a command line. The first physical control surface was four potentiometers —
 Depth, Time, Upward, Downward — on an MCP3008 SPI ADC, plus one momentary
 bypass switch on a GPIO pin. That wiring was verified on the assembled hardware
-(see [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)).
+(see [`../effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md)).
 
 Three facts constrain how that reaches the running DSP.
 
 **An ADC conversion cannot happen where the parameters are consumed.** An
 MCP3008 read is SPI traffic — a blocking `ioctl` — and the audio callback may
-not block, allocate, or perform I/O (`docs/contracts.md` §6). Something has to
-cross the real-time boundary, and `docs/architecture.md` had already anticipated
+not block, allocate, or perform I/O (`docs/oxtt/contracts.md` §6). Something has to
+cross the real-time boundary, and `docs/oxtt/architecture.md` had already anticipated
 what: a bounded non-blocking queue rather than a lock shared with the callback.
 
 **The platform this runs on is not settled.** [ADR 0009](0009-hardware-platform-choice-reopened.md)
@@ -54,7 +54,7 @@ crossover-split band signal and never against the raw input, because the two do
 not share a phase response. And the conditioning constants that turn noisy ADC
 counts into stable parameters — the jitter filter and the deadband — are
 justified by measurement, recorded in
-[`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
+[`../effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md)
 with the re-check rule kept next to the constants themselves in
 `src/control/mapping.rs`.
 
@@ -92,7 +92,7 @@ with the re-check rule kept next to the constants themselves in
 
 - **Hold layer B to the audio callback's own prohibitions** even though nothing
   calls it from a callback today: no allocation, no panic, no I/O, no clock, no
-  threads (`docs/contracts.md` §6, machine-checked by the same `no_panic` proof
+  threads (`docs/oxtt/contracts.md` §6, machine-checked by the same `no_panic` proof
   the DSP uses). This is the one concession made to a platform that does not
   exist yet, and it is deliberately the cheap one. ADR 0009 records that Bela
   reads its inputs inside `render()`; because layer B obeys the callback
@@ -106,7 +106,7 @@ with the re-check rule kept next to the constants themselves in
   the knob was moving. `triple_buffer::Output::update` is a single atomic swap
   plus an index assignment — wait-free, allocation-free, lock-free and
   constant-time — so the callback pays the same whether or not a knob moved.
-  This is the "bounded non-blocking queue" `docs/architecture.md` anticipated,
+  This is the "bounded non-blocking queue" `docs/oxtt/architecture.md` anticipated,
   with the bound at one.
 
 - **Publish only when the conditioned value changes.** A motionless pot and an
@@ -203,7 +203,7 @@ with the re-check rule kept next to the constants themselves in
   because the *host* decimates instead — `PollDecimator`, which reads on every
   *n*th block. "Layer B is platform-independent" therefore comes with a duty
   attached: a host that drives it owes it reads at the rate it was calibrated
-  for, and that duty is now written down in `docs/contracts.md` §8.
+  for, and that duty is now written down in `docs/oxtt/contracts.md` §8.
 
   **Revised again (ADR 0012): "not one constant" did not survive measuring the
   second converter.** The deadband was calibrated on an MCP3008, and a Gem's
@@ -227,7 +227,7 @@ with the re-check rule kept next to the constants themselves in
   128 frames / 48 kHz — and each callback takes whatever the latest sample
   produced. This is deliberate, and it is invisible: every parameter is
   re-smoothed per sample by the DSP with a 20 ms time constant
-  (`docs/architecture.md`), which is far longer than anything dropped between
+  (`docs/oxtt/architecture.md`), which is far longer than anything dropped between
   polls.
 
 - **Revised.** The six pot-driven CLI flags become startup-only values under
@@ -290,15 +290,15 @@ with the re-check rule kept next to the constants themselves in
 - [ADR 0009](0009-hardware-platform-choice-reopened.md) — the open platform
   question, Bela's synchronous reads inside `render()`, and the asymmetric
   control-layer migration cost this ADR's layering is shaped around.
-- [`../contracts.md`](../contracts.md) — §6 for the real-time callback
+- [`../oxtt/contracts.md`](../oxtt/contracts.md) — §6 for the real-time callback
   prohibitions layer B holds itself to, §8 for the control surface's own
   normative guarantees.
-- [`../architecture.md`](../architecture.md) — where the three layers sit in the
+- [`../oxtt/architecture.md`](../oxtt/architecture.md) — where the three layers sit in the
   component structure and how they cross the real-time boundary.
-- [`../raspberry-pi/control-surface-setup.md`](../raspberry-pi/control-surface-setup.md)
+- [`../effectkit/raspberry-pi/control-surface-setup.md`](../effectkit/raspberry-pi/control-surface-setup.md)
   — the wiring this decision assumes, and how SPI0 is enabled and confirmed to
   be the header's bus rather than the SoC's boot-flash controller.
-- [`../raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)
+- [`../effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md)
   — the idle-jitter measurement behind the filter and deadband constants, and
   the functional hardware checks against `contracts.md` §8, both passing on
   the shipped six-pot/latching-switch surface; the ADC-removal check remains

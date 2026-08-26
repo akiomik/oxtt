@@ -3,7 +3,7 @@
 //! No dependency on JACK, on libbela, or on any other host-audio API — it
 //! operates on `f32` samples and nothing else, which is what lets it be tested
 //! without an audio system and what made the second host an adapter rather
-//! than a port (ADR 0007, docs/architecture.md).
+//! than a port (ADR 0007, docs/oxtt/architecture.md).
 //!
 //! It knows nothing about a control surface either. [`OttProcessorUpdate`] is
 //! the one atomic update [`OttProcessor`] accepts, and both the control

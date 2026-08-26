@@ -62,7 +62,7 @@ impl ChannelSplitter {
     }
 }
 
-/// Stereo 3-band crossover. Keeps filter state independent per L/R channel (docs/architecture.md).
+/// Stereo 3-band crossover. Keeps filter state independent per L/R channel (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Crossover {
     sample_rate: f32,
@@ -92,7 +92,7 @@ impl Crossover {
         c
     }
 
-    /// On a sample-rate change: immediately reset both the smoothing state and filter state (docs/contracts.md §2, §7).
+    /// On a sample-rate change: immediately reset both the smoothing state and filter state (docs/oxtt/contracts.md §2, §7).
     pub fn reset(&mut self, sample_rate: f32, low_hz: f32, high_hz: f32) {
         *self = Self::new(sample_rate, low_hz, high_hz);
     }
@@ -149,7 +149,7 @@ impl Crossover {
         self.right.reset_state();
     }
 
-    /// Returns `false` if either channel's filter state has gone non-finite (docs/contracts.md §4).
+    /// Returns `false` if either channel's filter state has gone non-finite (docs/oxtt/contracts.md §4).
     #[must_use]
     pub const fn is_finite(&self) -> bool {
         self.left.is_finite() && self.right.is_finite()
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn reconstruction_is_flat_across_representative_crossovers() {
-        // Combinations representative of the allowed range and the minimum one-octave spacing (docs/contracts.md §1).
+        // Combinations representative of the allowed range and the minimum one-octave spacing (docs/oxtt/contracts.md §1).
         let cases: &[(f32, f32, f32)] = &[
             (48_000.0, 40.0, 400.0),
             (48_000.0, 2000.0, 4000.0),

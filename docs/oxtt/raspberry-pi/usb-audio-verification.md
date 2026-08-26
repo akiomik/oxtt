@@ -4,7 +4,7 @@ This is the audio-stability and latency verification for `oxtt` running on a
 Raspberry Pi 5 as a JACK client, with a class-compliant USB audio interface, and
 the results it produced. It assumes the environment from
 [`usb-audio-setup.md`](usb-audio-setup.md). The decision these results led to is
-[ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md).
+[ADR 0008](../../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md).
 
 Concrete card names, host names, and port numbers are examples from the
 validation environment (see [`usb-audio-setup.md`](usb-audio-setup.md));
@@ -18,7 +18,7 @@ period over 3 periods. At 48 kHz one callback is nominally about 1.33 ms for
 
 Two scripts under `scripts/` drive the tests. Neither embeds an adopted setting,
 and neither is used to start `oxtt` for normal playing — they are test-only. See
-[`scripts/README.md`](../../scripts/README.md) for full argument reference.
+[`scripts/README.md`](../../../scripts/README.md) for full argument reference.
 
 - `scripts/pi-jack-usb-soak-test.sh` — audio-stability soak. Takes `frames`,
   `periods`, duration, mode (`direct` loopback or through `oxtt`), the
@@ -158,7 +158,7 @@ clocking periodically corrects as a one-period slip. A 3-period ring
 5.33 ms) has no headroom and surfaces it as an audible dropout, below the client
 callback deadline that JACK and `oxtt` instrument. This is a property of the USB
 Audio Class transport; further USB-side root-cause work was judged low return on
-investment and stopped (see [ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
+investment and stopped (see [ADR 0008](../../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
 
 Web search confirmed periodic USB-audio dropouts as a long-standing pattern on
 Raspberry Pi generally; the known fix (`dwc_otg.fiq_fsm_enable=0`) targets the

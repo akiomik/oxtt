@@ -65,7 +65,7 @@ ALSA-direct adapter using the `alsa` crate. The adapter MUST:
 - treat an xrun or device failure as a failure of the full-duplex pair: silence
   output, recover or rebuild both directions together, reset DSP state, and expose
   non-real-time diagnostic counters;
-- satisfy the real-time callback rules in `docs/contracts.md` section 6 even
+- satisfy the real-time callback rules in `docs/oxtt/contracts.md` section 6 even
   though ALSA uses a processing loop rather than a JACK callback.
 
 Do not introduce a general `AudioBackend` trait before the ALSA adapter exists.

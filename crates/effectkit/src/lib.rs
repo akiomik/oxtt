@@ -42,7 +42,7 @@ pub mod smooth;
 #[cfg(test)]
 mod proofs {
     //! Link-time proofs that the per-sample path cannot panic
-    //! (docs/contracts.md §6).
+    //! (docs/effectkit/realtime.md).
     //!
     //! `#[no_panic]` only holds under full optimisation, so these are checked
     //! by `cargo test --release` and are inert in a debug build. What the

@@ -7,9 +7,9 @@
 use crate::dsp::envelope::BandEnvelope;
 use effectkit::decibels::db_to_amp;
 
-/// Lower clamp for the combined gain (docs/contracts.md §4).
+/// Lower clamp for the combined gain (docs/oxtt/contracts.md §4).
 pub const MIN_DYNAMIC_GAIN_DB: f32 = -60.0;
-/// Upper clamp for the combined gain (docs/contracts.md §4).
+/// Upper clamp for the combined gain (docs/oxtt/contracts.md §4).
 pub const MAX_DYNAMIC_GAIN_DB: f32 = 30.0;
 
 /// e.g. `effective_up_amount = clamp(band.up_amount * upward, 0, 1)` (ADR 0003).
@@ -43,7 +43,7 @@ pub struct DualThresholdCompressor {
 }
 
 impl DualThresholdCompressor {
-    /// Creates a compressor with its envelope initialized to threshold-derived boundary powers (docs/contracts.md §2).
+    /// Creates a compressor with its envelope initialized to threshold-derived boundary powers (docs/oxtt/contracts.md §2).
     #[must_use]
     pub fn new(lower_threshold_db: f32, upper_threshold_db: f32) -> Self {
         Self {
@@ -51,12 +51,12 @@ impl DualThresholdCompressor {
         }
     }
 
-    /// Immediate reset on `reset` or a sample-rate change (docs/contracts.md §2).
+    /// Immediate reset on `reset` or a sample-rate change (docs/oxtt/contracts.md §2).
     pub fn reset(&mut self, lower_threshold_db: f32, upper_threshold_db: f32) {
         self.envelope.reset(lower_threshold_db, upper_threshold_db);
     }
 
-    /// Returns `false` if the envelope state has gone non-finite (docs/contracts.md §4).
+    /// Returns `false` if the envelope state has gone non-finite (docs/oxtt/contracts.md §4).
     #[must_use]
     pub const fn is_finite(&self) -> bool {
         self.envelope.is_finite()
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn silence_stays_silent_even_with_max_upward_gain() {
-        // Silence stays silent even after +30 dB (docs/contracts.md §4).
+        // Silence stays silent even after +30 dB (docs/oxtt/contracts.md §4).
         let mut dynamics = default_dynamics();
         dynamics.effective_up_amount = 1.0;
         dynamics.effective_down_amount = 0.0;
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn init_state_yields_0db_gain() {
-        // The dynamic gain computed right after initial construction is 0 dB (docs/contracts.md §2).
+        // The dynamic gain computed right after initial construction is 0 dB (docs/oxtt/contracts.md §2).
         let dynamics = default_dynamics();
         let mut comp =
             DualThresholdCompressor::new(dynamics.lower_threshold_db, dynamics.upper_threshold_db);

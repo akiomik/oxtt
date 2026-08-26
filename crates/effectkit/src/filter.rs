@@ -9,11 +9,11 @@
 use std::f32::consts::{FRAC_1_SQRT_2, PI};
 
 /// Defensive floor for cutoff values fed into biquad coefficient computation.
-/// Stricter than the lowest value docs/contracts.md §1 allows (40 Hz); this
+/// Stricter than the lowest value docs/oxtt/contracts.md §1 allows (40 Hz); this
 /// margin should never be hit in practice since callers only pass already-
 /// validated frequencies.
 const MIN_CUTOFF_HZ: f32 = 20.0;
-/// Upper-bound coefficient for cutoff on the Nyquist side (docs/contracts.md §1).
+/// Upper-bound coefficient for cutoff on the Nyquist side (docs/oxtt/contracts.md §1).
 const NYQUIST_RATIO: f32 = 0.45;
 /// Q value for each stage of an LR4 with a Butterworth characteristic.
 const Q_BUTTERWORTH: f32 = FRAC_1_SQRT_2;
@@ -22,7 +22,7 @@ fn clamp_cutoff(cutoff_hz: f32, sample_rate: f32) -> f32 {
     let max_hz = (NYQUIST_RATIO * sample_rate).max(MIN_CUTOFF_HZ);
     // `f32::clamp` asserts `min <= max`; `max_hz` is runtime-computed, so the
     // optimizer can't prove that bound and treats the assert as reachable
-    // (breaks the no-panic proof on `OttProcessor::process`/`reset`, docs/contracts.md
+    // (breaks the no-panic proof on `OttProcessor::process`/`reset`, docs/oxtt/contracts.md
     // §6). `max` and `min` chained have the same behavior here (max_hz is
     // always >= MIN_CUTOFF_HZ by construction above) without the assert.
     cutoff_hz.max(MIN_CUTOFF_HZ).min(max_hz)

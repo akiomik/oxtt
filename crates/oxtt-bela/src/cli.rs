@@ -1,4 +1,4 @@
-//! Command-line arguments for the `oxtt-bela` binary (docs/contracts.md §1).
+//! Command-line arguments for the `oxtt-bela` binary (docs/oxtt/contracts.md §1).
 //!
 //! Lives beside the host rather than in [`crate::cli`] so that the shared
 //! argument definitions do not have to know a Bela exists: [`BelaCli`] reads
@@ -96,7 +96,7 @@ pub struct BelaCli {
     /// Nothing on this board reports input clipping, so without an indicator
     /// it is only visible after the run, in `--report-on-exit`. `D0` is
     /// refused: the bypass switch is wired there whether or not `--controls`
-    /// asked for it. See `docs/bela/control-surface-setup.md` for the wiring.
+    /// asked for it. See `docs/effectkit/bela/control-surface-setup.md` for the wiring.
     #[arg(long, value_name = "CHANNEL")]
     pub clip_led: Option<usize>,
 }

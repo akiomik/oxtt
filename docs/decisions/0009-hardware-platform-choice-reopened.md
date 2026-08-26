@@ -85,7 +85,7 @@ findings drive the reopening.
    nothing about the cost of the non-DSP layers below.
 4. **The control-surface layer (potentiometers, bypass switch) is not yet
    written, and its migration cost differs sharply by candidate.** The design
-   sketched in `docs/architecture.md` and `docs/contracts.md` §6 — an SPI-attached
+   sketched in `docs/oxtt/architecture.md` and `docs/oxtt/contracts.md` §6 — an SPI-attached
    ADC and GPIO read from a Linux userspace thread, handed to the audio callback
    through a bounded non-blocking queue — assumes an OS. On Bela, still embedded
    Linux, this mostly simplifies: Bela exposes its own analog/digital I/O read
@@ -315,7 +315,7 @@ on published power figures and the need for active cooling — no enclosure was
 involved. Held to that same standard, the Gem now has a *measured* figure where
 the Pi 5 has only published ones: 48.8 °C to 49.5 °C over sixty seconds of the
 heaviest preset, open board, no heatsink
-([`docs/bela/audio-verification.md`](../bela/audio-verification.md)). It is
+([`docs/oxtt/bela/audio-verification.md`](../oxtt/bela/audio-verification.md)). It is
 consistent with the order-of-magnitude power difference established above, and
 it is like-for-like with how the Pi 5 was judged. Two things stay genuinely
 open, and neither is a precondition for choosing a platform: a run long enough

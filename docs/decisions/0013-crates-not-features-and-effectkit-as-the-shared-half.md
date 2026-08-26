@@ -141,4 +141,4 @@ differs.
   conditioning constants that now travel together as one value.
 - [ADR 0014](0014-the-pot-position-scale-is-ten-bit.md) — the one contract
   the shared control crate fixes for every surface after it.
-- [`docs/architecture.md`](../architecture.md) — the resulting crate map.
+- [`docs/oxtt/architecture.md`](../oxtt/architecture.md) — the resulting crate map.

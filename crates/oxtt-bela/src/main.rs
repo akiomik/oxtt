@@ -1,8 +1,8 @@
 //! CLI entrypoint for the Bela host: parses arguments and starts the audio
-//! system (docs/bela/cross-compile.md, ADR 0011).
+//! system (docs/cross-compile.md, ADR 0011).
 //!
 //! Entirely outside the real-time audio callbacks, so the callback contract's
-//! no-I/O rule (docs/contracts.md §6) doesn't apply to `eprintln!` here.
+//! no-I/O rule (docs/oxtt/contracts.md §6) doesn't apply to `eprintln!` here.
 #![allow(clippy::disallowed_macros)]
 // Off-device only the fallback `main` below can run, so the argument parsing
 // and conversion above it are dead there — but they must still compile and
@@ -70,7 +70,7 @@ fn main() -> ExitCode {
     }
     eprintln!(
         "oxtt: this binary must be cross-compiled for Bela Gem (aarch64-unknown-linux-gnu); \
-         see docs/bela/cross-compile.md"
+         see docs/cross-compile.md"
     );
     ExitCode::FAILURE
 }

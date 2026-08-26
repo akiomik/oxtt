@@ -30,7 +30,7 @@
 //!
 //! Nothing here is on the real-time path. A conversion is a blocking `ioctl`,
 //! which is exactly why it is polled from a control thread of its own instead
-//! of the audio callback (docs/contracts.md §6, ADR 0009).
+//! of the audio callback (docs/effectkit/realtime.md, ADR 0009).
 
 use rppal::gpio::{Gpio, InputPin, Level};
 // Aliased rather than qualified at the use site: `rppal::spi::Error` is three
@@ -157,7 +157,7 @@ pub enum PiControlError {
 ///
 /// Owns the bus and the pin for the lifetime of the process; both are released
 /// on drop by `rppal`. Polled from the control thread, so it is free to block
-/// (docs/contracts.md §6).
+/// (docs/effectkit/realtime.md).
 #[derive(Debug)]
 pub struct PiControls {
     spi: Spi,
@@ -206,7 +206,7 @@ impl ControlSource for PiControls {
     type Error = PiControlError;
 
     /// The assembled breadboard's measured behaviour, all four values from
-    /// the same session (`docs/raspberry-pi/control-surface-verification.md`).
+    /// the same session (`docs/effectkit/raspberry-pi/control-surface-verification.md`).
     ///
     /// **`deadband_counts = 8.0`** — from a worst-case raw σ of 6.39 measured
     /// across all six channels at both full and mid travel.
@@ -232,7 +232,7 @@ impl ControlSource for PiControls {
     ///
     /// The value is intentionally not lower. Conditioning only has to reject
     /// jitter: every parameter it publishes is re-smoothed per sample by the
-    /// DSP with a 20 ms time constant (docs/architecture.md), so zipper noise
+    /// DSP with a 20 ms time constant (docs/oxtt/architecture.md), so zipper noise
     /// is already handled downstream and there is nothing to gain from extra
     /// lag here.
     ///
@@ -255,7 +255,7 @@ impl ControlSource for PiControls {
     /// reaching its new position and the parameters following. That is still
     /// below the ~50 ms at which a foot- or finger-operated switch starts to
     /// feel late, and the DSP's 20 ms smoothing dominates what is actually
-    /// heard anyway (docs/architecture.md).
+    /// heard anyway (docs/oxtt/architecture.md).
     ///
     /// This was sized from the switch class rather than an oscilloscope, and
     /// has since been confirmed on hardware: a live JACK session exercising

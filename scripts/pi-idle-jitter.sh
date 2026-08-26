@@ -18,7 +18,7 @@ repositioning the pots to capture a different position; nothing here
 automates the physical move.
 
 For what this measures, why, and the recorded results, see
-docs/raspberry-pi/control-surface-verification.md.
+docs/effectkit/raspberry-pi/control-surface-verification.md.
 USAGE
 }
 

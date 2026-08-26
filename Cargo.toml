@@ -41,7 +41,7 @@ repository = "https://github.com/akiomik/oxtt"
 license = "MIT OR Apache-2.0"
 
 # The real-time set: what a crate on or below the audio callback is held to
-# (docs/contracts.md §6). Inherited with `[lints] workspace = true`.
+# (docs/oxtt/contracts.md §6). Inherited with `[lints] workspace = true`.
 #
 # Inheriting is all-or-nothing — Cargo refuses a member that both inherits and
 # overrides — so the development/soak-test tool crates spell out their own
@@ -86,7 +86,7 @@ unwrap_used = "warn"
 [profile.release]
 # A single codegen unit lets LLVM inline and optimize across the whole crate,
 # which `OttProcessor::process`/`reset`'s `#[no_panic]` proof
-# (docs/contracts.md §6) needs to eliminate their panic paths (e.g. slice
+# (docs/oxtt/contracts.md §6) needs to eliminate their panic paths (e.g. slice
 # bounds checks) at `cargo test --release` time; the default of several
 # parallel codegen units isn't aggressive enough for that proof to go
 # through. Real release builds benefit the same way (better inlining across

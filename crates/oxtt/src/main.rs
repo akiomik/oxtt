@@ -1,7 +1,7 @@
 //! CLI entrypoint: parses arguments and either prints help/version or starts the JACK host.
 //!
 //! Entirely outside the real-time audio callback, so the callback contract's
-//! no-I/O rule (docs/contracts.md §6) doesn't apply to `eprintln!` here.
+//! no-I/O rule (docs/oxtt/contracts.md §6) doesn't apply to `eprintln!` here.
 #![allow(clippy::disallowed_macros)]
 
 use std::process::ExitCode;
@@ -79,7 +79,7 @@ fn main() -> ExitCode {
                 // The control-read count rides along on the same flag rather
                 // than getting one of its own — both are running totals only
                 // the host can print, because the threads that accumulate them
-                // must not (docs/contracts.md §6, and the control thread's own
+                // must not (docs/oxtt/contracts.md §6, and the control thread's own
                 // throttled stderr) — but only when there was a control
                 // surface to count for.
                 if let Some(failures) = summary.control_read_failures() {

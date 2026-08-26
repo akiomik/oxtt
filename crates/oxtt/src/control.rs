@@ -21,7 +21,7 @@
 //!
 //! Layer C exists because on a Raspberry Pi the audio callback cannot read SPI
 //! itself, so a finished `OttProcessorUpdate` has to cross a thread boundary
-//! without a lock (docs/contracts.md §6). On a Bela the controls are read
+//! without a lock (docs/oxtt/contracts.md §6). On a Bela the controls are read
 //! inside the audio callback, which then runs B1 and B2 *directly* and skips
 //! layer C entirely — possible only because both obey the same prohibitions as
 //! the callback (ADR 0011). That is why layer C lives in this package rather

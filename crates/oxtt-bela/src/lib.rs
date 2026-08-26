@@ -1,5 +1,5 @@
-//! Bela audio-system setup and lifecycle (docs/architecture.md,
-//! docs/contracts.md §6, §9; ADR 0011).
+//! Bela audio-system setup and lifecycle (docs/oxtt/architecture.md,
+//! docs/oxtt/contracts.md §6, §9; ADR 0011).
 //!
 //! The counterpart of `oxtt`'s JACK host: it builds the settings,
 //! brings the audio system up, sets the codec levels, waits, and reports. The
@@ -87,7 +87,7 @@ pub struct RunOptions {
     /// Analog input gain, in dB, applied to the codec before the DSP.
     ///
     /// `None` leaves the board's default of +16 dB, **which clips a
-    /// line-level source and has to be set** (docs/bela/noise-floor.md).
+    /// line-level source and has to be set** (docs/oxtt/bela/noise-floor.md).
     /// [`RunDiagnostics::input`] is what makes the ceiling findable: nothing
     /// on this board reports clipping otherwise.
     ///
@@ -97,7 +97,7 @@ pub struct RunOptions {
     /// with an Elektron Syntakt. Whether that point belongs to the board's
     /// input stage or to the source is not established — the two look
     /// identical from here — so it is worth finding per source rather than
-    /// assuming (docs/bela/noise-floor.md).
+    /// assuming (docs/oxtt/bela/noise-floor.md).
     ///
     /// The clipping ceiling is the source's, and moves a long way with what
     /// the source plays: a metered +6 dB for one note against roughly -12 dB
@@ -119,7 +119,7 @@ pub struct RunOptions {
     /// does *not* work: the effect's own amplified noise follows the two in
     /// opposite directions and returns to where it started, which measures as
     /// 4.8 dB against the output stage alone and 0.5 dB — nothing — against a
-    /// usable preset's hiss (docs/bela/noise-floor.md).
+    /// usable preset's hiss (docs/oxtt/bela/noise-floor.md).
     pub headphone_level_db: Option<f32>,
     /// Digital channel an LED is wired to, lit while the input clips.
     ///

@@ -9,7 +9,7 @@
 # `scripts/bela-build.sh`, which is the other half of the same arrangement.
 #
 # Run this *on the Pi*: the Pi build is native (host == target), so there is no
-# --target and no sysroot. See docs/raspberry-pi/ and docs/development.md.
+# --target and no sysroot. See docs/oxtt/raspberry-pi/ and docs/development.md.
 set -euo pipefail
 
 usage() {
@@ -21,7 +21,7 @@ Builds oxtt in release mode, natively, tuned for the Pi 5's Cortex-A76.
 Any extra arguments are passed through to `cargo build`.
 
   --controls   Also build the physical control surface (`pi-controls`), which
-               needs the SPI ADC and GPIO wiring in docs/raspberry-pi/.
+               needs the SPI ADC and GPIO wiring in docs/effectkit/raspberry-pi/.
 
 Refuses to run anywhere but an aarch64 Linux host, because the tuning flag
 below would otherwise be applied to a build that is not for a Pi at all.

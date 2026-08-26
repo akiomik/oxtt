@@ -54,7 +54,7 @@ impl InputMeter {
     /// both channels at once.
     ///
     /// Real-time safe: two comparisons, no allocation, no branch that can
-    /// panic (docs/contracts.md §6).
+    /// panic (docs/effectkit/realtime.md).
     #[inline]
     pub fn observe(&mut self, left: f32, right: f32) {
         let magnitude = left.abs().max(right.abs());
@@ -63,7 +63,7 @@ impl InputMeter {
         }
         if magnitude >= CLIP_THRESHOLD {
             // Saturating for `clippy::arithmetic_side_effects`
-            // (docs/contracts.md §6). A `u64` of frames outlives the hardware
+            // (docs/effectkit/realtime.md). A `u64` of frames outlives the hardware
             // by a wide margin.
             self.clipped_frames = self.clipped_frames.saturating_add(1);
         }
@@ -151,8 +151,8 @@ impl ClipIndicator {
     /// the meter accumulates over the run and this watches it for movement,
     /// which is what lets the two live in different places.
     ///
-    /// Real-time safe: two comparisons and a subtraction (docs/contracts.md
-    /// §6).
+    /// Real-time safe: two comparisons and a subtraction
+    /// (docs/effectkit/realtime.md).
     pub const fn update(&mut self, clipped_frames: u64, block_frames: u64) -> bool {
         if clipped_frames > self.seen {
             self.seen = clipped_frames;

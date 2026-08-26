@@ -1,4 +1,4 @@
-//! Startup presets (docs/contracts.md §1, ADR 0006).
+//! Startup presets (docs/oxtt/contracts.md §1, ADR 0006).
 
 use crate::bands::Bands;
 
@@ -7,7 +7,7 @@ use super::value::{
     CrossoverFreqHigh, CrossoverFreqLow, IoGain, MakeupGain, NormalizedF32, PositiveF32, Threshold,
 };
 
-/// Startup presets (docs/contracts.md §1, ADR 0006).
+/// Startup presets (docs/oxtt/contracts.md §1, ADR 0006).
 ///
 /// `clap::ValueEnum` is derived under the `clap` feature. It has to be derived
 /// here — the orphan rule leaves nowhere else — but a DSP core does not depend
@@ -15,7 +15,7 @@ use super::value::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Preset {
-    /// Conservative output level, suitable for a first listen (docs/contracts.md §1).
+    /// Conservative output level, suitable for a first listen (docs/oxtt/contracts.md §1).
     #[default]
     SafeStart,
     /// Intentionally strong preset that can exceed 0 dBFS (ADR 0006).

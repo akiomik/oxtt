@@ -1,4 +1,4 @@
-//! Value objects for individual parameter fields (docs/contracts.md §1).
+//! Value objects for individual parameter fields (docs/oxtt/contracts.md §1).
 //!
 //! Range/finiteness validation is delegated to the `nutype` crate: each type
 //! below is a `#[nutype]`-generated newtype with a `validate(...)` clause
@@ -31,7 +31,7 @@
 //! against hand-writing a `Display` impl per type.
 use nutype::nutype;
 
-/// A gain value in dB, range `-24.0..=24.0` (docs/contracts.md §1).
+/// A gain value in dB, range `-24.0..=24.0` (docs/oxtt/contracts.md §1).
 ///
 /// Used for the per-effect-band input and post-sum output gains, which are
 /// CLI-configurable.
@@ -64,7 +64,7 @@ impl IoGain {
     }
 }
 
-/// A positive duration in milliseconds (docs/contracts.md §1).
+/// A positive duration in milliseconds (docs/oxtt/contracts.md §1).
 ///
 /// Used for each band's base attack/release time at `time = 0.5`. Only ever
 /// constructed from preset literals (ADR 0006); not CLI-configurable, so
@@ -98,7 +98,7 @@ impl PositiveF32 {
     }
 }
 
-/// A normalized fraction in `0.0..=1.0` (docs/contracts.md §1).
+/// A normalized fraction in `0.0..=1.0` (docs/oxtt/contracts.md §1).
 ///
 /// Shared by the dry/wet mix, the attack/release time multiplier, the
 /// upward/downward multipliers, and each band's compression amounts.
@@ -131,7 +131,7 @@ impl NormalizedF32 {
     }
 }
 
-/// The low/mid crossover frequency in Hz, range `40.0..=2000.0` (docs/contracts.md §1).
+/// The low/mid crossover frequency in Hz, range `40.0..=2000.0` (docs/oxtt/contracts.md §1).
 ///
 /// Combined with `CrossoverFreqHigh` by `CrossoverSplit`, which enforces the
 /// octave-separation invariant that no single field can express on its own.
@@ -164,7 +164,7 @@ impl CrossoverFreqLow {
     }
 }
 
-/// The mid/high crossover frequency in Hz, range `400.0..=16000.0` (docs/contracts.md §1).
+/// The mid/high crossover frequency in Hz, range `400.0..=16000.0` (docs/oxtt/contracts.md §1).
 ///
 /// Combined with `CrossoverFreqLow` by `CrossoverSplit`, which enforces the
 /// octave-separation invariant that no single field can express on its own.
@@ -197,7 +197,7 @@ impl CrossoverFreqHigh {
     }
 }
 
-/// A band's downward/upward compression threshold in dB, range `-80.0..=0.0` (docs/contracts.md §1).
+/// A band's downward/upward compression threshold in dB, range `-80.0..=0.0` (docs/oxtt/contracts.md §1).
 ///
 /// Used for both `lower_threshold_db` and `upper_threshold_db`. `ThresholdRange`
 /// enforces `lower_threshold_db < upper_threshold_db`, since that ordering spans
@@ -231,7 +231,7 @@ impl Threshold {
     }
 }
 
-/// A band's makeup gain in dB, range `-40.0..=40.0` (docs/contracts.md §1).
+/// A band's makeup gain in dB, range `-40.0..=40.0` (docs/oxtt/contracts.md §1).
 ///
 /// Only ever constructed from preset literals (ADR 0006); not CLI-configurable,
 /// so its fallible constructor is crate-private.
@@ -264,12 +264,12 @@ impl MakeupGain {
     }
 }
 
-/// Lower bound of the allowed sample rate range (docs/contracts.md §1).
+/// Lower bound of the allowed sample rate range (docs/oxtt/contracts.md §1).
 const MIN_SAMPLE_RATE_HZ: f32 = 8_000.0;
-/// Upper bound of the allowed sample rate range (docs/contracts.md §1).
+/// Upper bound of the allowed sample rate range (docs/oxtt/contracts.md §1).
 const MAX_SAMPLE_RATE_HZ: f32 = 384_000.0;
 
-/// A sample rate in Hz, range `8_000.0..=384_000.0` (docs/contracts.md §1).
+/// A sample rate in Hz, range `8_000.0..=384_000.0` (docs/oxtt/contracts.md §1).
 ///
 /// Not CLI-configurable: JACK assigns this at connection time and can
 /// change it mid-session, so the only caller is `OttParams::validate`.

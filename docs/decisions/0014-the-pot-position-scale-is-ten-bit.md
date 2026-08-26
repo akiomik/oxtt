@@ -91,6 +91,6 @@ pot the way the wiring does, and an arity parameter takes that away.
   per-surface deadbands measured in these counts.
 - [ADR 0013](0013-crates-not-features-and-effectkit-as-the-shared-half.md) —
   the crate split that turned this detail into a shared contract.
-- [`docs/raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md),
-  [`docs/bela/control-surface-verification.md`](../bela/control-surface-verification.md)
+- [`docs/effectkit/raspberry-pi/control-surface-verification.md`](../effectkit/raspberry-pi/control-surface-verification.md),
+  [`docs/effectkit/bela/control-surface-verification.md`](../effectkit/bela/control-surface-verification.md)
   — the measurements the counts belong to.

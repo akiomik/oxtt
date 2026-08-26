@@ -7,15 +7,15 @@
 //! *immediate* dependent's build script, so `oxtt-bela` cannot inherit them
 //! and this script has to pass them on. Without it, linking a device binary
 //! needs the linker wrapper script from the `bela-rs` repository instead
-//! (docs/bela/cross-compile.md).
+//! (docs/cross-compile.md).
 //!
 //! `println!` is a build script's entire protocol with Cargo, and this runs at
 //! build time on a development machine rather than on any audio path, so the
-//! crate-wide prohibitions from `clippy.toml` (docs/contracts.md §6) do not
+//! crate-wide prohibitions from `clippy.toml` (docs/oxtt/contracts.md §6) do not
 //! describe it.
 #![allow(
     clippy::disallowed_macros,
-    reason = "a build script talks to Cargo over stdout; docs/contracts.md §6 governs the audio callback, not build time"
+    reason = "a build script talks to Cargo over stdout; docs/oxtt/contracts.md §6 governs the audio callback, not build time"
 )]
 
 use std::env;

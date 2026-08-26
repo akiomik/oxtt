@@ -82,7 +82,7 @@ exceed 0 dBFS. Start with `safe-start` and a low monitor level.
 
 Do this once per source. Getting it wrong is worth about 11 dB of noise, which
 is most of the difference between `safe-start` hissing on this board and not
-([noise-floor.md](noise-floor.md)).
+([noise-floor.md](oxtt/bela/noise-floor.md)).
 
 The board's default input gain is +16 dB and clips a line-level source without
 reporting it, so `--adc-gain-db` always has to be set. `--report-on-exit`
@@ -108,7 +108,7 @@ oxtt: input_clipped=0
    that point sits may be the board's input stage or the source's own output
    noise; the two are indistinguishable from the outside, so it is worth
    finding for a source rather than assuming
-   ([noise-floor.md](noise-floor.md)). Sweep the gain with the source silent
+   ([noise-floor.md](oxtt/bela/noise-floor.md)). Sweep the gain with the source silent
    and listen, or record and compare.
 4. **Take the same amount out digitally.** With `--adc-gain-db` at +6 rather
    than the −12 that suits no source in particular, move the other two by the
@@ -149,7 +149,7 @@ amount back with `--output-gain` is worth about 5 dB against the output stage
 measured on its own, and 0.46 dB — nothing — against the hiss a usable preset
 actually produces. The effect's own amplified noise follows the two controls in
 opposite directions and lands back where it started
-([noise-floor.md](noise-floor.md)). Set the headphone level for the level you
+([noise-floor.md](oxtt/bela/noise-floor.md)). Set the headphone level for the level you
 want and leave it there; the gain staging that matters is the input side above.
 
 Check the output for clipping separately whatever you set. `input_peak_dbfs`
@@ -224,7 +224,7 @@ cargo test  -p oxtt-bela --all-targets
 ```
 
 What cannot be checked off the board is the panic-free proof
-([contracts.md §6](../contracts.md#6-real-time-callback)): it needs
+([contracts.md §6](oxtt/contracts.md#6-real-time-callback)): it needs
 `cargo test --release`, which needs to run the tests, which needs the target.
 It is established on x86-64 instead, as it already is for the Raspberry Pi
 build — the proof is a property of the source and the optimiser rather than of
@@ -238,7 +238,7 @@ listed here because each of them ends a run rather than reporting an error.
 
 - **A failed initialisation poisons the process.** Once `Bela_initAudio` has
   failed, every later attempt in the same process fails too. oxtt refuses
-  everything it can before initialisation ([contracts.md §9](../contracts.md#9-bela-host-lifecycle))
+  everything it can before initialisation ([contracts.md §9](oxtt/contracts.md#9-bela-host-lifecycle))
   so that a mistake in the arguments is a message rather than a dead process.
 - **`--period 1` and `--period 3` hang the PRU** with eight analog inputs
   configured, and libbela exits the process from inside itself. The default of

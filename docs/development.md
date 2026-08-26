@@ -4,7 +4,7 @@
 
 - Rust, edition 2024 (rustc >= 1.88).
 - A JACK server, or a JACK-compatible backend (e.g. PipeWire's JACK compatibility layer), to run the `oxtt` binary. Not required to build the crate or run `cargo test`.
-- For the Bela host only: a cross toolchain and a sysroot from the board — see [`bela/cross-compile.md`](bela/cross-compile.md). Not required to build, lint or test `oxtt-bela`'s portable half, which is almost all of it.
+- For the Bela host only: a cross toolchain and a sysroot from the board — see [`cross-compile.md`](cross-compile.md). Not required to build, lint or test `oxtt-bela`'s portable half, which is almost all of it.
 
 ## Hosts and packages
 
@@ -94,7 +94,7 @@ ldd target/release/oxtt
 more: a Bela Gem compiles for the same triple and is a Cortex-A53, so one
 section describing the Pi would silently mis-build the Bela and vice versa.
 Each build now exports its own settings from its own script — see
-[`bela/cross-compile.md`](bela/cross-compile.md) for the other half.
+[`cross-compile.md`](cross-compile.md) for the other half.
 
 Before running the binary, confirm that `rustc -vV` reports
 `host: aarch64-unknown-linux-gnu`, `file` reports an AArch64 ELF binary, and
@@ -103,8 +103,8 @@ Before running the binary, confirm that `rustc -vV` reports
 For the full reproducible setup on real hardware — the build/run split, realtime
 privileges, ALSA card naming, JACK port mapping, and the audio-stability and
 latency verification with a class-compliant USB audio interface — see
-[`raspberry-pi/usb-audio-setup.md`](raspberry-pi/usb-audio-setup.md) and
-[`raspberry-pi/usb-audio-verification.md`](raspberry-pi/usb-audio-verification.md).
+[`oxtt/raspberry-pi/usb-audio-setup.md`](oxtt/raspberry-pi/usb-audio-setup.md) and
+[`oxtt/raspberry-pi/usb-audio-verification.md`](oxtt/raspberry-pi/usb-audio-verification.md).
 
 ### The `pi-controls` feature
 
@@ -121,9 +121,9 @@ cargo build --release --locked --features pi-controls
 The feature only compiles the hardware layer in; it does not turn it on. The
 `--controls` flag — which exists only in a `pi-controls` build — is what starts
 the control thread, so the same binary still runs on a Pi with no breadboard
-attached. See [`raspberry-pi/control-surface-setup.md`](raspberry-pi/control-surface-setup.md)
+attached. See [`effectkit/raspberry-pi/control-surface-setup.md`](effectkit/raspberry-pi/control-surface-setup.md)
 for wiring the hardware and enabling SPI0,
-[`raspberry-pi/control-surface-verification.md`](raspberry-pi/control-surface-verification.md)
+[`effectkit/raspberry-pi/control-surface-verification.md`](effectkit/raspberry-pi/control-surface-verification.md)
 for the hardware verification, and
 [`decisions/0010-three-layer-control-surface-and-newest-value-handoff.md`](decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
 for the design.
@@ -174,7 +174,7 @@ cargo clippy -p oxtt-bela --all-targets --target aarch64-unknown-linux-gnu -- -D
 ```
 
 Producing a runnable binary *is* a real cross-compile, and that is
-[`bela/cross-compile.md`](bela/cross-compile.md).
+[`cross-compile.md`](cross-compile.md).
 
 CI runs one job for it, `bela-device`, covering the cfg'd half. The portable
 half needs no job of its own: it is a package like any other.
@@ -214,7 +214,7 @@ cargo test --all-targets
 ```
 
 Separately, a release build proves the real-time path panic-free
-([contracts.md §6](contracts.md#6-real-time-callback)). The proof only holds
+([contracts.md §6](oxtt/contracts.md#6-real-time-callback)). The proof only holds
 under full optimization, so it does not run as part of the debug suite above,
 and it is asked for crate by crate rather than left to `--workspace`:
 
@@ -245,7 +245,7 @@ The suite is organized by module and none of it requires a running JACK server:
 - `crates/oxtt-bela/src/` — the settings the board is asked for, and the exit report's wording
 - `crates/oxtt-render/src/lib.rs` — the offline renderer's WAV handling and loudness matching
 
-See [contracts.md](contracts.md) for the guarantees those tests protect.
+See [contracts.md](oxtt/contracts.md) for the guarantees those tests protect.
 
 ## Inspecting Generated Code
 

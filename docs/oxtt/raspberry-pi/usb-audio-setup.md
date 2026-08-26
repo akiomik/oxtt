@@ -3,15 +3,15 @@
 This is the reproducible setup for running `oxtt` on a Raspberry Pi 5 as a
 CLI-only JACK client, with a class-compliant USB audio interface as the
 full-duplex device — on real hardware, before any physical controls. It is one
-of the Raspberry Pi configurations under `docs/raspberry-pi/`; an I2S HAT
+of the Raspberry Pi configurations this repository documents; an I2S HAT
 configuration is planned but not yet documented (see
-[ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
+[ADR 0008](../../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md)).
 
 For the results this setup produced, see
 [`usb-audio-verification.md`](usb-audio-verification.md). For the decision it led
-to, see [ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md).
+to, see [ADR 0008](../../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md).
 The physical controls come afterwards and build on this environment: see
-[`control-surface-setup.md`](control-surface-setup.md).
+[`../../effectkit/raspberry-pi/control-surface-setup.md`](../../effectkit/raspberry-pi/control-surface-setup.md).
 
 Concrete names in this document — the host name `oxtt-pi`, the shared home server
 `daphnis`, the ALSA card name `Pro73056544`, the workspace path
@@ -34,7 +34,7 @@ the commands that must use your value point it out.
 
 The DSP core is independent of the audio host (see
 [`../architecture.md`](../architecture.md) and
-[ADR 0007](../decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md)), so
+[ADR 0007](../../decisions/0007-alsa-direct-not-cpal-for-pi-native-backend.md)), so
 these instructions target JACK2 over ALSA and do not depend on any interface
 beyond a full-duplex, class-compliant, single-clock-master device.
 

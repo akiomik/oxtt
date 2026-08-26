@@ -16,9 +16,9 @@ its own settings instead. All three take `--help`.
 | `bela-build.sh` | Cross-compiles `oxtt-bela` for a Bela Gem Stereo. Needs `BELA_SYSROOT`; `BELA_LINKER` selects the cross compiler driver. |
 | `bela-deploy.sh [--host H] [--no-run] [-- args...]` | Copies the built binary to the board, stops `bela_daemon`, and runs it over `ssh -t`. Does not build. |
 
-See [`docs/bela/cross-compile.md`](../docs/bela/cross-compile.md) for the Bela
+See [`docs/cross-compile.md`](../docs/cross-compile.md) for the Bela
 toolchain and sysroot setup, and
-[`docs/raspberry-pi/`](../docs/raspberry-pi/) for the Pi.
+[`docs/oxtt/raspberry-pi/`](../docs/oxtt/raspberry-pi/) for the Pi.
 
 ## Test scripts
 
@@ -29,12 +29,12 @@ physical loopback cable on that USB interface — they are **not** generic audio
 tests. They are also **test-only**: neither embeds an adopted period setting,
 and neither is meant to launch `oxtt` for normal playing. For the full
 procedure, pass criteria, and recorded results, see
-[`docs/raspberry-pi/usb-audio-verification.md`](../docs/raspberry-pi/usb-audio-verification.md).
+[`docs/oxtt/raspberry-pi/usb-audio-verification.md`](../docs/oxtt/raspberry-pi/usb-audio-verification.md).
 
 `pi-idle-jitter.sh` is unrelated to JACK or audio; see its own section below.
 
 Both audio scripts require the Pi host setup from
-[`docs/raspberry-pi/usb-audio-setup.md`](../docs/raspberry-pi/usb-audio-setup.md): a running JACK
+[`docs/oxtt/raspberry-pi/usb-audio-setup.md`](../docs/oxtt/raspberry-pi/usb-audio-setup.md): a running JACK
 environment, realtime privileges, and release builds of both `oxtt` and the
 `oxtt-jack-tools` binaries (`soak_source`, `soak_recorder`, `soak_analyze`) under
 `target/release/`. They also need the JACK CLI tools (`jackd`, `jack_lsp`,
@@ -42,7 +42,7 @@ environment, realtime privileges, and release builds of both `oxtt` and the
 `jack_bufsize`) and `git` on the host, plus tools a standard Raspberry Pi OS
 already provides (`sudo`, `journalctl`, `ps`, `awk`, `vcgencmd`, `timeout`). The
 host package list is in
-[`usb-audio-setup.md` step 3](../docs/raspberry-pi/usb-audio-setup.md). The card name, host name, and
+[`usb-audio-setup.md` step 3](../docs/oxtt/raspberry-pi/usb-audio-setup.md). The card name, host name, and
 port numbers below are examples from the validation environment — substitute your
 own.
 
@@ -124,7 +124,7 @@ Captures readings from `effectkit-pi-tools` and reduces them to n/min/max/spread
 per channel (Depth, Time, Upward, Downward, InputGain, OutputGain). This is
 unrelated to the two audio scripts above: no JACK, no USB audio interface, no
 `usb-audio-setup.md`. It needs SPI0 enabled and the control surface wired per
-[`docs/raspberry-pi/control-surface-setup.md`](../docs/raspberry-pi/control-surface-setup.md),
+[`docs/effectkit/raspberry-pi/control-surface-setup.md`](../docs/effectkit/raspberry-pi/control-surface-setup.md),
 and builds `effectkit-pi-tools` itself via `cargo run --release -p effectkit-pi-tools`.
 
 Move all six pots to the position being measured and leave them completely
@@ -145,4 +145,4 @@ stdout; redirect or `tee` to save it. Exits non-zero, with a message per
 channel on stderr, if any channel got fewer readings than requested.
 
 For what this measures, why, and the recorded results, see
-[`docs/raspberry-pi/control-surface-verification.md`](../docs/raspberry-pi/control-surface-verification.md).
+[`docs/effectkit/raspberry-pi/control-surface-verification.md`](../docs/effectkit/raspberry-pi/control-surface-verification.md).

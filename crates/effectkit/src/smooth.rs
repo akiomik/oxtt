@@ -1,4 +1,4 @@
-//! Sample-rate-independent per-sample parameter smoothing (docs/architecture.md).
+//! Sample-rate-independent per-sample parameter smoothing (docs/oxtt/architecture.md).
 //!
 //! Applies one-pole smoothing, `current[n] = c * current[n-1] + (1 - c) * target`,
 //! fixed at 20ms. After 20ms the difference from the target is about 36.8%
@@ -6,7 +6,7 @@
 
 use std::f64::consts::LN_2;
 
-/// Smoothing time constant (docs/architecture.md).
+/// Smoothing time constant (docs/oxtt/architecture.md).
 pub const SMOOTHING_TIME_MS: f32 = 20.0;
 
 /// Remaining logarithmic crossover-frequency difference at which smoothing snaps to its target.
@@ -85,7 +85,7 @@ impl Smoothed {
     }
 }
 
-/// Wrapper for crossover frequencies that smooths on a logarithmic frequency scale (docs/architecture.md).
+/// Wrapper for crossover frequencies that smooths on a logarithmic frequency scale (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogSmoothed {
     current_log_hz: f64,

@@ -1,14 +1,14 @@
 # Bela Gem Stereo Verification: Audio Without a Control Surface
 
 What a Bela Gem Stereo did with `oxtt-bela`, measured on the board. This is the
-first milestone of the port ([ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md)):
+first milestone of the port ([ADR 0011](../../decisions/0011-bela-gem-stereo-as-the-second-host.md)):
 the DSP running under Bela's callbacks with its parameters from the command
 line. The control surface has its own document
-([`control-surface-verification.md`](control-surface-verification.md)), as it
+([`../../effectkit/bela/control-surface-verification.md`](../../effectkit/bela/control-surface-verification.md)), as it
 does on the Raspberry Pi
-([`raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md)).
+([`raspberry-pi/control-surface-verification.md`](../../effectkit/raspberry-pi/control-surface-verification.md)).
 
-For the setup these results come from, see [`cross-compile.md`](cross-compile.md).
+For the setup these results come from, see [`../../cross-compile.md`](../../cross-compile.md).
 
 ## Environment
 
@@ -18,7 +18,7 @@ For the setup these results come from, see [`cross-compile.md`](cross-compile.md
 | Image | Bela Debian Bookworm, 2026-03-25 |
 | Kernel | `6.12.49-ti-arm64-r55-evl-2` |
 | `libbela.so` | dated 2026-03-25 with the image |
-| Binary | `oxtt-bela`, release, cross-compiled per [`cross-compile.md`](cross-compile.md) |
+| Binary | `oxtt-bela`, release, cross-compiled per [`../../cross-compile.md`](../../cross-compile.md) |
 | Enclosure | none — open board on a desk |
 | Source | Elektron Syntakt, main out, from the input-gain section onward; nothing connected before it |
 | Monitoring | RME Babyface Pro FS, recorded on the host; its own input floor is −116.5 dBFS |
@@ -63,7 +63,7 @@ Twelve-second runs, `--preset safe-start`, `--report-cpu 4`:
 
 About 19% of one audio thread, flat across period sizes. `thread_count` is
 pinned to 1 because the DSP's filters carry state across frames
-([ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md)), so the
+([ADR 0011](../../decisions/0011-bela-gem-stereo-as-the-second-host.md)), so the
 question this answers is whether that pinning costs anything. At 19% it does
 not: there is roughly five times the headroom the effect uses.
 
@@ -132,7 +132,7 @@ own validation. The mapping cannot produce an out-of-range parameter, whatever
 it reads.
 
 It says nothing about whether the right pot moves the right parameter, which
-needs the wiring in [`control-surface-setup.md`](control-surface-setup.md) and
+needs the wiring in [`../../effectkit/bela/control-surface-setup.md`](../../effectkit/bela/control-surface-setup.md) and
 a document of its own.
 
 ### Audio passes through — PASS

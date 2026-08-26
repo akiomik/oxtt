@@ -4,18 +4,24 @@ This is the reproducible setup for `oxtt`'s physical control surface on a
 Raspberry Pi 5 — six potentiometers on an MCP3008 SPI ADC driving
 `depth`/`time`/`upward`/`downward` and the input/output gains, plus a latching
 bypass switch. It is one of
-the Raspberry Pi configurations under `docs/raspberry-pi/`, and it assumes the
+the Raspberry Pi configurations this repository documents, and it assumes the
 environment already built by
-[`usb-audio-setup.md`](usb-audio-setup.md): the same Pi 5, the same 64-bit
+[`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md): the same Pi 5, the same 64-bit
 Raspberry Pi OS Lite, the same workspace, and a working JACK-over-USB audio
 path.
+
+> **The knob names in this document are `oxtt`'s.** The wiring, the deadband
+> and the verification below are effect-independent and belong to
+> `effectkit`; what each pot *means* is decided by the assignment step in
+> [`docs/oxtt/`](../../oxtt/) and is not general
+> ([ADR 0015](../../decisions/0015-documentation-is-namespaced-by-project.md)).
 
 For the results this setup produced — the wiring check, the idle-jitter
 measurement, and the live JACK session — see
 [`control-surface-verification.md`](control-surface-verification.md). For the
 design being set up, see
-[ADR 0010](../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md);
-for the guarantees it must satisfy, `docs/contracts.md` §8.
+[ADR 0010](../../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md);
+for the guarantees it must satisfy, `docs/oxtt/contracts.md` §8.
 
 **The one step in here that is not a formality is enabling SPI0** (steps 3 and
 4). It is easy to believe SPI is already on, because a Pi 5 has a `/dev/spidev*`
@@ -28,7 +34,7 @@ Concrete names in this document — the host name `oxtt-pi`, the workspace path
 `~/workspaces/oxtt`, and your user account — are examples from the environment
 these instructions were validated on. Substitute your own values. Vendor part
 numbers are deliberately absent for the same reason the ALSA card name is an
-example in [`usb-audio-setup.md`](usb-audio-setup.md): the bill of materials
+example in [`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md): the bill of materials
 below is generic, and which specific MCP3008 breakout, pot, or switch you buy is
 environment-specific.
 
@@ -36,7 +42,7 @@ environment-specific.
 
 | Role | Reference configuration |
 | --- | --- |
-| SBC | Raspberry Pi 5, set up per [`usb-audio-setup.md`](usb-audio-setup.md) |
+| SBC | Raspberry Pi 5, set up per [`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md) |
 | ADC | MCP3008, single-ended, on SPI0/CE0 at 500 kHz, SPI mode 0 |
 | Pots | Six linear-taper (B-curve) potentiometers, 10 kΩ, on MCP3008 CH0–CH5 |
 | Unused ADC inputs | CH6 and CH7, tied to ground — never left floating |
@@ -195,7 +201,7 @@ Pi 5 shares with earlier 40-pin models.
 SPI0's `CE0`/`MISO`/`MOSI`/`SCLK` on GPIO8–11 deliberately keeps the control
 surface off GPIO18–21, which is the range a typical I2S audio HAT uses. Moving
 the audio path from the USB interface to an I2S HAT is still on the table
-([ADR 0008](../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md), which
+([ADR 0008](../../decisions/0008-usb-audio-clock-slip-and-i2s-migration.md), which
 selected its HAT candidates partly on not colliding with this ADC and this
 switch), so this is a mapping to keep rather than to re-derive.
 
@@ -395,7 +401,7 @@ unconditionally, and `pi-controls` gates only `oxtt`'s own hardware layer.
 
 `cargo run` builds *and* runs in one command, so run it somewhere the SPI and
 GPIO devices are actually reachable. If you use the container build split from
-[`usb-audio-setup.md`](usb-audio-setup.md), whether the container sees
+[`../../oxtt/raspberry-pi/usb-audio-setup.md`](../../oxtt/raspberry-pi/usb-audio-setup.md), whether the container sees
 `/dev/spidev0.0` and the GPIO character device depends on how it was created;
 the step 5 checks are what tell you, and they are worth re-running on whichever
 side you invoke this from.

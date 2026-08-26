@@ -5,23 +5,23 @@ Bela Gem Stereo: six potentiometers on analog inputs `A0`–`A5` driving
 `depth`/`time`/`upward`/`downward` and the input/output gains, plus a latching
 bypass switch on digital `D0`. It assumes the surface is assembled and wired
 per [`control-surface-setup.md`](control-surface-setup.md), and the build and
-deployment from [`cross-compile.md`](cross-compile.md). The design being
+deployment from [`../../cross-compile.md`](../../cross-compile.md). The design being
 verified is
-[ADR 0010](../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
-as ported by [ADR 0011](../decisions/0011-bela-gem-stereo-as-the-second-host.md);
+[ADR 0010](../../decisions/0010-three-layer-control-surface-and-newest-value-handoff.md)
+as ported by [ADR 0011](../../decisions/0011-bela-gem-stereo-as-the-second-host.md);
 the guarantees it must satisfy are
-[`docs/contracts.md` §8](../contracts.md#8-control-surface).
+[`docs/oxtt/contracts.md` §8](../../oxtt/contracts.md#8-control-surface).
 
 It is the counterpart of
-[`docs/raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md),
+[`docs/effectkit/raspberry-pi/control-surface-verification.md`](../raspberry-pi/control-surface-verification.md),
 and the two are worth reading together: the same six pots and the same layer B
 on a different converter, which is what
-[ADR 0012](../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)
+[ADR 0012](../../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)
 turns on.
 
 What is deliberately *not* verified here: the audio path itself, covered by
-[`audio-verification.md`](audio-verification.md); the board's noise floor,
-covered by [`noise-floor.md`](noise-floor.md); and the conditioning logic
+[`../../oxtt/bela/audio-verification.md`](../../oxtt/bela/audio-verification.md); the board's noise floor,
+covered by [`../../oxtt/bela/noise-floor.md`](../../oxtt/bela/noise-floor.md); and the conditioning logic
 (filter, deadband, debounce, explicit bypass level), covered by the unit and
 property tests in `crates/oxtt-controls/src/lib.rs` and `crates/effectkit-controls/src/gem.rs`,
 which need no hardware.
@@ -161,7 +161,7 @@ rather than merely quiet — and leaves 0.29% of travel, about 341 positions,
 and 0.141 dB per step on the two gain pots.
 
 The deadband being per-source rather than shared is
-[ADR 0012](../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md);
+[ADR 0012](../../decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md);
 this measurement is the evidence behind the Gem's half of it. The Raspberry
 Pi's figure is unchanged and needs no re-verification.
 

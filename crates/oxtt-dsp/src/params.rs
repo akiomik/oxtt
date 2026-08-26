@@ -1,6 +1,6 @@
 //! Parameter value objects, validation, and presets.
 //!
-//! Ranges and invariants follow `docs/contracts.md` §1. Split by responsibility:
+//! Ranges and invariants follow `docs/oxtt/contracts.md` §1. Split by responsibility:
 //! - [`value`]: per-field value objects (`IoGain`, `NormalizedF32`, `CrossoverFreqLow`, ...).
 //! - [`model`]: the `GlobalParams`/`BandParams`/`OttParams` aggregates, plus
 //!   `CrossoverSplit`/`ThresholdRange` — small composite value objects that

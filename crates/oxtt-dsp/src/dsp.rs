@@ -1,4 +1,4 @@
-//! `OttProcessor` and the public DSP API (docs/architecture.md).
+//! `OttProcessor` and the public DSP API (docs/oxtt/architecture.md).
 
 pub mod compressor;
 pub mod crossover;
@@ -19,7 +19,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     (b - a).mul_add(t, a)
 }
 
-/// Runtime error returned by `process` (docs/contracts.md §3).
+/// Runtime error returned by `process` (docs/oxtt/contracts.md §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ProcessError {
     /// `input_l`, `input_r`, `output_l`, and `output_r` did not all have the same length.
@@ -27,7 +27,7 @@ pub enum ProcessError {
     BufferLengthMismatch,
 }
 
-/// Bundles one band's smoothed parameters with its dual-threshold compressor (docs/architecture.md).
+/// Bundles one band's smoothed parameters with its dual-threshold compressor (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct BandProcessor {
     lower_threshold_db: Smoothed,
@@ -57,7 +57,7 @@ impl BandProcessor {
         }
     }
 
-    /// Updates only the smoothing targets. Keeps the current smoothing state as-is (docs/contracts.md §2).
+    /// Updates only the smoothing targets. Keeps the current smoothing state as-is (docs/oxtt/contracts.md §2).
     const fn set_targets(&mut self, params: &BandParams) {
         self.lower_threshold_db
             .set_target(params.thresholds.lower_db().get());
@@ -74,7 +74,7 @@ impl BandProcessor {
         self.compressor.is_finite()
     }
 
-    /// Resets only this band's envelope state (docs/contracts.md §4).
+    /// Resets only this band's envelope state (docs/oxtt/contracts.md §4).
     fn reset_envelope_state(&mut self) {
         self.compressor.reset(
             self.lower_threshold_db.current(),
@@ -126,7 +126,7 @@ impl BandProcessor {
     }
 }
 
-/// Bundles one frame's smoothed global values to pass to `BandProcessor` (docs/architecture.md).
+/// Bundles one frame's smoothed global values to pass to `BandProcessor` (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct FrameControls {
     time: f32,
@@ -135,7 +135,7 @@ struct FrameControls {
     depth: f32,
 }
 
-/// Smoothed global parameters holding current/target (docs/architecture.md).
+/// Smoothed global parameters holding current/target (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct GlobalRuntime {
     input_gain_db: Smoothed,
@@ -212,11 +212,11 @@ impl GlobalRuntime {
     }
 }
 
-/// DSP core for the 3-band, upward/downward multiband compressor (docs/architecture.md).
+/// DSP core for the 3-band, upward/downward multiband compressor (docs/oxtt/architecture.md).
 ///
 /// Processes frame-by-frame and holds no variable-length buffer for
 /// intermediate bands. Keeps state independent of JACK's buffer size
-/// (docs/architecture.md).
+/// (docs/oxtt/architecture.md).
 #[derive(Debug, Clone, Copy)]
 pub struct OttProcessor {
     sample_rate: f32,
@@ -232,7 +232,7 @@ impl OttProcessor {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError` if `sample_rate` or `params` fail validation (docs/contracts.md §1).
+    /// Returns `ConfigError` if `sample_rate` or `params` fail validation (docs/oxtt/contracts.md §1).
     pub fn new(sample_rate: f32, params: OttParams) -> Result<Self, ConfigError> {
         params.validate(sample_rate)?;
         Ok(Self::new_unchecked(sample_rate, params))
@@ -261,16 +261,16 @@ impl OttProcessor {
     }
 
     /// On a sample-rate change: recomputes all filter coefficients and time
-    /// coefficients, and resets state (docs/contracts.md §2, §7).
+    /// coefficients, and resets state (docs/oxtt/contracts.md §2, §7).
     ///
     /// Keeps the most recently set target parameters and immediately sets
-    /// `current` to `target` (docs/contracts.md §2).
+    /// `current` to `target` (docs/oxtt/contracts.md §2).
     ///
     /// # Errors
     ///
     /// Returns `ConfigError` if `sample_rate` fails validation against the
-    /// currently held target parameters (docs/contracts.md §1).
-    // Proves this function can never panic (docs/contracts.md §6); see the
+    /// currently held target parameters (docs/oxtt/contracts.md §1).
+    // Proves this function can never panic (docs/oxtt/contracts.md §6); see the
     // note on `process` above.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     pub fn reset(&mut self, sample_rate: f32) -> Result<(), ConfigError> {
@@ -283,7 +283,7 @@ impl OttProcessor {
     }
 
     /// Applies one complete update: the parameter targets and the explicit
-    /// bypass level, together (docs/contracts.md §2).
+    /// bypass level, together (docs/oxtt/contracts.md §2).
     ///
     /// Keeps the current smoothing state as-is, so the targets are approached
     /// rather than jumped to. The bypass level is applied through an
@@ -301,9 +301,9 @@ impl OttProcessor {
     /// # Errors
     ///
     /// Returns `ConfigError` if the parameters are invalid for this
-    /// processor's sample rate (docs/contracts.md §1); on error no state
+    /// processor's sample rate (docs/oxtt/contracts.md §1); on error no state
     /// changes.
-    // Proves this function can never panic (docs/contracts.md §6); see the
+    // Proves this function can never panic (docs/oxtt/contracts.md §6); see the
     // note on `process` below. It is held to the callback contract because the
     // control surface applies its updates from inside the audio callback
     // (`AudioProcessHandler::process`), not from the control thread.
@@ -323,13 +323,13 @@ impl OttProcessor {
         Ok(())
     }
 
-    /// Returns an error before writing anything if the 4 slices don't have the same length (docs/contracts.md §3).
+    /// Returns an error before writing anything if the 4 slices don't have the same length (docs/oxtt/contracts.md §3).
     ///
     /// # Errors
     ///
     /// Returns `ProcessError::BufferLengthMismatch` if `input_l`, `input_r`,
     /// `output_l`, and `output_r` don't all have the same length.
-    // Proves this function can never panic (docs/contracts.md §6), checked by
+    // Proves this function can never panic (docs/oxtt/contracts.md §6), checked by
     // `cargo test --release` (the proof only holds under optimization; see
     // the `no-panic` crate's docs). Existing tests in `processor_tests`
     // already call this, so no separate proof-only test is needed.
@@ -348,7 +348,7 @@ impl OttProcessor {
 
         // Iterator-based rather than indexed: bounds checks on 4 independently-
         // indexed slices aren't reliably provable away even once lengths are
-        // known equal, which breaks the no-panic proof (docs/contracts.md §6).
+        // known equal, which breaks the no-panic proof (docs/oxtt/contracts.md §6).
         // Zipped iterators can't go out of bounds by construction.
         let inputs = input_l.iter().zip(input_r.iter());
         let outputs = output_l.iter_mut().zip(output_r.iter_mut());
@@ -367,7 +367,7 @@ impl OttProcessor {
     /// method is a loop over this one — so the two agree sample for sample,
     /// and the choice between them is the shape the host's buffers arrive in,
     /// not a difference in what comes out. Neither carries any state a block
-    /// boundary can be seen in (docs/contracts.md §3).
+    /// boundary can be seen in (docs/oxtt/contracts.md §3).
     ///
     /// A host with separate per-channel buffers, or one reading a whole file,
     /// wants `process`: the slice loop pays the length check once instead of
@@ -376,13 +376,13 @@ impl OttProcessor {
     /// this one, because de-interleaving a block into scratch buffers just to
     /// call `process` would copy every sample twice for nothing.
     // Proven panic-free for the same reason and by the same means as
-    // `process` (docs/contracts.md §6); `process` calls this, so the two
+    // `process` (docs/oxtt/contracts.md §6); `process` calls this, so the two
     // proofs cover the same code, but a host calling this directly is
     // entitled to the guarantee without going through `process`.
     #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
     #[inline]
     pub fn process_frame(&mut self, left_in: f32, right_in: f32) -> (f32, f32) {
-        // If an input sample is NaN/+-Inf, treat that sample as 0 (docs/contracts.md §4).
+        // If an input sample is NaN/+-Inf, treat that sample as 0 (docs/oxtt/contracts.md §4).
         let left_in = if left_in.is_finite() { left_in } else { 0.0 };
         let right_in = if right_in.is_finite() { right_in } else { 0.0 };
 
@@ -426,7 +426,7 @@ impl OttProcessor {
         let mut out_left = lerp(effect_left * output_gain, bypass_left, bypass_mix);
         let mut out_right = lerp(effect_right * output_gain, bypass_right, bypass_mix);
 
-        // Even if filter or envelope state goes non-finite, force the output to 0 (docs/contracts.md §4).
+        // Even if filter or envelope state goes non-finite, force the output to 0 (docs/oxtt/contracts.md §4).
         if !out_left.is_finite() {
             out_left = 0.0;
         }
@@ -438,13 +438,13 @@ impl OttProcessor {
     }
 }
 
-/// `OttProcessor` integration tests (docs/contracts.md §2-§5).
+/// `OttProcessor` integration tests (docs/oxtt/contracts.md §2-§5).
 #[cfg(test)]
 // These tests compare exact deterministic values (verbatim inputs, buffer
 // equality across chunkings) and cast sample counts that stay well within
 // f32/f64's exact range, so unwrap/cast noise here is expected.
 // `vec!` is fine in tests; the real-time-callback contract
-// (docs/contracts.md §6) only applies to the DSP/audio-callback path.
+// (docs/oxtt/contracts.md §6) only applies to the DSP/audio-callback path.
 #[allow(
     clippy::unwrap_used,
     clippy::cast_precision_loss,
@@ -1093,7 +1093,7 @@ mod processor_tests {
         };
 
         // A hard-panned, loud signal must still drive one shared gain for the
-        // quieter channel (docs/contracts.md §4, ADR 0002).
+        // quieter channel (docs/oxtt/contracts.md §4, ADR 0002).
         let left_in = 0.02;
         let right_in = 0.5;
         for _ in 0..2_000 {

@@ -1,4 +1,4 @@
-//! Command-line arguments for the `oxtt` binary (docs/contracts.md §1).
+//! Command-line arguments for the `oxtt` binary (docs/oxtt/contracts.md §1).
 //!
 //! The startup preset and the global parameter overrides are shared with the
 //! other two binaries and live in [`oxtt_args`]; what is here is the JACK
