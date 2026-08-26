@@ -63,6 +63,18 @@ pub const CAPACITY: usize = 1024;
 /// The most notes a chord may name.
 pub const MAX_NOTES: usize = 8;
 
+/// Multiples of the decay to append when a caller does not say.
+///
+/// Two takes a tail 120 dB down, which is below anything the render will be
+/// listened to at.
+const DEFAULT_TAIL_DECAYS: f32 = 2.0;
+
+/// Longest tail that will be appended without being asked for.
+///
+/// A decay of eight seconds would otherwise turn a three-second source into a
+/// nineteen-second file. A caller that wants that says so.
+const MAX_DERIVED_TAIL_S: f32 = 6.0;
+
 /// How close to the target an iteration has to land before it stops.
 const NORMALIZATION_TOLERANCE_LU: f64 = 0.01;
 /// Loudness matching is a fixed point; three passes reach it comfortably.
@@ -83,6 +95,11 @@ pub struct RenderOptions {
     pub notes: Vec<u8>,
     /// Integrated loudness target. Absent means "match the input".
     pub target_lufs: Option<f64>,
+    /// Seconds of silence appended so the resonators can finish.
+    ///
+    /// Absent derives it from the decay, which is what a caller almost always
+    /// wants: twice the decay, capped at six seconds.
+    pub tail_seconds: Option<f32>,
 }
 
 /// EBU R128 and peak measurements of one stream.
@@ -178,8 +195,15 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
     let mut processor = HyperglareProcessor::<CAPACITY>::new(options.params, sample_rate);
     processor.apply_params(&options.params, &notes);
 
+    // The input is not the whole render. A resonator asked to ring for a
+    // second goes on ringing for a second after its input stops — that is what
+    // it is for — and a render that ended with the input would cut the tail
+    // off mid-ring, which is both wrong and a click.
+    let tail = tail_frames(options, spec.sample_rate);
     let mut left: Vec<f32> = input_frames.iter().map(|(l, _)| *l).collect();
     let mut right: Vec<f32> = input_frames.iter().map(|(_, r)| *r).collect();
+    left.resize(left.len().saturating_add(tail), 0.0);
+    right.resize(right.len().saturating_add(tail), 0.0);
     processor.process(&mut left, &mut right);
 
     let input_metrics = measure(&input_frames, spec.sample_rate)?;
@@ -203,6 +227,22 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
         normalization_gain_db: gain_db,
         active_resonators: processor.active(),
     })
+}
+
+/// How many frames of silence to append after the input.
+///
+/// Derived from the decay unless a caller says otherwise, because the right
+/// answer is a property of the setting rather than of the file, and a caller
+/// who had to work it out would work it out from the same number.
+fn tail_frames(options: &RenderOptions, sample_rate: u32) -> usize {
+    let seconds = options.tail_seconds.unwrap_or_else(|| {
+        (options.params.bank.decay_t60_s * DEFAULT_TAIL_DECAYS).min(MAX_DERIVED_TAIL_S)
+    });
+    #[allow(clippy::cast_precision_loss)] // Sample rates are exact in `f32`.
+    let frames = seconds.max(0.0) * sample_rate as f32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Clamped above.
+    let frames = frames as usize;
+    frames
 }
 
 /// Applies gain until the integrated loudness lands on `target`.
@@ -421,6 +461,7 @@ mod tests {
             // A1, E2, A2.
             notes: vec![33, 40, 45],
             target_lufs: None,
+            tail_seconds: Some(0.0),
         }
     }
 
@@ -446,6 +487,46 @@ mod tests {
             .map(|((a, _), (b, _))| (a - b).abs())
             .sum();
         assert!(difference > 1.0, "the render did nothing: {difference}");
+    }
+
+    /// A resonator rings after its input stops, so a render is longer than
+    /// the file it came from. Without the tail the last note is cut off
+    /// mid-ring, which is both wrong and a click.
+    #[test]
+    fn the_tail_rings_out_past_the_end_of_the_input() {
+        let input = scratch("in-tail");
+        let output = scratch("out-tail");
+        source(&input, 0.5);
+
+        let mut opts = options(&input, &output, Geometry::Octaves);
+        opts.params.bank.decay_t60_s = 0.4;
+        opts.tail_seconds = None; // derived from the decay
+        render(&opts).unwrap();
+
+        let (_, dry) = read_stereo_f32(&input).unwrap();
+        let (_, wet) = read_stereo_f32(&output).unwrap();
+        assert!(
+            wet.len() > dry.len(),
+            "the render should outlast its input: {} vs {}",
+            wet.len(),
+            dry.len()
+        );
+
+        // And it should end quietly, rather than being cut while still loud.
+        let tail_peak = |frames: &[(f32, f32)], from: usize| {
+            frames[from..]
+                .iter()
+                .map(|(l, r)| l.abs().max(r.abs()))
+                .fold(0.0f32, f32::max)
+        };
+        let start = dry.len();
+        let last = wet.len() - wet.len() / 20;
+        let early = tail_peak(&wet, start);
+        let end = tail_peak(&wet, last);
+        assert!(
+            end < early * 0.2,
+            "the tail should have decayed by the end: {early} -> {end}"
+        );
     }
 
     /// Matching is what makes an A/B a comparison of sound rather than of

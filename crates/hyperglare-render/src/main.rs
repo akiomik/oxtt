@@ -43,6 +43,11 @@ struct RenderCli {
     #[arg(long, value_name = "LUFS")]
     target_lufs: Option<f64>,
 
+    /// Seconds of silence appended so the resonators can finish ringing.
+    /// Defaults to twice the decay, capped at six seconds.
+    #[arg(long, value_name = "SECONDS")]
+    tail: Option<f32>,
+
     /// The chord, as MIDI note numbers. MIDI's own units, so the eventual
     /// MIDI input and this argument agree about what A4 is.
     #[arg(long, value_name = "NOTE", value_delimiter = ',', default_values_t = [33u8, 40, 45])]
@@ -213,6 +218,7 @@ fn main() -> ExitCode {
         params: HyperglareParams::from(&cli.params),
         notes: cli.notes,
         target_lufs: cli.target_lufs,
+        tail_seconds: cli.tail,
     };
 
     match render(&options) {

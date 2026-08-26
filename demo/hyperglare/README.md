@@ -1,31 +1,40 @@
 # hyperglare Demo Audio
 
-**Empty, and waiting on one recording.** Everything M0 has left to decide is
-decided by ear, and there is nothing to listen to yet.
+| File | What it is |
+| --- | --- |
+| `dry.wav` | An FM bass from a Syntakt, growling. A1 (55 Hz), 2.5 s, stereo 32-bit float |
+| `wet-octaves.wav` | The default geometry on an A minor chord, with drive and noise up |
+| `wet-stretched.wav` | Octave pairs, detuned 35 cents an octave, post-drive after the split |
 
-## What the source has to be
+The renders are regenerated rather than recorded, so they follow the DSP
+instead of pinning it. The commands are at the bottom.
+
+## What the source has to be, and why
 
 **A distorted bass.** Not a stylistic preference — a requirement of the
 mechanism. A bank of band-pass filters is a filter and not an oscillator, so it
 can only emphasise energy the input already has at the frequencies it is tuned
-to. A clean sine has one partial and the bank has almost nothing to ring on; a
-saturated bass has a dense series, and the resonators sitting on those partials
-sound.
+to. A clean sine has one partial and the bank has almost nothing to ring on.
 
-The effect has a waveshaper of its own (`--drive`) for exactly this reason, but
-it can only work with what arrives. A source that is already dense is a fairer
-test of the resonators than one that has to be manufactured by the drive stage
-first.
+`dry.wav` measures 55 Hz with partials to about 550 Hz, which is a tenth
+harmonic — dark for this effect on its own, and enough once the excitation
+stage is doing its job. Measured against the dry file, at drive 0.6 and noise
+0.6, the render adds **37 dB in the 3–9 kHz band**; with the noise path alone
+it adds 47 dB. That is the glare, and it comes almost entirely from the noise
+path, exactly as `crate::exciter` says it does.
 
 | | |
 | --- | --- |
 | Format | Stereo, 32-bit IEEE float WAV — what `hyperglare-render` reads and writes |
-| Length | 8–15 seconds. About 1.4 MB at 48 kHz mono-into-stereo |
-| Content | A bass line with obvious saturation. A held note and a couple of moves is plenty |
-| Level | Peaks a few dB below full scale. The renderer matches loudness, so absolute level does not matter, but headroom does |
-| Pitch | Somewhere around A1–A2 (MIDI 33–45), because that is where the design's figures are quoted and where the chord defaults sit |
+| Length | A few seconds. The renderer appends the tail, so the source does not have to |
+| Content | A bass with obvious saturation. A held note and a couple of moves is plenty |
+| Level | Peaks a few dB below full scale. Loudness is matched, but headroom is not recoverable |
+| Pitch | Around A1–A2 (MIDI 33–45), where the design's figures are quoted |
 
-Suggested name: `dry.wav`, matching [`../oxtt/`](../oxtt/).
+**Name the chord to match the source.** `dry.wav` is A1, so the default
+`--notes 33,40,45` is an A minor triad rooted on it. A chord that has nothing
+to do with the source is a legitimate thing to try — it is what the effect is
+for — but it is not the first thing to listen to.
 
 ## Why a pattern is not what to record first
 
@@ -39,23 +48,23 @@ harmonic geometry sounds thin at the top — and whether that is timbre or level
 cannot be told apart by ear.
 
 **A sustained note near the reference is a fair comparison between the
-geometries. A line is not.** Record the held note first; a pattern is worth
-having later, for the questions that are about movement rather than about which
-geometry to keep.
+geometries. A line is not.**
 
-## What goes here after it
-
-Renders from `hyperglare-render`, named for what they demonstrate, the way
-[`../oxtt/`](../oxtt/) names its presets. They are regenerated rather than
-recorded, so they follow the DSP instead of pinning it.
+## Regenerating the renders
 
 ```sh
 cargo run --release -p hyperglare-render -- \
-  --input demo/hyperglare/dry.wav \
-  --output demo/hyperglare/wet-octaves.wav \
-  --notes 33,40,45
+  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-octaves.wav \
+  --notes 33,40,45 --geometry octaves \
+  --drive 0.6 --noise 0.6 --decay 0.8 --color 1.0
+
+cargo run --release -p hyperglare-render -- \
+  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-stretched.wav \
+  --notes 33,40,45 --geometry octave-pairs --stretch 35 --drift 12 \
+  --drive 0.7 --noise 0.7 --decay 1.2 \
+  --sear 0.5 --sear-placement before-split --width 1.0 --color 1.3
 ```
 
 Read the reported `normalization_gain_db`: a setting that needed a large
 correction was mostly a level change, which is half of what a comparison is
-for.
+for. These two needed 12.4 dB and 4.6 dB.
