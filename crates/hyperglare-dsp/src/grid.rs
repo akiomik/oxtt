@@ -419,21 +419,41 @@ mod tests {
     /// Both directions from the note, so an octave grid's count does not depend
     /// on which key was pressed. This is what makes its CPU cost and its
     /// loudness constant across the keyboard.
+    ///
+    /// The bound is one octave step's worth of points, and it is not zero: the
+    /// band is `log2(9000/65) = 7.11` octaves wide, so a grid catches seven
+    /// steps or eight depending on where the note falls between them. One step
+    /// is one point under [`Geometry::Octaves`] and two under
+    /// [`Geometry::OctavePairs`], so the tolerance is derived from the
+    /// geometry rather than picked.
     #[test]
     fn an_octave_grids_count_is_stable_across_octaves_of_the_played_note() {
-        for geometry in [Geometry::Octaves, Geometry::OctavePairs] {
+        // Deliberately *not* all octaves of one note: those share an offset
+        // into the band and so cannot differ, which would leave the bound
+        // untested. This set spans both counts.
+        let notes = [32.7, 41.2, 55.0, 65.4, 110.0, 261.6, 440.0];
+        for (geometry, points_per_step) in [(Geometry::Octaves, 1), (Geometry::OctavePairs, 2)] {
             let grid = Grid {
                 geometry,
                 ..Grid::default()
             };
-            let counts: Vec<usize> = [32.7, 65.4, 130.8, 261.6, 523.3]
+            let counts: Vec<usize> = notes
                 .into_iter()
                 .map(|hz| collect(&grid, hz).len())
                 .collect();
             let (min, max) = (*counts.iter().min().unwrap(), *counts.iter().max().unwrap());
             assert!(
-                max - min <= 2,
-                "{geometry:?} should not swing with the played octave, got {counts:?}"
+                max - min <= points_per_step,
+                "{geometry:?} should vary by at most one step ({points_per_step} \
+                 points), got {counts:?}"
+            );
+            // And it really does vary by that much, so the bound is being
+            // exercised rather than merely satisfied.
+            assert_eq!(
+                max - min,
+                points_per_step,
+                "{geometry:?} should cross the seven/eight step boundary over \
+                 this set, got {counts:?}"
             );
             // A note well above the floor only stays covered because `j` goes
             // negative: C4 with upward-only steps would start at 261 Hz.
