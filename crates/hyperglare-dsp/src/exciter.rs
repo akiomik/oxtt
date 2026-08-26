@@ -209,7 +209,7 @@ impl Exciter {
 /// transparent — without it the shaper's own curve would still be in the path,
 /// and "drive at zero" would not mean "no drive".
 #[inline]
-fn shape(x: f32, drive: f32) -> f32 {
+pub(crate) fn shape(x: f32, drive: f32) -> f32 {
     let drive = drive.clamp(0.0, 1.0);
     if drive == 0.0 {
         return x;

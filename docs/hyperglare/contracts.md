@@ -3,10 +3,9 @@
 Normative for `hyperglare-dsp`. What a caller may rely on, and what the crate
 guarantees in return.
 
-**This document grows with the crate.** The resonator bank exists; the
-processor around it — excitation, post-drive, mix, bypass — does not yet, so
-the sections that belong to it say so rather than describing something that is
-not there. A section that is absent is absent, not implied.
+**This document grows with the crate.** Excitation, resonance, post-drive and
+the mix exist; bypass does not, so section 7 says so rather than describing
+something that is not there. A section that is absent is absent, not implied.
 
 The real-time prohibitions are not restated here. They are the one contract
 shared across every effect in this family rather than duplicated per project,
@@ -59,15 +58,13 @@ cost two orders of magnitude more than the filtering itself.
 
 ## 3. Buffer processing
 
-`ResonatorBank::process` takes one sample and returns one sample. There is no
-block entry point, and therefore no way for the two to disagree.
+`HyperglareProcessor::process` is a loop over `process_frame` and nothing else,
+so the two cannot disagree about anything.
 
-**Output is independent of how the input is partitioned across calls**, because
-there is nothing to partition: the bank carries no block-scoped state. A caller
-that splits a buffer differently gets the same samples.
-
-When the processor arrives, its block entry point will be a loop over the
-per-frame one and this section will say so explicitly, the way `oxtt`'s does.
+**Output is independent of how the input is partitioned across calls.** No
+stage carries block-scoped state, so a caller that chunks a buffer differently
+gets the same samples — tested against block sizes of 1, 37, 64 and the whole
+buffer.
 
 ## 4. Signal invariants
 
@@ -90,13 +87,25 @@ These hold for every sample, at any settings:
   zero**, with the drive and the noise at maximum. Not "after the release" —
   a one-pole release reaches 120 dB down after about fourteen of its own time
   constants, a bit under half a second — and not "small", because a tolerance
-  would pass for a gate that had been deleted. The test derives its wait from
-  the release and the floor, and it has been checked against a build with the
-  gate removed: it is the only test in the module that fails there.
-- **The output is bounded.** Q reaches into the thousands, so the bound is
-  worth stating separately from finiteness. It is currently a consequence of
-  the per-filter normalisation and the density divisor rather than of a
-  limiter; a limiter belongs at the processor's output and is not here yet.
+  would pass for a gate that had been deleted. Both the exciter's test and the
+  processor's have been checked against a build with the gate removed: they are
+  the only tests that fail there.
+
+  **For the whole processor the arrival is two stages in series, and the second
+  is a setting.** The gate goes on feeding the bank while it closes, and only
+  then do the resonators start decaying toward the filter's own floor — which
+  is what they are for. Reaching exactly zero therefore takes about half a
+  second of gate plus seven decay times, so at a four-second decay it is
+  measured in tens of seconds. That is correct behaviour, not a leak: a
+  resonator asked to ring for four seconds rings for four seconds.
+
+- **The output is bounded to full scale**, by a soft knee one decibel below it.
+  Bounding every input into `[-1, 1]` while leaving some region untouched
+  requires bending somewhere below one, so "transparent" means "transparent for
+  material that is gain-staged" — which is what the input gain is for.
+- **A non-finite sample never leaves the processor.** The frame path ends in a
+  guard, so a host receives silence rather than a NaN. State poisoned by a
+  non-finite *input* is cleared by `reset_state`, not by the guard.
 
 ## 5. Level
 
@@ -158,7 +167,11 @@ it is stated here rather than left to be discovered.
 
 ## 7. Bypass and reset
 
-**Not yet a contract**, and it will not be `oxtt`'s when it is one.
+**Still not a contract**, and it will not be `oxtt`'s when it is one.
+
+Deferred deliberately rather than forgotten: the choice below is between two
+implementations that feel different under the hands, and there is no control
+surface yet to feel them with. Nothing in the offline path needs a bypass.
 
 `oxtt` stops when its input stops, so a 20 ms crossfade into bypass is
 inaudible. `hyperglare` rings for as long as its decay, and the same crossfade
@@ -170,7 +183,7 @@ bypassed.
 `reset` differs for the same reason: `oxtt`'s means "as if newly constructed",
 and doing that to `hyperglare` deletes a sounding chord.
 
-Both are decided with the processor.
+Both are decided when there is a host with a switch on it.
 
 ## 8. Real-time callback
 

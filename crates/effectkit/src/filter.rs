@@ -123,7 +123,12 @@ impl Biquad {
         self.x2 = self.x1;
         self.x1 = x0;
         self.y2 = self.y1;
-        self.y1 = y0;
+        // Flushed for the same reason [`Svf`]'s integrators are: a filter
+        // decaying into silence approaches zero without arriving, and the
+        // subnormal arithmetic on the way is neither free nor bounded in time.
+        // Only the feedback state needs it — `x1`/`x2` are the caller's own
+        // samples and stop being small when the caller does.
+        self.y1 = flush(y0);
         y0
     }
 
@@ -132,6 +137,12 @@ impl Biquad {
     pub const fn is_finite(&self) -> bool {
         self.x1.is_finite() && self.x2.is_finite() && self.y1.is_finite() && self.y2.is_finite()
     }
+}
+
+/// Zero for anything smaller than [`DENORMAL_FLOOR`], and unchanged otherwise.
+#[inline]
+fn flush(x: f32) -> f32 {
+    if x.abs() < DENORMAL_FLOOR { 0.0 } else { x }
 }
 
 /// A 4th-order Linkwitz-Riley filter made of two cascaded second-order Butterworth biquads at the same cutoff.
@@ -222,6 +233,26 @@ impl SvfCoeffs {
     }
 }
 
+/// State below this magnitude is flushed to zero.
+///
+/// A high-Q resonator decaying into silence is where denormals collect: the
+/// integrators approach zero without arriving, and on an out-of-order core the
+/// subnormal arithmetic that follows is not free. Flushing keeps that off an
+/// audio thread, and it turns the asymptote into an arrival so a caller can
+/// say when a tail has actually finished.
+///
+/// Not at `f32`'s denormal boundary but well above it, because the boundary is
+/// not where the trouble starts. A decaying second-order state is a difference
+/// of two nearly equal numbers, so below roughly `1e-20` the decrement the
+/// coefficients describe stops surviving the rounding and the state *crawls*
+/// instead of arriving — measured going from a factor of 0.002 per 50 ms to a
+/// factor of 0.87. Flushing above that region is what makes the arrival real.
+///
+/// Four hundred decibels below full scale, so this is a numerical decision
+/// rather than an audibility one: no effect's idea of silence is anywhere near
+/// it, which is what keeps the constant appropriate to a shared primitive.
+const DENORMAL_FLOOR: f32 = 1e-20;
+
 /// A topology-preserving state-variable filter, band-pass branch.
 ///
 /// The state is the two integrators, not the output history, which is what
@@ -276,8 +307,8 @@ impl Svf {
         let v2 = coeffs
             .a3
             .mul_add(v3, coeffs.a2.mul_add(self.ic1eq, self.ic2eq));
-        self.ic1eq = 2.0f32.mul_add(v1, -self.ic1eq);
-        self.ic2eq = 2.0f32.mul_add(v2, -self.ic2eq);
+        self.ic1eq = flush(2.0f32.mul_add(v1, -self.ic1eq));
+        self.ic2eq = flush(2.0f32.mul_add(v2, -self.ic2eq));
         v1
     }
 

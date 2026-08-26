@@ -354,6 +354,44 @@ impl<const N: usize> ResonatorBank<N> {
         self.voice_norm = 1.0 / asked_for.sqrt();
     }
 
+    /// One sample through every sounding resonator, split across a stereo
+    /// pair by alternating grid points.
+    ///
+    /// The bank runs in mono, so this is the cheap way to get width out of it:
+    /// neighbouring resonators — an octave apart under the octave geometries —
+    /// go to opposite sides, and `width` blends that back toward the centre.
+    /// At `width = 0` both channels receive the whole sum and this is
+    /// [`process`](Self::process) in a pair.
+    ///
+    /// Constant power: `gl² + gr²` is two whatever the width, so widening is
+    /// not also a level control.
+    ///
+    /// **This is only useful before a non-linearity.** Once the sum has been
+    /// through a waveshaper the individual resonators are no longer separable,
+    /// which is why the order of the two is a choice rather than a detail.
+    #[inline]
+    pub fn process_split(&mut self, x: f32, width: f32) -> (f32, f32) {
+        let width = width.clamp(0.0, 1.0);
+        let mut left = 0.0f32;
+        let mut right = 0.0f32;
+        for (index, ((filter, coeffs), gain)) in self
+            .filters
+            .iter_mut()
+            .zip(self.coeffs.iter())
+            .zip(self.gains.iter())
+            .take(self.active)
+            .enumerate()
+        {
+            let value = gain * filter.process_bandpass(coeffs, x);
+            // Alternate sides, so the two channels carry interleaved octaves
+            // rather than a split band.
+            let pan = if index % 2 == 0 { -width } else { width };
+            left = (1.0 - pan).sqrt().mul_add(value, left);
+            right = (1.0 + pan).sqrt().mul_add(value, right);
+        }
+        (left * self.voice_norm, right * self.voice_norm)
+    }
+
     /// One sample through every sounding resonator.
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
@@ -795,6 +833,44 @@ mod tests {
         );
         // Quietest at the top, because that is where the partials run out.
         assert!(harm_db[0] > *harm_db.last().unwrap(), "{harm_db:?}");
+    }
+
+    /// At zero width the split is the mono sum in both channels, and at full
+    /// width the two channels carry different resonators — while the total
+    /// power does not move, so the width knob is not a volume knob.
+    #[test]
+    fn splitting_is_constant_power_and_collapses_to_mono_at_zero_width() {
+        let settings = params(0.6, 500.0);
+        let drive = |bank: &mut Bank, width: f32| {
+            let mut acc = (0.0f64, 0.0f64, 0.0f64);
+            for i in 0..9_600 {
+                let x = if i % 480 < 8 { 1.0 } else { 0.0 };
+                let (l, r) = bank.process_split(x, width);
+                acc.0 += f64::from(l) * f64::from(l);
+                acc.1 += f64::from(r) * f64::from(r);
+                acc.2 += f64::from(l - r).abs();
+            }
+            acc
+        };
+
+        let mut mono = Bank::new();
+        mono.retune(&[110.0], &settings, SR);
+        let (ml, mr, mdiff) = drive(&mut mono, 0.0);
+        assert!(
+            mdiff < 1e-6,
+            "zero width should be identical channels: {mdiff}"
+        );
+
+        let mut wide = Bank::new();
+        wide.retune(&[110.0], &settings, SR);
+        let (wl, wr, wdiff) = drive(&mut wide, 1.0);
+        assert!(
+            wdiff > 1.0,
+            "full width should differ between channels: {wdiff}"
+        );
+
+        let db = 10.0 * ((wl + wr) / (ml + mr)).log10();
+        assert!(db.abs() < 0.5, "widening moved the total power by {db} dB");
     }
 
     /// A silent voice contributes nothing and does not consume capacity.

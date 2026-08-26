@@ -9,6 +9,7 @@
 pub mod bank;
 pub mod exciter;
 pub mod grid;
+pub mod processor;
 
 #[cfg(test)]
 mod proofs {
@@ -21,6 +22,7 @@ mod proofs {
     use crate::bank::{BankParams, ResonatorBank};
     use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams};
     use crate::grid::{Geometry, Grid};
+    use crate::processor::{HyperglareParams, HyperglareProcessor, SearPlacement};
 
     /// The grid is rebuilt whenever a chord or a knob moves, which under Bela
     /// is inside `render_pre`. It is not a per-sample path, but it is on the
@@ -137,6 +139,38 @@ mod proofs {
                 let _ = run(&mut exciter, params, coeffs, x);
             }
             exciter.reset();
+        }
+    }
+
+    /// The whole chain, which is what a host actually calls per frame.
+    #[test]
+    fn the_processors_frame_path_cannot_panic() {
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn run(processor: &mut HyperglareProcessor<64>, l: f32, r: f32) -> (f32, f32) {
+            processor.process_frame(l, r)
+        }
+
+        for placement in [SearPlacement::AfterSum, SearPlacement::BeforeSplit] {
+            let params = HyperglareParams {
+                sear_placement: placement,
+                sear: 1.0,
+                width: 1.0,
+                color: 2.0,
+                input_gain_db: 24.0,
+                output_gain_db: 24.0,
+                ..HyperglareParams::default()
+            };
+            let mut processor = HyperglareProcessor::<64>::new(params, 48_000.0);
+            processor.apply_params(&params, &[55.0, 82.4, 110.0]);
+            for (l, r) in [
+                (0.0, 0.0),
+                (1.0, -1.0),
+                (f32::MAX, f32::MIN),
+                (f32::NAN, f32::INFINITY),
+            ] {
+                let (out_l, out_r) = run(&mut processor, l, r);
+                assert!(out_l.is_finite() && out_r.is_finite());
+            }
         }
     }
 }
