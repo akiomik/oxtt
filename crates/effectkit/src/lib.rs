@@ -7,8 +7,10 @@
 //!
 //! - [`smooth`] — sample-rate-independent parameter smoothing, linear and
 //!   logarithmic.
-//! - [`filter`] — RBJ cookbook coefficients, a Direct Form I biquad, and the
-//!   cascaded pair that makes a 4th-order Linkwitz-Riley section.
+//! - [`filter`] — two families: RBJ cookbook coefficients with a Direct Form I
+//!   biquad and the cascaded pair that makes a 4th-order Linkwitz-Riley
+//!   section, for a crossover; and a TPT state-variable filter with a
+//!   normalised band-pass output, for a resonator.
 //! - [`decibels`] — dB conversions for the real-time path, and the floor they
 //!   respect.
 //! - [`metering`] — what arrived at the input, and an indicator hold that
@@ -53,7 +55,7 @@ mod proofs {
     //! caller says nothing to the next caller.
 
     use crate::decibels::{db_to_amp, power_to_db};
-    use crate::filter::{Biquad, Lr4, biquad_coeffs};
+    use crate::filter::{Biquad, Lr4, Svf, SvfCoeffs, biquad_coeffs};
     use crate::metering::{ClipIndicator, InputMeter};
     use crate::smooth::{LogSmoothed, Smoothed};
 
@@ -73,6 +75,24 @@ mod proofs {
 
         for x in [0.0, 0.5, -1.0, 1.0] {
             assert!(run(&mut section, &mut stage, x).is_finite());
+        }
+    }
+
+    #[test]
+    fn an_svf_cannot_panic_per_sample() {
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn run(filter: &mut Svf, coeffs: &SvfCoeffs, x: f32) -> f32 {
+            filter.process_bandpass(coeffs, x)
+        }
+
+        // The coefficient constructor is *not* under the proof: it calls
+        // `tan`, and it runs at a control rate rather than per sample
+        // (`SvfCoeffs`). What has to hold here is the sample path.
+        let coeffs = SvfCoeffs::new(60.0, SAMPLE_RATE, 9_100.0);
+        let mut filter = Svf::new();
+
+        for x in [0.0, 0.5, -1.0, 1.0] {
+            assert!(run(&mut filter, &coeffs, x).is_finite());
         }
     }
 
