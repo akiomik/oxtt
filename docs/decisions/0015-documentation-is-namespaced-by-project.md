@@ -79,6 +79,24 @@ The board becomes a directory *under* a project, because a board is not a
 namespace: it is a fact each project verifies for itself. `docs/bela/` was
 already two projects' documents in one directory.
 
+#### Amended: the rule reaches `demo/` too
+
+Written against `docs/` because that is where the problem was visible, and
+`demo/` turned out to have the same one the moment a second effect wanted a
+source file. Three audio files sat at `demo/` with no owner in their path, and
+the next three would have collided with them by name.
+
+**`demo/` is namespaced the same way, for the same reason**, and nothing is
+shared between the directories. That is not an oversight either: what
+demonstrates a multiband compressor is a full-band musical excerpt and what
+demonstrates a resonator bank is a distorted bass, because a bank of band-pass
+filters can only emphasise energy the input already has. One file cannot be
+both, so the case for sharing one never arises.
+
+Recorded here rather than in an ADR of its own, because it is the same decision
+applied to a directory this one did not think to name — and a separate ADR for
+moving three files would be a heavier record than the decision it holds.
+
 ### 2. `contracts.md` is not split. Each project gets its own
 
 `docs/oxtt/contracts.md` is today's file, moved and otherwise unchanged.
@@ -207,7 +225,8 @@ Applying it backwards would be a claim about the past, not a label.
   having settled it.
 
 - **A fourth project would add a fourth directory and nothing else.** That is
-  the property being bought.
+  the property being bought — in `docs/` and, per the amendment above, in
+  `demo/`.
 
 ## References
 

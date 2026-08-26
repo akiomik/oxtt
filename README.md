@@ -117,5 +117,6 @@ Technical documentation lives under `docs/`, namespaced by project ([ADR 0015](d
 - [`docs/hyperglare/`](docs/hyperglare/) — a second effect, in progress: a resonator bank that colours an input with a chord. It renders offline today (`cargo run -p hyperglare-render -- --help`) with the chord as an argument; MIDI, a host and a control surface come after. [`contracts.md`](docs/hyperglare/contracts.md) is what its DSP core guarantees so far, and says which sections are still waiting on code
 - [`docs/effectkit/`](docs/effectkit/) — the effect-independent half: the six-pot control surface's wiring and hardware verification, on [both](docs/effectkit/bela/) [boards](docs/effectkit/raspberry-pi/)
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs). Flat across all three projects, and append-only
+- [`demo/`](demo/) — a source and its renders, one directory per effect ([`demo/README.md`](demo/README.md))
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes
 - [`docs/cross-compile.md`](docs/cross-compile.md) — the Bela cross toolchain and sysroot
