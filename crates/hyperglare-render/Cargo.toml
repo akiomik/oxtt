@@ -1,0 +1,20 @@
+[package]
+name = "hyperglare-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Renders a WAV through hyperglare offline, loudness-matched, for the comparisons M0 has to make by ear"
+readme = "../../README.md"
+publish = false
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ebur128 = "0.1.10"
+hound = "3.5.1"
+hyperglare-dsp = { path = "../hyperglare-dsp" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -9,6 +9,7 @@ default-members = [
     "crates/effectkit",
     "crates/effectkit-controls",
     "crates/hyperglare-dsp",
+    "crates/hyperglare-render",
     "crates/oxtt",
     "crates/oxtt-args",
     "crates/oxtt-bela",

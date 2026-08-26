@@ -9,6 +9,7 @@
 pub mod bank;
 pub mod exciter;
 pub mod grid;
+pub mod note;
 pub mod processor;
 
 #[cfg(test)]
