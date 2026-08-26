@@ -90,11 +90,11 @@ struct ParamsArgs {
 
     /// How much of the bandwidth difference between resonators to compensate.
     /// `0.5` is exact for broadband excitation, `0` for tonal.
-    #[arg(long, value_name = "EXPONENT", default_value_t = 0.5)]
+    #[arg(long, value_name = "EXPONENT", default_value_t = 0.25)]
     compensation: f32,
 
     /// Spectral tilt, -1 (dark) to 1 (bright).
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, default_value_t = 0.5)]
     tilt: f32,
 
     /// Cents of detune spread across the voices.
@@ -110,8 +110,13 @@ struct ParamsArgs {
     drive: f32,
 
     /// Gated noise into the bank: what makes everything else ring.
-    #[arg(long, default_value_t = 0.25)]
+    #[arg(long, default_value_t = 0.5)]
     noise: f32,
+
+    /// How much of the wet's level difference from the dry to remove, so that
+    /// `--color` is a real crossfade. Zero leaves the resonators raw.
+    #[arg(long, value_name = "AMOUNT", default_value_t = 1.0)]
+    wet_match: f32,
 
     /// Post-drive amount.
     #[arg(long, default_value_t = 0.0)]
@@ -202,6 +207,7 @@ impl From<&ParamsArgs> for HyperglareParams {
             sear_placement: args.sear_placement.into(),
             sear: args.sear,
             width: args.width,
+            wet_match: args.wet_match,
             color: args.color,
             input_gain_db: args.input_gain,
             output_gain_db: args.output_gain,

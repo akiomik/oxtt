@@ -95,7 +95,9 @@ impl Default for ExciterParams {
     fn default() -> Self {
         Self {
             drive: 0.3,
-            noise_amount: 0.25,
+            // The top of the bank is fed by this path almost alone, so a
+            // quarter is a quarter of the glare. M0 listened at 0.5 to 0.9.
+            noise_amount: 0.5,
         }
     }
 }

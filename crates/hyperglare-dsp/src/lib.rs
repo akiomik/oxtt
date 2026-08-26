@@ -11,6 +11,7 @@ pub mod exciter;
 pub mod grid;
 pub mod note;
 pub mod processor;
+pub mod wet_match;
 
 #[cfg(test)]
 mod proofs {
@@ -24,6 +25,7 @@ mod proofs {
     use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams};
     use crate::grid::{Geometry, Grid};
     use crate::processor::{HyperglareParams, HyperglareProcessor, SearPlacement};
+    use crate::wet_match::{WetMatch, WetMatchCoeffs};
 
     /// The grid is rebuilt whenever a chord or a knob moves, which under Bela
     /// is inside `render_pre`. It is not a per-sample path, but it is on the
@@ -172,6 +174,32 @@ mod proofs {
                 let (out_l, out_r) = run(&mut processor, l, r);
                 assert!(out_l.is_finite() && out_r.is_finite());
             }
+        }
+    }
+
+    /// The wet matcher runs per frame with the rest of the chain, and it is
+    /// the one stage that divides.
+    #[test]
+    fn the_wet_matcher_cannot_panic() {
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn run(m: &mut WetMatch, dry: f32, wet: f32, amount: f32, c: &WetMatchCoeffs) -> f32 {
+            m.process(dry, wet, amount, c)
+        }
+
+        let coeffs = WetMatchCoeffs::new(48_000.0);
+        let mut matcher = WetMatch::new();
+        for (dry, wet) in [
+            (0.0, 0.0),
+            (0.5, 0.0),
+            (0.0, 0.5),
+            (f32::MAX, f32::MIN_POSITIVE),
+            (f32::NAN, 1.0),
+            (1.0, f32::INFINITY),
+        ] {
+            for amount in [0.0, 0.5, 1.0, -1.0, 9.0] {
+                let _ = run(&mut matcher, dry, wet, amount, &coeffs);
+            }
+            matcher.reset();
         }
     }
 }

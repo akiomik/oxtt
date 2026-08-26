@@ -3,7 +3,7 @@
 | File | What it is |
 | --- | --- |
 | `dry.wav` | An FM bass from a Syntakt, growling. A1 (55 Hz), 2.5 s, stereo 32-bit float |
-| `wet-octaves.wav` | The default geometry on an A minor chord, with drive and noise up |
+| `wet-octaves.wav` | The default geometry on an A minor chord, at seven tenths colour |
 | `wet-stretched.wav` | Octave pairs, detuned 35 cents an octave, post-drive after the split |
 
 The renders are regenerated rather than recorded, so they follow the DSP
@@ -55,16 +55,17 @@ geometries. A line is not.**
 ```sh
 cargo run --release -p hyperglare-render -- \
   --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-octaves.wav \
-  --notes 33,40,45 --geometry octaves \
-  --drive 0.6 --noise 0.6 --decay 0.8 --color 1.0
+  --notes 33,40,45 --geometry octaves --decay 0.8 --color 0.7
 
 cargo run --release -p hyperglare-render -- \
   --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-stretched.wav \
   --notes 33,40,45 --geometry octave-pairs --stretch 35 --drift 12 \
-  --drive 0.7 --noise 0.7 --decay 1.2 \
-  --sear 0.5 --sear-placement before-split --width 1.0 --color 1.3
+  --decay 1.2 --sear 0.5 --sear-placement before-split --width 1.0 --color 0.9
 ```
 
 Read the reported `normalization_gain_db`: a setting that needed a large
 correction was mostly a level change, which is half of what a comparison is
-for. These two needed 12.4 dB and 4.6 dB.
+for. These two need −0.9 dB and −4.7 dB, which is a change from the 12.4 and
+4.6 they needed before the wet was matched to the dry — the wet is now the
+same size as the thing it is mixed against, so the render arrives close to the
+level it should be.

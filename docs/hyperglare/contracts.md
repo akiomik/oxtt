@@ -140,6 +140,24 @@ are made not to:
 
 The decay is a third: see section 6.
 
+**And the wet is matched to the dry, which is the one that makes the mix knob
+work.** How loud the bank comes out depends on how much of the input's spectrum
+lands on the grid, and that varied by about 20 dB across real material. A
+linear crossfade between signals 20 dB apart is not a crossfade: measured on a
+percussive source, nine tenths of `color` did nothing and the whole transition
+happened in its last tenth. Matched, the same sweep is monotonic across the
+range. `wet_match` at zero restores the raw behaviour for a caller who wants
+the resonators at whatever level they were excited to.
+
+The correction is measured on the mid and applied to both channels as a ratio.
+A matcher per channel would read the dry's own left/right balance and print it
+onto a wet that has no image of its own, which is a width manufactured from a
+level rather than one that is there.
+
+It holds while the input is silent. A ratio of two decaying envelopes says
+nothing, and sweeping the gain across a tail would reshape the one part of the
+output that is the effect's own.
+
 ## 5.1 Stereo
 
 **The wet path is mono under `SearPlacement::AfterSum`.** Once the resonators

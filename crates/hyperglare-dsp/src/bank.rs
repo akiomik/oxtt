@@ -174,8 +174,16 @@ impl Default for BankParams {
             grid: Grid::default(),
             decay_t60_s: 0.6,
             q_max: 500.0,
-            compensation_exponent: 0.5,
-            tilt: 0.0,
+            // M0's answers, not neutral values. The compensation's stated
+            // range was 0.25 to 0.5, and listening put it at the lower end:
+            // at 0.5 the slope above the breakpoint is -3 dB per octave, and
+            // over the three octaves to the top of the band that is a
+            // deliberate 9 dB of darkening nobody asked for. At 0.25 it is
+            // -1.5 dB per octave, and a tilt of 0.5 is +1.5 — so the two
+            // together leave the band about flat above the breakpoint, which
+            // is where the comparison landed.
+            compensation_exponent: 0.25,
+            tilt: 0.5,
             drift_cents: 0.0,
             voices: 4,
         }
@@ -499,11 +507,19 @@ mod tests {
         (sum_sq / counted as f64).sqrt() as f32
     }
 
+    /// A bank set up to isolate whatever a test is measuring.
+    ///
+    /// `tilt` is explicitly flat. The shipped default is not — M0 chose a
+    /// half-open tilt to sit against the compensation's slope — and a spectral
+    /// slope is a confound for every test in this module that measures a gain
+    /// or a level. Inheriting it would make these tests measure the default
+    /// rather than the thing they name.
     fn params(decay: f32, q_max: f32) -> BankParams {
         BankParams {
             decay_t60_s: decay,
             q_max,
             voices: 1,
+            tilt: 0.0,
             ..BankParams::default()
         }
     }

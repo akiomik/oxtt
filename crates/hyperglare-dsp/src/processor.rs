@@ -53,6 +53,7 @@ use effectkit::filter::{Biquad, biquad_coeffs};
 
 use crate::bank::{BankParams, ResonatorBank};
 use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams, shape};
+use crate::wet_match::{WetMatch, WetMatchCoeffs};
 
 /// Where the anti-alias low-pass sits, as a fraction of the sample rate.
 ///
@@ -110,6 +111,12 @@ pub struct HyperglareParams {
     /// `AfterSum` the wet is mono, so whatever width the output has is the
     /// dry's — and at a `color` of one or more there is no dry.
     pub width: f32,
+    /// How much of the wet's level difference from the dry to remove.
+    ///
+    /// `1.0` makes [`color`](Self::color) a real crossfade; `0.0` leaves the
+    /// resonators at whatever level the input happened to excite them to. See
+    /// [`crate::wet_match`] for why the default is not zero.
+    pub wet_match: f32,
     /// Dry/wet, `0.0` to `2.0`.
     ///
     /// Zero is the input untouched, one is the resonators alone, and the range
@@ -131,6 +138,7 @@ impl Default for HyperglareParams {
             sear_placement: SearPlacement::default(),
             sear: 0.0,
             width: 0.6,
+            wet_match: 1.0,
             color: 1.0,
             input_gain_db: 0.0,
             output_gain_db: 0.0,
@@ -145,6 +153,8 @@ pub struct HyperglareProcessor<const N: usize> {
     exciter: Exciter,
     exciter_coeffs: ExciterCoeffs,
     anti_alias: [Biquad; 2],
+    wet_match: WetMatch,
+    wet_match_coeffs: WetMatchCoeffs,
     params: HyperglareParams,
     sample_rate: f32,
 }
@@ -158,6 +168,8 @@ impl<const N: usize> HyperglareProcessor<N> {
             exciter: Exciter::new(),
             exciter_coeffs: ExciterCoeffs::new(sample_rate),
             anti_alias: [Biquad::default(); 2],
+            wet_match: WetMatch::new(),
+            wet_match_coeffs: WetMatchCoeffs::new(sample_rate),
             params,
             sample_rate,
         };
@@ -169,6 +181,8 @@ impl<const N: usize> HyperglareProcessor<N> {
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         self.exciter_coeffs = ExciterCoeffs::new(sample_rate);
+        self.wet_match_coeffs = WetMatchCoeffs::new(sample_rate);
+        self.wet_match.reset();
         let coeffs = biquad_coeffs(ANTI_ALIAS_RATIO * sample_rate, sample_rate, false);
         for stage in &mut self.anti_alias {
             stage.set_coeffs(coeffs);
@@ -199,6 +213,7 @@ impl<const N: usize> HyperglareProcessor<N> {
         for stage in &mut self.anti_alias {
             stage.reset_state();
         }
+        self.wet_match.reset();
     }
 
     /// One stereo frame in, one stereo frame out.
@@ -226,6 +241,28 @@ impl<const N: usize> HyperglareProcessor<N> {
         let [left_stage, right_stage] = &mut self.anti_alias;
         wet_l = left_stage.process(wet_l);
         wet_r = right_stage.process(wet_r);
+
+        // Scaled to the dry before the mix, so that `color` crossfades between
+        // two things of comparable size rather than between a signal and one
+        // twenty decibels under it.
+        //
+        // One correction for the pair, measured on the mids and applied to
+        // both. A matcher per channel would read the dry's own left/right
+        // balance and print it onto a wet that has no image of its own, which
+        // is a width manufactured from a level rather than one that is there.
+        let wet_mid = f32::midpoint(wet_l, wet_r);
+        let matched =
+            self.wet_match
+                .process(mid, wet_mid, self.params.wet_match, &self.wet_match_coeffs);
+        // The correction is a ratio, so apply it as one rather than replacing
+        // the pair with the mid it was measured on.
+        let correction = if wet_mid.abs() > f32::EPSILON {
+            matched / wet_mid
+        } else {
+            1.0
+        };
+        wet_l *= correction;
+        wet_r *= correction;
 
         let (dry_gain, wet_gain) = mix_gains(self.params.color);
         let output = db_to_amp(self.params.output_gain_db);
@@ -588,6 +625,7 @@ mod tests {
             },
             sear: 1.0,
             width: 1.0,
+            wet_match: 1.0,
             color: 2.0,
             input_gain_db: 24.0,
             output_gain_db: 24.0,
