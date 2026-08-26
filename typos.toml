@@ -7,3 +7,7 @@ mis = "mis"
 # Elektron Syntakt, one of the line-level sources the input stage is for
 # (ADR 0009, docs/bela/).
 Syntakt = "Syntakt"
+# "-Ein" is grep's combined flag cluster (-E -i -n), not a misspelling of "In".
+Ein = "Ein"
+# "DOUT" is the MCP3008 ADC's data-out pin name (docs/raspberry-pi/), not "DOUBT".
+DOUT = "DOUT"
