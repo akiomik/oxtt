@@ -34,8 +34,18 @@ const NYQUIST_RATIO: f32 = 0.45;
 /// Q value for each stage of an LR4 with a Butterworth characteristic.
 const Q_BUTTERWORTH: f32 = FRAC_1_SQRT_2;
 
+/// The highest centre or cutoff frequency the coefficients are computed for.
+///
+/// Both families clamp to this rather than to Nyquist, so a caller placing
+/// filters itself — a resonator bank choosing where its partials go — can ask
+/// where the ceiling is instead of discovering it as a pile-up on the clamp.
+#[must_use]
+pub fn max_centre_hz(sample_rate: f32) -> f32 {
+    (NYQUIST_RATIO * sample_rate).max(MIN_CUTOFF_HZ)
+}
+
 fn clamp_cutoff(cutoff_hz: f32, sample_rate: f32) -> f32 {
-    let max_hz = (NYQUIST_RATIO * sample_rate).max(MIN_CUTOFF_HZ);
+    let max_hz = max_centre_hz(sample_rate);
     // `f32::clamp` asserts `min <= max`; `max_hz` is runtime-computed, so the
     // optimizer can't prove that bound and treats the assert as reachable
     // (breaks the no-panic proof on `OttProcessor::process`/`reset`, docs/oxtt/contracts.md

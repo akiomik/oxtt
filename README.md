@@ -114,6 +114,7 @@ See [`docs/effectkit/bela/control-surface-setup.md`](docs/effectkit/bela/control
 Technical documentation lives under `docs/`, namespaced by project ([ADR 0015](docs/decisions/0015-documentation-is-namespaced-by-project.md)):
 
 - [`docs/oxtt/`](docs/oxtt/) — this effect. [`architecture.md`](docs/oxtt/architecture.md) is the component structure, signal flow, state ownership and real-time boundaries; [`contracts.md`](docs/oxtt/contracts.md) is the normative DSP and audio-callback contracts. Under it, what `oxtt` measured on each board: JACK-over-USB setup and audio-stability/latency verification on a [Raspberry Pi 5](docs/oxtt/raspberry-pi/), audio verification and the converter noise floor on a [Bela Gem](docs/oxtt/bela/)
+- [`docs/hyperglare/`](docs/hyperglare/) — a second effect, in progress: a resonator bank that colours an input with a chord. [`contracts.md`](docs/hyperglare/contracts.md) is what its DSP core guarantees so far, and says which sections are still waiting on code
 - [`docs/effectkit/`](docs/effectkit/) — the effect-independent half: the six-pot control surface's wiring and hardware verification, on [both](docs/effectkit/bela/) [boards](docs/effectkit/raspberry-pi/)
 - [`docs/decisions/`](docs/decisions/) — design decisions and their rationale (ADRs). Flat across all three projects, and append-only
 - [`docs/development.md`](docs/development.md) — build, lint, test, and local JACK setup, including macOS notes

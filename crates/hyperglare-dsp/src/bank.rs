@@ -65,7 +65,7 @@
 
 use core::f32::consts::{LN_2, LN_10, PI};
 
-use effectkit::filter::{Svf, SvfCoeffs};
+use effectkit::filter::{Svf, SvfCoeffs, max_centre_hz};
 
 use crate::grid::Grid;
 
@@ -85,6 +85,24 @@ const LN_1000: f32 = 6.907_755_3;
 /// Comparing two exponents by ear is otherwise comparing two loudnesses, and
 /// the louder one wins every time.
 pub const REFERENCE_DECAY_S: f32 = 1.0;
+
+/// The note the bank measures a geometry's *density* at.
+///
+/// A bass fundamental, because that is what the effect is applied to.
+///
+/// The count of resonators one voice produces differs by a factor of twenty
+/// between the cheapest geometry and the dearest, and an uncompensated bank is
+/// therefore about 13 dB louder on one than on the other. Choosing between
+/// them by ear would then be choosing a loudness, which is the same trap
+/// [`REFERENCE_DECAY_S`] exists to avoid — and the geometry is the axis where
+/// the comparison matters most.
+///
+/// **Measured at a fixed note rather than at the chord being played**, for the
+/// same reason [`BankParams::voices`] divides by the configured count rather
+/// than the live one: a density read off the live chord would move when a note
+/// joined it, and a bank with a second of tail would duck audibly. A fixed
+/// note makes the divisor a property of the settings alone.
+pub const REFERENCE_NOTE_HZ: f32 = 60.0;
 
 /// Decibels per octave of spectral tilt at full deflection.
 ///
@@ -122,6 +140,15 @@ pub struct BankParams {
     ///
     /// Deterministic rather than random, so that two renders of the same
     /// settings are the same file and can be compared.
+    ///
+    /// **The spread is over slot positions, not over the notes sounding.** A
+    /// voice's share is fixed by where it sits in the table an allocator hands
+    /// over, so the same chord played into two different slot assignments
+    /// detunes differently. That is a property an allocator has to know about
+    /// — a voice-stealing one that reuses slots in a different order will not
+    /// reproduce a chord's detune — and it is left this way because the
+    /// alternative, numbering only the sounding voices, moves every other
+    /// voice's tuning whenever one note is added or released.
     pub drift_cents: f32,
     /// How many voices the bank is *configured* for.
     ///
@@ -131,6 +158,9 @@ pub struct BankParams {
     /// to a sustaining chord would duck the notes already ringing, which on an
     /// effect with a second of tail is very audible and is not what any
     /// instrument does. A chord is louder than one note.
+    ///
+    /// The geometry's density is divided out alongside it, at
+    /// [`REFERENCE_NOTE_HZ`].
     pub voices: usize,
 }
 
@@ -155,7 +185,10 @@ impl Default for BankParams {
 /// here" is audible, and "the Q stops at 500" is not.
 #[must_use]
 pub fn q_max_for_breakpoint(f_star_hz: f32, decay_t60_s: f32) -> f32 {
-    f_star_hz * PI * decay_t60_s.max(MIN_DECAY_S) / LN_1000
+    // Floored the same way `breakpoint_hz` floors its Q, so the two stay
+    // inverses over the whole domain rather than only over the sensible part.
+    let q = f_star_hz.max(0.0) * PI * decay_t60_s.max(MIN_DECAY_S) / LN_1000;
+    q.max(MIN_Q_MAX)
 }
 
 /// The frequency above which the Q cap shortens the decay.
@@ -238,7 +271,12 @@ impl<const N: usize> ResonatorBank<N> {
     /// with the coefficients, so a large retune glides rather than jumps —
     /// deliberately, because a jump is a click and a glide is a portamento.
     pub fn retune(&mut self, notes_hz: &[f32], params: &BankParams, sample_rate: f32) {
-        let nyquist = sample_rate / 2.0;
+        // Not `sample_rate / 2.0`. The filter clamps its own centre frequency
+        // below Nyquist, and a grid point in the gap would be silently folded
+        // onto the clamp — several resonators piled on one frequency, which is
+        // exactly what the grid skips points to avoid. Asking the filter where
+        // its ceiling is keeps the grid's promise instead of half-keeping it.
+        let nyquist = max_centre_hz(sample_rate);
         let t60 = params.decay_t60_s.max(MIN_DECAY_S);
         let q_max = params.q_max.max(MIN_Q_MAX);
         let bw_floor = LN_1000 / (PI * t60);
@@ -276,12 +314,23 @@ impl<const N: usize> ResonatorBank<N> {
 
         // Filters that have just come into use start from rest; the ones that
         // were already sounding keep their state, tails and all.
-        for f in self.filters.iter_mut().skip(self.active).take(written) {
+        for f in self
+            .filters
+            .iter_mut()
+            .skip(self.active)
+            .take(written.saturating_sub(self.active))
+        {
             f.reset_state();
         }
         self.active = written;
         let configured = f32::from(u16::try_from(params.voices.max(1)).unwrap_or(u16::MAX));
-        self.voice_norm = 1.0 / configured.sqrt();
+        // Resonators are mutually incoherent, so the sum grows as the square
+        // root of their number: divide by the square root of how many the
+        // settings ask for, and neither the voice count nor the geometry is
+        // also a volume control.
+        let density = params.grid.count(REFERENCE_NOTE_HZ, nyquist).max(1);
+        let density = f32::from(u16::try_from(density).unwrap_or(u16::MAX));
+        self.voice_norm = 1.0 / (configured * density).sqrt();
     }
 
     /// One sample through every sounding resonator.
@@ -368,6 +417,26 @@ mod tests {
     /// tail has had time to establish itself.
     fn noise_rms(bank: &mut Bank, seconds: f32) -> f32 {
         // A deterministic generator: an A/B has to differ only in the setting.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let n = (SR * seconds) as usize;
+        let mut sum_sq = 0.0f64;
+        let mut counted = 0usize;
+        for i in 0..n {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let x = ((state >> 40) as f32 / 8_388_608.0) - 1.0;
+            let y = bank.process(x);
+            if i > n / 2 {
+                sum_sq += f64::from(y) * f64::from(y);
+                counted += 1;
+            }
+        }
+        (sum_sq / counted as f64).sqrt() as f32
+    }
+
+    /// The same measurement for a bank large enough to hold a harmonic series.
+    fn noise_rms_big(bank: &mut ResonatorBank<1024>, seconds: f32) -> f32 {
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
         let n = (SR * seconds) as usize;
         let mut sum_sq = 0.0f64;
@@ -583,6 +652,63 @@ mod tests {
         );
     }
 
+    /// The comparison the three geometries exist for has to be a comparison of
+    /// sound, not of loudness. Uncompensated, a harmonic series runs about
+    /// twenty times as many resonators as an octave grid and is therefore some
+    /// 13 dB louder — and the louder one wins every time.
+    #[test]
+    fn the_geometries_are_level_matched() {
+        let level = |geometry: Geometry| {
+            let settings = BankParams {
+                grid: Grid {
+                    geometry,
+                    ..Grid::default()
+                },
+                voices: 1,
+                ..params(0.6, 500.0)
+            };
+            let mut bank = ResonatorBank::<1024>::new();
+            bank.retune(&[60.0], &settings, SR);
+            (bank.active(), 20.0 * noise_rms_big(&mut bank, 3.0).log10())
+        };
+        let (n_oct, oct) = level(Geometry::Octaves);
+        let (n_pair, pair) = level(Geometry::OctavePairs);
+        let (n_harm, harm) = level(Geometry::Harmonics);
+
+        // The densities really do differ by the order of magnitude that makes
+        // this worth compensating.
+        assert!(n_pair >= 2 * n_oct, "{n_oct} vs {n_pair}");
+        assert!(n_harm > 15 * n_oct, "{n_oct} vs {n_harm}");
+
+        for (name, db) in [("pairs", pair), ("harmonics", harm)] {
+            assert!(
+                (db - oct).abs() < 2.0,
+                "{name} is {} dB from octaves ({oct} vs {db}); the geometries \
+                 must be compared at the same loudness",
+                db - oct
+            );
+        }
+    }
+
+    /// Density is read at a fixed note, so a chord that grows does not duck
+    /// the notes already ringing — the same property the voice count has.
+    #[test]
+    fn adding_a_note_does_not_duck_the_ones_already_sounding() {
+        let settings = BankParams {
+            voices: 4,
+            ..params(0.6, 500.0)
+        };
+        let mut bank = Bank::new();
+        bank.retune(&[110.0], &settings, SR);
+        let before = bank.voice_norm;
+        bank.retune(&[110.0, 164.8, 220.0], &settings, SR);
+        assert!(
+            (bank.voice_norm - before).abs() < 1e-6,
+            "the divisor moved when a note joined: {before} -> {}",
+            bank.voice_norm
+        );
+    }
+
     /// A silent voice contributes nothing and does not consume capacity.
     #[test]
     fn non_positive_notes_are_skipped() {
@@ -630,6 +756,33 @@ mod tests {
         );
         assert_eq!(small.active(), 8);
         assert_eq!(small.capacity(), 8);
+    }
+
+    /// Capacity is spent voice by voice in the order the caller lists them, so
+    /// a chord that does not fit loses its *last* voices rather than thinning
+    /// all of them. An allocator that cares which notes survive has to order
+    /// the table itself; the bank does not choose for it.
+    #[test]
+    fn capacity_is_spent_in_order_so_the_last_voices_are_the_ones_dropped() {
+        let settings = params(0.6, 500.0);
+        let per_voice = settings.grid.count(110.0, SR / 2.0);
+        assert!(per_voice >= 6, "expected a useful count, got {per_voice}");
+
+        // Room for one voice and a little more.
+        let mut bank = ResonatorBank::<9>::new();
+        bank.retune(&[110.0, 220.0, 440.0], &settings, SR);
+        assert_eq!(bank.active(), 9);
+
+        // The first voice is whole; what is left is the beginning of the
+        // second, and the third never starts.
+        let mut first = ResonatorBank::<9>::new();
+        first.retune(&[110.0], &settings, SR);
+        let whole = first.active();
+        assert!(whole <= 9, "the first voice should fit: {whole}");
+        assert!(
+            bank.active() > whole,
+            "the second voice should get the remainder: {whole} of 9"
+        );
     }
 
     /// Nothing the bank can be asked for produces a non-finite sample.

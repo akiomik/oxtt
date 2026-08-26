@@ -53,6 +53,7 @@ jobs:
         run: >-
           cargo test --release --locked
           -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls
+          -p hyperglare-dsp
 
   pi-controls:
     # `effectkit-controls-pi` depends on Linux-only `rppal`, so it is off the

@@ -161,14 +161,39 @@ impl Grid {
     /// was pressed. Running both ways and letting the band do the limiting is
     /// what makes those three constant.
     pub fn frequencies(&self, note_hz: f32, nyquist_hz: f32, out: &mut [f32]) -> usize {
+        let mut sink = Sink::new(out);
+        self.generate(note_hz, nyquist_hz, |hz| sink.push(hz));
+        sink.written()
+    }
+
+    /// How many points [`frequencies`](Self::frequencies) would produce, with
+    /// no buffer and nothing written.
+    ///
+    /// The bank uses this to divide out the *density* of a geometry, so that
+    /// choosing between geometries is not also choosing a loudness.
+    #[must_use]
+    pub fn count(&self, note_hz: f32, nyquist_hz: f32) -> usize {
+        let mut n = 0usize;
+        self.generate(note_hz, nyquist_hz, |_| {
+            n = n.saturating_add(1);
+            true
+        });
+        n
+    }
+
+    /// Walks the grid, handing each frequency to `emit` until it returns
+    /// `false`.
+    ///
+    /// One generator behind both public entry points, so a count can never
+    /// disagree with what a fill would have produced.
+    fn generate(&self, note_hz: f32, nyquist_hz: f32, mut emit: impl FnMut(f32) -> bool) {
         let high = self.high_hz.min(nyquist_hz);
         // Written as positive tests rather than negated ones so that a NaN
         // takes the early return instead of falling through a comparison that
         // is false for both directions.
         if !note_hz.is_finite() || note_hz <= 0.0 || high <= self.low_hz {
-            return 0;
+            return;
         }
-        let mut sink = Sink::new(out);
         match self.geometry {
             Geometry::Octaves | Geometry::OctavePairs => {
                 let paired = self.geometry == Geometry::OctavePairs;
@@ -180,13 +205,13 @@ impl Grid {
                     if f < self.low_hz || f >= high {
                         continue;
                     }
-                    if !sink.push(f) {
-                        break;
+                    if !emit(f) {
+                        return;
                     }
                     if paired {
                         let paired_hz = f * spread;
-                        if paired_hz < high && !sink.push(paired_hz) {
-                            break;
+                        if paired_hz < high && !emit(paired_hz) {
+                            return;
                         }
                     }
                 }
@@ -199,15 +224,14 @@ impl Grid {
                 for k in 1..=MAX_HARMONICS {
                     let f = note_hz * (exponent * harmonic_ln(k)).exp();
                     if f >= high {
-                        break;
+                        return;
                     }
-                    if f >= self.low_hz && !sink.push(f) {
-                        break;
+                    if f >= self.low_hz && !emit(f) {
+                        return;
                     }
                 }
             }
         }
-        sink.written()
     }
 }
 
@@ -269,6 +293,12 @@ fn harmonic_ln(k: usize) -> f32 {
 /// rather than papered over with a second unit, because the comparison this
 /// enum exists for is exactly what decides whether the harmonic geometry
 /// survives at all — and 150 partials a voice is a large part of that answer.
+///
+/// **A negative detune does not reach the top of the band at all.** The
+/// exponent falls below one, so the partials crowd together and 9 kHz would
+/// need about 240 of them; the ceiling stops it around 6.3 kHz. That is a
+/// ceiling, not a truncation — raising the bank's capacity does not help — and
+/// it is another part of the same answer.
 pub const MAX_HARMONICS: usize = 160;
 
 #[cfg(test)]
@@ -333,6 +363,32 @@ mod tests {
         // Twenty times the octave grid's count, for the same band. This is the
         // number the geometry has to justify by sounding better.
         assert!(f.len() > 15 * collect(&Grid::default(), BASS_HZ).len());
+    }
+
+    /// A negative detune crowds a harmonic series together, and the ceiling
+    /// stops it before the top of the band. Raising a bank's capacity does not
+    /// help — the limit is `MAX_HARMONICS`, not the buffer — which is part of
+    /// what the geometry has to answer for.
+    #[test]
+    fn a_negative_detune_leaves_a_harmonic_series_short_of_the_band() {
+        let reach = |detune: f32| {
+            let grid = Grid {
+                geometry: Geometry::Harmonics,
+                detune_cents_per_octave: detune,
+                ..Grid::default()
+            };
+            let f = collect(&grid, BASS_HZ);
+            (f.len(), *f.last().unwrap())
+        };
+        let (_, top_flat) = reach(0.0);
+        let (n_low, top_low) = reach(-100.0);
+        assert!(top_flat > DEFAULT_HIGH_HZ * 0.9, "{top_flat}");
+        assert!(
+            top_low < DEFAULT_HIGH_HZ * 0.75,
+            "a negative detune should fall short of the band, reached {top_low}"
+        );
+        // Short because of the partial ceiling, not because of the buffer.
+        assert!(n_low >= MAX_HARMONICS - 2, "stopped at {n_low} partials");
     }
 
     /// Both directions from the note, so the count does not depend on which
@@ -433,6 +489,12 @@ mod tests {
             BASS_HZ,
         );
         assert!(paired.len() >= 2 * plain.len() - 1);
+        assert!(
+            paired.len() <= 2 * plain.len(),
+            "pairs should double the points, not more: {} vs {}",
+            paired.len(),
+            plain.len()
+        );
         assert!(*paired.last().unwrap() < DEFAULT_HIGH_HZ);
         let spread = 12.0 * (paired[1] / paired[0]).log2() * 100.0;
         assert!(

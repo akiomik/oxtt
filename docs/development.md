@@ -214,7 +214,7 @@ cargo test --all-targets
 ```
 
 Separately, a release build proves the real-time path panic-free
-([contracts.md §6](oxtt/contracts.md#6-real-time-callback)). The proof only holds
+([`effectkit/realtime.md`](effectkit/realtime.md)). The proof only holds
 under full optimization, so it does not run as part of the debug suite above,
 and it is asked for crate by crate rather than left to `--workspace`:
 

@@ -42,7 +42,8 @@ repository = "https://github.com/akiomik/oxtt"
 license = "MIT OR Apache-2.0"
 
 # The real-time set: what a crate on or below the audio callback is held to
-# (docs/oxtt/contracts.md §6). Inherited with `[lints] workspace = true`.
+# (docs/effectkit/realtime.md). Inherited with `[lints] workspace = true`, so it
+# reaches every effect's crates, not just oxtt's.
 #
 # Inheriting is all-or-nothing — Cargo refuses a member that both inherits and
 # overrides — so the development/soak-test tool crates spell out their own

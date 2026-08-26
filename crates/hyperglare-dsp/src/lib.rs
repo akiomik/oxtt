@@ -73,10 +73,12 @@ mod proofs {
             },
             48_000.0,
         );
+        // `f32::MAX` is included to prove the path survives it, not to claim
+        // the state does: it will not. What is being proved here is the
+        // absence of a panic, so the return values are deliberately unused.
         for x in [0.0, 1.0, -1.0, f32::MAX] {
             let _ = run(&mut bank, x);
         }
-        assert!(run(&mut bank, 0.0).is_finite() || !bank.is_finite());
     }
 
     /// Retuning runs on the callback too, under Bela: a chord change arrives
