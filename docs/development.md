@@ -219,12 +219,14 @@ under full optimization, so it does not run as part of the debug suite above,
 and it is asked for crate by crate rather than left to `--workspace`:
 
 ```sh
-cargo test --release -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls
+cargo test --release \
+  -p effectkit -p effectkit-controls -p oxtt-dsp -p oxtt-controls -p hyperglare-dsp
 ```
 
 Each crate proves what is closed inside it — `effectkit`'s per-sample
 primitives, `SixPotBypassConditioner::update` and `PotTravel::from_counts`,
-`OttProcessor`'s callback methods, and `oxtt_controls::assign`. Their
+`OttProcessor`'s callback methods, `oxtt_controls::assign`, and
+`hyperglare-dsp`'s grid, retune and sample paths. Their
 composition is deliberately not proved anywhere, so that a failure names the
 crate that caused it. **Add a crate to this list, and to the same step in
 `.github/workflows/ci.yml`, when it gains a `#[no_panic]`.**
@@ -237,7 +239,8 @@ The suite is organized by module and none of it requires a running JACK server:
 - `crates/oxtt-dsp/src/dsp/crossover.rs` — crossover reconstruction and phase-compensator tests (`crates/effectkit/src/filter.rs` holds the biquad and `Lr4` these exercise)
 - `crates/oxtt-dsp/src/dsp/compressor.rs` — dual-threshold gain computation tests
 - `crates/oxtt-dsp/src/dsp/envelope.rs` — envelope follower and time-scaling tests
-- `crates/effectkit/src/` — the effect-independent primitives: parameter smoothing, the biquad and `Lr4` sections, the dB conversions and the floor they respect, and the input meter
+- `crates/effectkit/src/` — the effect-independent primitives: parameter smoothing, the biquad and `Lr4` sections for a crossover, the TPT state-variable filter and its normalised band-pass for a resonator, the dB conversions and the floor they respect, and the input meter
+- `crates/hyperglare-dsp/src/` — the second effect's DSP core: `grid.rs` holds the three resonator geometries and the arithmetic that decides between them, `bank.rs` the tuned band-pass bank, its Q cap and the gain law that keeps the geometries and the decay from also being volume controls ([`hyperglare/contracts.md`](hyperglare/contracts.md))
 - `crates/effectkit-controls/src/` — control-surface conditioning (jitter filter, deadband, switch debounce, normalisation onto `PotTravel`), including that the conditioning constants are the surface's rather than this layer's ([ADR 0012](decisions/0012-the-jitter-deadband-belongs-to-the-control-source.md)), and `gem.rs`'s analog-reading-to-pot-position conversion, the board's own measured deadband and the read decimator
 - `crates/oxtt-controls/src/lib.rs` — the pot-to-parameter assignment, and the conditioning/assignment pair driven end to end
 - `crates/effectkit-controls-pi/src/lib.rs` — the MCP3008 command/response encoding (Linux only)

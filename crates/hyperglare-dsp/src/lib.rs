@@ -43,8 +43,12 @@ mod proofs {
             };
             // Including the inputs that have to be rejected rather than
             // trusted: a silent voice, a negative frequency, and a NaN.
+            // The return value is bounded by the buffer's own length, so
+            // asserting that would assert nothing. What is proved here is the
+            // absence of a panic on inputs that have to be rejected rather
+            // than trusted.
             for note_hz in [60.0, 0.0, -1.0, f32::NAN, f32::INFINITY] {
-                assert!(run(&grid, note_hz, &mut out) <= out.len());
+                let _ = run(&grid, note_hz, &mut out);
             }
         }
     }

@@ -113,7 +113,11 @@ const TILT_DB_PER_OCTAVE: f32 = 3.0;
 /// Shortest decay the bank computes a Q for, in seconds.
 const MIN_DECAY_S: f32 = 0.005;
 /// Lowest cap the bank computes a Q for. Below `0.5` there is no resonance.
-const MIN_Q_MAX: f32 = 0.5;
+///
+/// Public because it is part of what [`q_max_for_breakpoint`] returns: the
+/// floor is where that function stops being an inverse, and a caller cannot
+/// see that without the number.
+pub const MIN_Q_MAX: f32 = 0.5;
 
 /// What the bank needs to know, recomputed whenever a knob or a chord moves.
 ///
@@ -180,13 +184,23 @@ impl Default for BankParams {
 
 /// The Q cap that puts the breakpoint at `f_star_hz` for a given decay.
 ///
-/// The inverse of `f* = q_max · ln(1000) / (pi · T60)`, provided because
-/// choosing a cap is choosing a frequency: "the bank stops sustaining above
-/// here" is audible, and "the Q stops at 500" is not.
+/// Inverts `f* = q_max · ln(1000) / (pi · T60)`, provided because choosing a
+/// cap is choosing a frequency: "the bank stops sustaining above here" is
+/// audible, and "the Q stops at 500" is not.
+///
+/// The result is floored at [`MIN_Q_MAX`], the same value [`ResonatorBank`]
+/// clamps to, **so the Q handed back is always the Q the bank will actually
+/// use** — which is what the floor buys, and it is not the same as being an
+/// inverse everywhere.
+///
+/// The two are inverses above `MIN_Q_MAX · ln(1000) / (pi · T60)`, about
+/// 1.1 Hz at [`REFERENCE_DECAY_S`]. Below that both saturate on the floor and
+/// a round trip returns that frequency rather than the one asked for. A
+/// breakpoint of one hertz is not a setting anything has a use for; the floor
+/// is there to keep a degenerate request off the panic path, not to extend the
+/// inverse.
 #[must_use]
 pub fn q_max_for_breakpoint(f_star_hz: f32, decay_t60_s: f32) -> f32 {
-    // Floored the same way `breakpoint_hz` floors its Q, so the two stay
-    // inverses over the whole domain rather than only over the sensible part.
     let q = f_star_hz.max(0.0) * PI * decay_t60_s.max(MIN_DECAY_S) / LN_1000;
     q.max(MIN_Q_MAX)
 }
@@ -323,14 +337,21 @@ impl<const N: usize> ResonatorBank<N> {
             f.reset_state();
         }
         self.active = written;
-        let configured = f32::from(u16::try_from(params.voices.max(1)).unwrap_or(u16::MAX));
         // Resonators are mutually incoherent, so the sum grows as the square
         // root of their number: divide by the square root of how many the
         // settings ask for, and neither the voice count nor the geometry is
         // also a volume control.
+        //
+        // Capped at the capacity, because a bank that truncates does not have
+        // the resonators the settings asked for — it has `N` of them — and
+        // dividing by a number that is not there would make a bank quiet for
+        // no reason a listener could act on. Every term is a property of the
+        // settings, so this stays free of the live chord and cannot duck.
+        let configured = params.voices.max(1);
         let density = params.grid.count(REFERENCE_NOTE_HZ, nyquist).max(1);
-        let density = f32::from(u16::try_from(density).unwrap_or(u16::MAX));
-        self.voice_norm = 1.0 / (configured * density).sqrt();
+        let asked_for = configured.saturating_mul(density).min(N).max(1);
+        let asked_for = f32::from(u16::try_from(asked_for).unwrap_or(u16::MAX));
+        self.voice_norm = 1.0 / asked_for.sqrt();
     }
 
     /// One sample through every sounding resonator.
@@ -413,30 +434,15 @@ mod tests {
     const SR: f32 = 48_000.0;
     type Bank = ResonatorBank<64>;
 
-    /// Peak of the bank's output when driven by white-ish noise, after the
-    /// tail has had time to establish itself.
-    fn noise_rms(bank: &mut Bank, seconds: f32) -> f32 {
-        // A deterministic generator: an A/B has to differ only in the setting.
-        let mut state = 0x2545_f491_4f6c_dd1d_u64;
-        let n = (SR * seconds) as usize;
-        let mut sum_sq = 0.0f64;
-        let mut counted = 0usize;
-        for i in 0..n {
-            state = state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1);
-            let x = ((state >> 40) as f32 / 8_388_608.0) - 1.0;
-            let y = bank.process(x);
-            if i > n / 2 {
-                sum_sq += f64::from(y) * f64::from(y);
-                counted += 1;
-            }
-        }
-        (sum_sq / counted as f64).sqrt() as f32
-    }
-
-    /// The same measurement for a bank large enough to hold a harmonic series.
-    fn noise_rms_big(bank: &mut ResonatorBank<1024>, seconds: f32) -> f32 {
+    /// RMS of the bank's output under a deterministic noise input, measured
+    /// over the second half of the run so the tail has established itself.
+    ///
+    /// Generic over the capacity so that every level comparison in this module
+    /// is the same measurement: a second copy for a larger bank is a second
+    /// window and a second seed, and the two drift apart the first time one is
+    /// touched.
+    fn noise_rms<const N: usize>(bank: &mut ResonatorBank<N>, seconds: f32) -> f32 {
+        // Deterministic: an A/B has to differ only in the setting.
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
         let n = (SR * seconds) as usize;
         let mut sum_sq = 0.0f64;
@@ -529,7 +535,9 @@ mod tests {
             bank.retune(&[60.0], &settings, SR);
 
             let mut centres = [0.0f32; 64];
-            let n = settings.grid.frequencies(60.0, SR / 2.0, &mut centres);
+            let n = settings
+                .grid
+                .frequencies(60.0, max_centre_hz(SR), &mut centres);
             assert_eq!(n, bank.active());
 
             let mut checked = 0;
@@ -590,7 +598,9 @@ mod tests {
             bank.retune(&[60.0], &settings, SR);
 
             let mut centres = [0.0f32; 64];
-            let n = settings.grid.frequencies(60.0, SR / 2.0, &mut centres);
+            let n = settings
+                .grid
+                .frequencies(60.0, max_centre_hz(SR), &mut centres);
             let above: Vec<(f32, f32)> = centres
                 .iter()
                 .zip(bank.gains.iter())
@@ -669,7 +679,7 @@ mod tests {
             };
             let mut bank = ResonatorBank::<1024>::new();
             bank.retune(&[60.0], &settings, SR);
-            (bank.active(), 20.0 * noise_rms_big(&mut bank, 3.0).log10())
+            (bank.active(), 20.0 * noise_rms(&mut bank, 3.0).log10())
         };
         let (n_oct, oct) = level(Geometry::Octaves);
         let (n_pair, pair) = level(Geometry::OctavePairs);
@@ -706,6 +716,34 @@ mod tests {
             (bank.voice_norm - before).abs() < 1e-6,
             "the divisor moved when a note joined: {before} -> {}",
             bank.voice_norm
+        );
+    }
+
+    /// A bank too small for its settings is not also a quiet one. The divisor
+    /// counts what the bank actually has, so truncation costs resonators
+    /// rather than resonators *and* level.
+    #[test]
+    fn a_truncated_bank_holds_its_level() {
+        let settings = BankParams {
+            grid: Grid {
+                geometry: Geometry::Harmonics,
+                ..Grid::default()
+            },
+            voices: 1,
+            ..params(0.6, 500.0)
+        };
+        let mut roomy = ResonatorBank::<1024>::new();
+        roomy.retune(&[60.0], &settings, SR);
+        let mut cramped = ResonatorBank::<32>::new();
+        cramped.retune(&[60.0], &settings, SR);
+        assert!(roomy.active() > 4 * cramped.active());
+
+        let db = 20.0 * (noise_rms(&mut cramped, 3.0) / noise_rms(&mut roomy, 3.0)).log10();
+        assert!(
+            db.abs() < 2.5,
+            "truncating to {} of {} resonators moved the level by {db} dB",
+            cramped.active(),
+            roomy.active()
         );
     }
 
@@ -765,7 +803,7 @@ mod tests {
     #[test]
     fn capacity_is_spent_in_order_so_the_last_voices_are_the_ones_dropped() {
         let settings = params(0.6, 500.0);
-        let per_voice = settings.grid.count(110.0, SR / 2.0);
+        let per_voice = settings.grid.count(110.0, max_centre_hz(SR));
         assert!(per_voice >= 6, "expected a useful count, got {per_voice}");
 
         // Room for one voice and a little more.
@@ -773,15 +811,29 @@ mod tests {
         bank.retune(&[110.0, 220.0, 440.0], &settings, SR);
         assert_eq!(bank.active(), 9);
 
-        // The first voice is whole; what is left is the beginning of the
-        // second, and the third never starts.
+        // The first voice is whole, the second gets what is left, and the
+        // third never starts.
         let mut first = ResonatorBank::<9>::new();
         first.retune(&[110.0], &settings, SR);
         let whole = first.active();
-        assert!(whole <= 9, "the first voice should fit: {whole}");
+        assert!(
+            whole < 9,
+            "the first voice should fit with room to spare, took {whole} of 9"
+        );
         assert!(
             bank.active() > whole,
             "the second voice should get the remainder: {whole} of 9"
+        );
+
+        // Adding the third voice changes nothing, because there is nothing
+        // left for it. That is what "the last voices are the ones dropped"
+        // means, as against thinning every voice evenly.
+        let mut two = ResonatorBank::<9>::new();
+        two.retune(&[110.0, 220.0], &settings, SR);
+        assert_eq!(
+            two.active(),
+            bank.active(),
+            "the third voice took capacity it should not have had"
         );
     }
 

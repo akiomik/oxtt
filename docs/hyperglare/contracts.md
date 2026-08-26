@@ -51,6 +51,12 @@ cost two orders of magnitude more than the filtering itself.
   them evenly and does not wrap. An allocator that cares which notes survive
   orders the table itself.
 
+  **Truncation costs resonators, not level.** The divisor in section 5 is
+  capped at the capacity, so a bank too small for its settings is not also a
+  quiet one. What a caller loses is the top of its chord, which is a thing it
+  can see in `active()` and act on; a level drop it could only hear would tell
+  it nothing about what to change.
+
 ## 3. Buffer processing
 
 `ResonatorBank::process` takes one sample and returns one sample. There is no
@@ -99,6 +105,10 @@ are made not to:
   reference note. Uncompensated, a harmonic series runs about twenty times the
   resonators an octave grid does and is some 13 dB louder — and a comparison
   between two loudnesses is decided by the louder one, whatever it sounds like.
+
+  The divisor is `min(voices · density, capacity)`: every term is a property of
+  the settings, so it never moves with the chord being played, and it never
+  counts resonators a truncated bank does not have (section 2).
 
 The decay is a third: see section 6.
 
