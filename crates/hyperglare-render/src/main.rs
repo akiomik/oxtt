@@ -78,7 +78,11 @@ struct ParamsArgs {
     high_hz: f32,
 
     /// Decay to 60 dB, in seconds, below the breakpoint.
-    #[arg(long, value_name = "SECONDS", default_value_t = 0.6)]
+    ///
+    /// The default is the knee: colour stops growing there and only the
+    /// reverberation keeps going. Longer is a real setting, and a listener
+    /// called 0.6 "flashy, and it matches the original concept".
+    #[arg(long, value_name = "SECONDS", default_value_t = 0.25)]
     decay: f32,
 
     /// Where the bank stops sustaining and starts ringing.
@@ -119,11 +123,6 @@ struct ParamsArgs {
     /// Gated noise into the bank: what makes everything else ring.
     #[arg(long, default_value_t = 0.5)]
     noise: f32,
-
-    /// How much of the wet's level difference from the dry to remove, so that
-    /// `--color` is a real crossfade. Zero leaves the resonators raw.
-    #[arg(long, value_name = "AMOUNT", default_value_t = 1.0)]
-    wet_match: f32,
 
     /// Post-drive amount.
     #[arg(long, default_value_t = 0.0)]
@@ -214,7 +213,6 @@ impl From<&ParamsArgs> for HyperglareParams {
             sear_placement: args.sear_placement.into(),
             sear: args.sear,
             width: args.width,
-            wet_match: args.wet_match,
             color: args.color,
             input_gain_db: args.input_gain,
             output_gain_db: args.output_gain,
@@ -268,5 +266,9 @@ fn print_report(report: &RenderReport) {
     println!(
         "hyperglare-render: normalization_gain_db={:.2}",
         report.normalization_gain_db
+    );
+    println!(
+        "hyperglare-render: loudness_shortfall_db={:.2}",
+        report.loudness_shortfall_db
     );
 }

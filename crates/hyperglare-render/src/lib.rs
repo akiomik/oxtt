@@ -130,6 +130,13 @@ pub struct RenderReport {
     /// correction is a setting that was mostly a level change, and knowing
     /// that is half of what a comparison is for.
     pub normalization_gain_db: f64,
+    /// How much of the loudness target the peak ceiling cost, in dB.
+    ///
+    /// **Zero means the render is level-matched.** Anything else means the
+    /// output would have clipped at the target and was left quieter, so a
+    /// comparison against it is no longer a fair one — which is a thing to
+    /// know before listening rather than after.
+    pub loudness_shortfall_db: f64,
     /// How many resonators the chord and the geometry produced.
     pub active_resonators: usize,
 }
@@ -215,7 +222,7 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
     }
 
     let target = options.target_lufs.unwrap_or(input_metrics.integrated_lufs);
-    let (matched, gain_db, output_metrics) =
+    let (matched, gain_db, shortfall_db, output_metrics) =
         match_loudness(rendered, spec.sample_rate, target, raw_metrics)?;
     write_stereo_f32(&options.output, spec, &matched)?;
 
@@ -224,6 +231,7 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
         raw: raw_metrics,
         output: output_metrics,
         target_lufs: target,
+        loudness_shortfall_db: shortfall_db,
         normalization_gain_db: gain_db,
         active_resonators: processor.active(),
     })
@@ -245,33 +253,67 @@ fn tail_frames(options: &RenderOptions, sample_rate: u32) -> usize {
     frames
 }
 
-/// Applies gain until the integrated loudness lands on `target`.
+/// The highest true peak this will write.
+///
+/// The same threshold the DSP's own limiter holds, so the renderer cannot
+/// undo the one guarantee the processor makes about its output. Loudness
+/// matching is a gain applied *after* that limiter, and on a source that is
+/// already hot — `ice` arrives at +3.8 dBTP — matching to it walked the
+/// output to +1.6 dBTP and clipped 86 samples.
+const MAX_OUTPUT_DBTP: f64 = -1.0;
+
+/// Applies gain until the integrated loudness lands on `target`, or until the
+/// true peak reaches [`MAX_OUTPUT_DBTP`].
 ///
 /// Iterated rather than solved in one step because the measurement is not
 /// exactly linear in the gain: the gate that R128 applies can admit or exclude
 /// a block as the level moves.
-#[allow(clippy::type_complexity)] // The matched audio, the gain it took, and what it measured.
+///
+/// **The ceiling wins, and the shortfall is reported rather than hidden.**
+/// Limiting into the target instead would change the thing being judged, and
+/// the whole reason for matching loudness is that a comparison between two
+/// loudnesses is decided by the louder one. A render that could not reach the
+/// target is no longer level-matched, and a listener has to be told.
+#[allow(clippy::type_complexity)] // The audio, the gain, the shortfall, the measurement.
 fn match_loudness(
     mut frames: Vec<(f32, f32)>,
     sample_rate: u32,
     target: f64,
     mut metrics: AudioMetrics,
-) -> Result<(Vec<(f32, f32)>, f64, AudioMetrics), RenderError> {
+) -> Result<(Vec<(f32, f32)>, f64, f64, AudioMetrics), RenderError> {
     let mut total_db = 0.0;
+    let apply = |frames: &mut Vec<(f32, f32)>, db: f64| -> Result<_, RenderError> {
+        let gain = db_to_amp(db);
+        for (l, r) in frames.iter_mut() {
+            *l *= gain;
+            *r *= gain;
+        }
+        measure(frames, sample_rate)
+    };
     for _ in 0..MAX_NORMALIZATION_ITERATIONS {
         let error = target - metrics.integrated_lufs;
         if !error.is_finite() || error.abs() <= NORMALIZATION_TOLERANCE_LU {
             break;
         }
-        let gain = db_to_amp(error);
-        for (l, r) in &mut frames {
-            *l *= gain;
-            *r *= gain;
-        }
+        metrics = apply(&mut frames, error)?;
         total_db += error;
-        metrics = measure(&frames, sample_rate)?;
     }
-    Ok((frames, total_db, metrics))
+    // Then back off if that put the peak over. One step: the true peak moves
+    // with the gain exactly, unlike the gated loudness.
+    let over = metrics.true_peak_dbtp - MAX_OUTPUT_DBTP;
+    let shortfall = if over.is_finite() && over > 0.0 {
+        metrics = apply(&mut frames, -over)?;
+        total_db -= over;
+        over
+    } else {
+        0.0
+    };
+    // **What the ceiling cost, not how far the matcher landed from target.**
+    // The loop stops inside a tolerance, so the distance to target is never
+    // quite zero; reporting that as a shortfall would say every render is
+    // unmatched. This field answers one question — did the peak get in the
+    // way — and the tolerance is not an answer to it.
+    Ok((frames, total_db, shortfall, metrics))
 }
 
 /// Integrated loudness and peaks for a stereo stream.
@@ -553,6 +595,77 @@ mod tests {
             report.normalization_gain_db > 10.0,
             "a 20 dB trim should need a large correction, got {}",
             report.normalization_gain_db
+        );
+    }
+
+    /// A loud source cannot walk the output over full scale.
+    ///
+    /// The processor's own limiter holds its output at `-1 dBFS`; loudness
+    /// matching is a gain applied after it, and matching to a source that is
+    /// already hot used to undo the guarantee — the source this is built from
+    /// is deliberately at full scale, as `ice` was at +3.8 dBTP.
+    ///
+    /// The ceiling wins and the shortfall is reported, because a render that
+    /// could not reach the target is no longer level-matched and a listener
+    /// comparing against it needs to know that before listening.
+    #[test]
+    fn a_hot_source_does_not_push_the_output_over_the_ceiling() {
+        let input = scratch("in-hot");
+        source(&input, 1.0);
+        // Take it to full scale, so matching the output back to it has to ask
+        // for more gain than there is headroom for.
+        let (spec, mut frames) = read_stereo_f32(&input).unwrap();
+        let peak = frames
+            .iter()
+            .fold(0.0f32, |m, (l, r)| m.max(l.abs()).max(r.abs()));
+        for (l, r) in &mut frames {
+            *l /= peak;
+            *r /= peak;
+        }
+        write_stereo_f32(&input, spec, &frames).unwrap();
+
+        let output = scratch("out-hot");
+        let report = render(&options(&input, &output, Geometry::Octaves)).unwrap();
+
+        assert!(
+            report.output.true_peak_dbtp <= -1.0 + 0.01,
+            "wrote {} dBTP, over the ceiling",
+            report.output.true_peak_dbtp
+        );
+        assert!(
+            report.loudness_shortfall_db > 0.0,
+            "the ceiling cost loudness and the report said it did not: {} \
+             LUFS against a target of {}",
+            report.output.integrated_lufs,
+            report.target_lufs
+        );
+        // And no sample made it past full scale either, which is what a
+        // listener would actually hear.
+        let (_, written) = read_stereo_f32(&output).unwrap();
+        assert!(
+            written.iter().all(|(l, r)| l.abs() < 1.0 && r.abs() < 1.0),
+            "a sample reached full scale"
+        );
+    }
+
+    /// A source with headroom is matched exactly, so the ceiling is not
+    /// silently costing every render loudness.
+    #[test]
+    fn a_quiet_source_is_matched_without_a_shortfall() {
+        let input = scratch("in-quiet");
+        source(&input, 1.0);
+        let output = scratch("out-quiet");
+        let report = render(&options(&input, &output, Geometry::Octaves)).unwrap();
+        assert!(
+            report.loudness_shortfall_db == 0.0,
+            "a source with headroom reported a shortfall of {}",
+            report.loudness_shortfall_db
+        );
+        assert!(
+            (report.output.integrated_lufs - report.target_lufs).abs() < 0.5,
+            "output {} did not land on {}",
+            report.output.integrated_lufs,
+            report.target_lufs
         );
     }
 
