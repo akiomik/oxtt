@@ -2,7 +2,28 @@
 
 ## Status
 
-Proposed
+Accepted, **scoped to what has been listened to**.
+
+Implemented in `crates/hyperglare-dsp/src/bands.rs` and the excitation path,
+and judged by ear on six sources — the five paired recordings and `oxtt`'s
+drum loop.
+
+**Three things this does not settle**, none of which is a reason to keep it
+proposed and all of which could revise it:
+
+- **The band count and the edges.** Five, at 130 / 260 / 520 / 1040, chosen so
+  that no band sits where the grid puts no resonators. `hyperglare` has never
+  run on a Bela, so the CPU half of that choice is unmeasured.
+- **Material.** Six sources, of which five are the same kind of thing: short
+  foley through one commercial effect. Nothing sustained, nothing with a
+  vocal, nothing long.
+- **Whether the two excitation paths are still two.** See the last consequence
+  below. Per-band excitation was the change that might have separated them and
+  it has not been re-measured.
+
+What would reverse it is a source where a resonator ought to ring on energy
+that is not near its own frequency. Nothing in the five pairs is that, and if
+one turns up this ADR is where to start.
 
 ## Scope
 

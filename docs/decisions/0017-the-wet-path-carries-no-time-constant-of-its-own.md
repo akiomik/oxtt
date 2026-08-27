@@ -2,7 +2,19 @@
 
 ## Status
 
-Proposed
+Accepted, and it closes half of the defect it names.
+
+Implemented in `ResonatorBank::retune` and by the removal of
+`crates/hyperglare-dsp/src/wet_match.rs`. `color` now crossfades against the
+bank; it does not crossfade against `drive`, which moves the wet about 21 dB
+across its range. That half is [ADR 0019](0019-the-waveshaper-is-a-compressor-and-is-normalised-as-one.md),
+and it is a question about the waveshaper's normalisation rather than about
+the bank's level.
+
+**The decay's default is the part most likely to be revised.** 0.25 s is the
+knee on the material measured, and a listener called the old 0.6 s "flashy,
+and it matches the original concept" — so the knob's range is doing real work
+and the default is a judgement about which end is the ordinary one.
 
 ## Scope
 

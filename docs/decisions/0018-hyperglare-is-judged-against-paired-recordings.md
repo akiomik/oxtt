@@ -2,7 +2,17 @@
 
 ## Status
 
-Proposed
+Accepted.
+
+Nothing to implement: this is how ADR 0016 and ADR 0017 were reached, and the
+method has already caught four things since. Two of them were mistakes in
+the measurement rather than in the effect — a `tilt` reading that was 40 times
+too small because the measuring rig masked it, and a `drive` axis that had
+never been swept at all.
+
+**The rule it adds by being accepted** is that a sound change arrives with its
+paired evidence or it does not arrive. What that costs is speed, and what it
+buys is that the last four changes were arguable.
 
 ## Scope
 
