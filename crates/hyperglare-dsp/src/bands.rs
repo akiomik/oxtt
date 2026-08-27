@@ -39,10 +39,21 @@ use effectkit::filter::{Biquad, biquad_coeffs};
 
 /// Where one band ends and the next begins, in hertz.
 ///
-/// Octaves, and only as many as there are resonators to feed. The grid's
-/// default band runs from `DEFAULT_LOW_HZ` to `DEFAULT_HIGH_HZ`
-/// (`crate::grid`), so an edge at 2 kHz would split a region no resonator is
-/// ever placed in — arithmetic whose result is thrown away.
+/// **Octaves, and that is load-bearing rather than tidy.** The gain law
+/// measures a resonator's share as `BW/W_b`, and above the breakpoint `BW`
+/// grows with frequency; the share only stops changing — which is what makes
+/// the compensation flat there — if `W_b` grows at the same rate. A band that
+/// spans two octaves breaks that, and the resonators inside it are lifted
+/// against their neighbours by `(W_b/W_ref)^p`.
+///
+/// So the edges reach as far as the grid does. They ran to 1040 while
+/// `DEFAULT_HIGH_HZ` was 1.8 kHz; at 5 kHz that left a top band four times too
+/// wide, and it showed up as a step in the middle of the band rather than as
+/// anything subtle. **Moving the ceiling means checking these.**
+///
+/// Not further than the grid, either: an edge above the ceiling splits a
+/// region no resonator is ever placed in, which is arithmetic whose result is
+/// thrown away.
 ///
 /// **Fixed rather than derived from the grid.** Deriving them would make
 /// [`SplitCoeffs::new`] depend on [`BankParams`], and it depends on the sample
@@ -52,7 +63,7 @@ use effectkit::filter::{Biquad, biquad_coeffs};
 /// wider band rather than a broken one.
 ///
 /// [`BankParams`]: crate::bank::BankParams
-pub const EDGES: [f32; 4] = [130.0, 260.0, 520.0, 1040.0];
+pub const EDGES: [f32; 6] = [130.0, 260.0, 520.0, 1040.0, 2080.0, 4160.0];
 
 /// How many bands [`EDGES`] cuts the spectrum into.
 pub const BANDS: usize = EDGES.len() + 1;

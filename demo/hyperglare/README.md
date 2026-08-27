@@ -80,12 +80,11 @@ to do it. That detune is 175 cents across five octaves, which a three-note
 triad carries and a five-note chord does not: it came out dissonant. A demo
 that changes one thing is a demo of that thing.
 
-**The default stops the grid at 1.8 kHz**, and on this source that leaves the
-top two bands almost uncoloured: pitch-class concentration measures 0.036 above
-2 kHz, against 0.204 with the ceiling at 5 kHz. That ceiling was chosen when
-every resonator was fed the same broadband noise and a sparse top rang as
-bells; ADR 0016 removed the cause and the number has not been revisited. These
-demonstrate the defaults, so they are rendered at them.
+The grid's ceiling is 5 kHz here, which is the default and was chosen by ear
+across six sources — see
+[`docs/hyperglare/contracts.md`](../../docs/hyperglare/contracts.md) §5.0 for
+what it trades. **These demonstrate the defaults**, so anything that would
+flatter them is not in the commands below.
 
 ## Regenerating the renders
 
@@ -101,6 +100,6 @@ cargo run --release -p hyperglare-render -- \
 
 Read the two numbers the renderer prints. `normalization_gain_db` says how much
 of a setting was a level change, which is half of what a comparison is for —
-these need +4.0 dB and +5.3 dB. `loudness_shortfall_db` says whether the peak
+these need +5.0 dB and +6.0 dB. `loudness_shortfall_db` says whether the peak
 ceiling stopped the match from landing; both are zero here, so the two are
 level-matched against the source and against each other.

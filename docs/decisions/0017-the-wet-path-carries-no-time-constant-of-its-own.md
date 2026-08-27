@@ -6,8 +6,8 @@ Accepted, and it closes half of the defect it names.
 
 Implemented in `ResonatorBank::retune` and by the removal of
 `crates/hyperglare-dsp/src/wet_match.rs`. `color` now crossfades against the
-bank; it does not crossfade against `drive`, which moves the wet about 21 dB
-across its range. That half is [ADR 0019](0019-drive-moves-the-level-and-the-normalisation-is-why.md),
+bank; it does not crossfade against `drive`, which moves the wet about 17 dB
+across its range on percussive material and more on quieter input. That half is [ADR 0019](0019-drive-moves-the-level-and-the-normalisation-is-why.md),
 and it is a question about the waveshaper's normalisation rather than about
 the bank's level.
 
@@ -166,9 +166,9 @@ ADR 0016 lands.
 - **`color` is a crossfade against the bank, and not yet against the exciter.**
   The static compensation puts the bank at the level of what excited it, which
   is what closes the defect `wet_match` was built for. It does not follow
-  `drive`, and `drive` moves the wet by about 21 dB across its range —
-  measured, and evenly across the bands. **So this ADR closes half of what it
-  names.** The other half is a normalisation question about the waveshaper
+  `drive`, and `drive` moves the wet by about 17 dB across its range on
+  percussive material — more on quieter input, because the waveshaper
+  compresses. **So this ADR closes half of what it names.** The other half is a normalisation question about the waveshaper
   rather than a level question about the bank, and belongs to ADR 0019.
 - **This narrows the effect's identity.** A resonator bank with a long decay is
   a reverb with a chord in it, and that is a thing somebody might want. This

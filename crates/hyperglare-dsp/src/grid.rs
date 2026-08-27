@@ -60,43 +60,40 @@ pub const DEFAULT_LOW_HZ: f32 = 65.0;
 
 /// Highest frequency a grid point is generated at, before Nyquist.
 ///
-/// # This used to be 9 kHz, and that was the wrong end of a real trade
+/// # This has been 9 kHz and 1.8 kHz, and the trade is real in both directions
 ///
-/// The design this was built from held that extending resonance into the top
-/// of the spectrum is what makes an effect glare, and took 9 kHz from
-/// N-PRYSM's published range. Measured against three commercial colour-bass
-/// processors on the same source, the opposite is true for *this* mechanism.
+/// The design took 9 kHz from N-PRYSM's published range on the reasoning that
+/// extending resonance into the top of the spectrum is what makes an effect
+/// glare. Measured, the high band came out sparse and a listener called it a
+/// bell, so it went to 1.8 kHz — below which the top of the output belongs to
+/// the source rather than to the bank.
 ///
-/// A resonator is a narrow thing. Spaced an octave apart at 4 kHz, its
-/// neighbours are two thousand hertz away and its own bandwidth is ten, so
-/// what arrives up there is a handful of isolated sustained sine tones with
-/// silence between them — which is how a tubular bell is synthesised, and it
-/// is what a listener called a bell. It also stops following the input,
-/// because nothing at those frequencies is exciting it except broadband noise.
-///
-/// Two measures against the references, on the same six-second loop
-/// (2-9 kHz spectral flatness, and how closely the top follows the source's
-/// low end):
+/// **Neither number was wrong about its own measurement, and both were about
+/// one source.** Swept across six — five paired recordings and a drum loop —
+/// the two halves of the trade are visible at once:
 ///
 /// ```text
-/// grid ceiling   9000   2500   1800   1200      references
-/// density       0.181  0.221  0.304  0.306   0.192 .. 0.298
-/// tracking      -0.18  -0.24  -0.33  -0.33   -0.26 .. -0.32
+///  ceiling                    1800    3000    5000    9000
+///  chord content, 2-9 kHz    0.011   0.099   0.164   0.225   higher is more
+///  spectral density, same    0.448   0.288   0.198   0.162   references .192-.298
 /// ```
 ///
-/// **Stopping the grid below about 2 kHz puts both inside the references'
-/// range, and the reason is that the top then belongs to the source again.**
-/// The input's own high band is dense and moves with the music, because it was
-/// made by the music; nothing a sparse bank of resonators adds up there can
-/// be either.
+/// Raising it puts a chord above 2 kHz, which at 1.8 kHz is simply absent —
+/// the top two bands measure what the source already had. Raising it also
+/// thins that band, and below about 0.19 the top reads as isolated tones,
+/// which is what a bell is.
 ///
-/// N-PRYSM's 9 kHz is not wrong for N-PRYSM. It drives tuned *oscillators*
-/// from a filter bank, so its density up there comes from the analysis rather
-/// than from the grid. Carrying the number across to a resonator bank carried
-/// the range without the mechanism that fills it.
+/// **5 kHz is where a listener put it**, across all six sources. It is the
+/// point where the chord has arrived and the density has not yet fallen out of
+/// the range the references occupy.
 ///
-/// Raise it for a source with nothing of its own up there, and expect bells.
-pub const DEFAULT_HIGH_HZ: f32 = 1_800.0;
+/// Per-band excitation ([ADR 0016](../../../docs/decisions/0016-the-bank-is-excited-per-band.md))
+/// changed one half of this and not the other. A resonator now rings only on
+/// energy the source has near it, so the top follows the music instead of
+/// being invented by broadband noise — but it is still one narrow filter with
+/// nothing beside it, and the density above shows the sparsity surviving the
+/// change. **The bell risk was reduced, not removed.**
+pub const DEFAULT_HIGH_HZ: f32 = 5_000.0;
 
 /// Lowest octave step generated, relative to the played note.
 ///
@@ -405,10 +402,14 @@ mod tests {
     #[test]
     fn an_octave_grid_spans_the_band_in_single_digits() {
         let f = collect(&Grid::default(), BASS_HZ);
+        // From the band rather than from a number: the ceiling is a setting,
+        // and this has been 7-8 steps at 9 kHz and 4-5 at 1.8 kHz already.
+        let octaves = (DEFAULT_HIGH_HZ / DEFAULT_LOW_HZ).log2();
+        let count = f.len() as f32;
         assert!(
-            (4..=5).contains(&f.len()),
-            "expected the band to take 4-5 octave steps, got {}: {f:?}",
-            f.len()
+            count >= octaves - 1.0 && count <= octaves + 1.0,
+            "a band of {octaves:.2} octaves should take about that many \
+             steps, got {count}: {f:?}"
         );
         assert!(*f.first().unwrap() >= DEFAULT_LOW_HZ);
         assert!(*f.last().unwrap() < DEFAULT_HIGH_HZ);

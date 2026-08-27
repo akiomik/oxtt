@@ -984,9 +984,16 @@ mod tests {
         );
     }
 
-    /// A bank too small for its settings is not also a quiet one. The divisor
-    /// counts what the bank actually has, so truncation costs resonators
-    /// rather than resonators *and* level.
+    /// A bank too small for its settings is not *also* punished by the
+    /// divisor. What it loses is the top of its chord, and what that costs in
+    /// level is whatever the gain law's own slope says — which is a different
+    /// thing from the divisor charging it twice.
+    ///
+    /// **The bound comes from the law rather than from a round number.** The
+    /// resonators that survive truncation are the lowest, and since the share
+    /// is measured against the band the lowest are also the quietest; a
+    /// tolerance picked by hand would be measuring how far apart the bands
+    /// happen to be today.
     #[test]
     fn a_truncated_bank_holds_its_level() {
         let settings = BankParams {
@@ -1008,10 +1015,30 @@ mod tests {
             cramped.active()
         );
 
+        // **The divisors differ, and that is the compensation rather than a
+        // bug.** Each is `min(voices · density, capacity)`, so the cramped
+        // bank divides by the six resonators it has instead of the eighty-two
+        // the settings asked for; dividing by what it does not have is
+        // precisely how a truncated bank would end up quiet.
+        assert!(
+            cramped.voice_norm > roomy.voice_norm,
+            "the cramped bank should divide by less: {} vs {}",
+            cramped.voice_norm,
+            roomy.voice_norm
+        );
+
+        // What remains is the gain law's spread across the band, which the
+        // truncated bank sits at one end of.
+        let gains: Vec<f32> = roomy.gains.iter().take(roomy.active()).copied().collect();
+        let spread = 20.0
+            * (gains.iter().copied().fold(f32::MIN, f32::max)
+                / gains.iter().copied().fold(f32::MAX, f32::min))
+            .log10();
         let db = 20.0 * (noise_rms(&mut cramped, 3.0) / noise_rms(&mut roomy, 3.0)).log10();
         assert!(
-            db.abs() < 2.5,
-            "truncating to {} of {} resonators moved the level by {db} dB",
+            db.abs() < spread,
+            "truncating to {} of {} moved the level by {db} dB, past the \
+             {spread} dB the gain law spans across the band",
             cramped.active(),
             roomy.active()
         );

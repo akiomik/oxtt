@@ -134,8 +134,8 @@ mod proofs {
     #[test]
     fn the_exciters_sample_path_cannot_panic() {
         #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-        fn run(exciter: &mut Exciter, coeffs: ExciterCoeffs, x: f32) -> [f32; BANDS] {
-            exciter.process(x, &coeffs)
+        fn run(exciter: &mut Exciter, coeffs: &ExciterCoeffs, x: f32) -> [f32; BANDS] {
+            exciter.process(x, coeffs)
         }
 
         let mut exciter = Exciter::new();
@@ -156,7 +156,7 @@ mod proofs {
         ] {
             let coeffs = ExciterCoeffs::new(48_000.0, &params);
             for x in [0.0, 0.5, -1.0, f32::MAX, f32::MIN, f32::NAN] {
-                let _ = run(&mut exciter, coeffs, x);
+                let _ = run(&mut exciter, &coeffs, x);
             }
             exciter.reset();
         }

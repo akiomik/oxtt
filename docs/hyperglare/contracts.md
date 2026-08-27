@@ -50,9 +50,12 @@ cost two orders of magnitude more than the filtering itself.
   them evenly and does not wrap. An allocator that cares which notes survive
   orders the table itself.
 
-  **Truncation costs resonators, not level.** The divisor in section 5 is
-  capped at the capacity, so a bank too small for its settings is not also a
-  quiet one. What a caller loses is the top of its chord, which is a thing it
+  **Truncation is not charged twice.** The divisor in section 5 is capped at
+  the capacity, so a bank too small for its settings does not also divide by
+  resonators it does not have. What it still costs is whatever the gain law's
+  own spread across the band says: the resonators that survive are the lowest,
+  and since the share is measured against the band the lowest are the
+  quietest. What a caller loses is the top of its chord, which is a thing it
   can see in `active()` and act on; a level drop it could only hear would tell
   it nothing about what to change.
 
@@ -180,58 +183,64 @@ are made not to:
 
 The decay is a third: see section 6.
 
-**And the wet is matched to the dry, which is the one that makes the mix knob
-work.** How loud the bank comes out depends on how much of the input's spectrum
-lands on the grid, and that varied by about 20 dB across real material. A
-linear crossfade between signals 20 dB apart is not a crossfade: measured on a
-percussive source, nine tenths of `color` did nothing and the whole transition
-happened in its last tenth. Matched, the same sweep is monotonic across the
-range. `wet_match` at zero restores the raw behaviour for a caller who wants
-the resonators at whatever level they were excited to.
+**And the wet sits at the level of what excited it, which is the one that
+makes the mix knob work.** A resonator collects the part of its band that falls
+inside its own bandwidth — 2.2 Hz of 130 at the reference decay — so left
+alone the bank arrives some 18 dB under the dry, and a linear crossfade between
+signals that far apart is not a crossfade. Measured on a percussive source
+before this was corrected, nine tenths of `color` did nothing and the whole
+transition happened in the last tenth.
 
-The correction is measured on the mid and applied to both channels as a ratio.
-A matcher per channel would read the dry's own left/right balance and print it
-onto a wet that has no image of its own, which is a width manufactured from a
-level rather than one that is there.
+The correction is the `makeup` term of section 6. **It is a constant**, so
+nothing here reads the chord, follows an envelope or has a time constant of its
+own: those are the properties the follower this replaced could not keep, and
+[ADR 0017](../decisions/0017-the-wet-path-carries-no-time-constant-of-its-own.md)
+records why it was removed rather than tuned.
 
-It holds while the input is silent. A ratio of two decaying envelopes says
-nothing, and sweeping the gain across a tail would reshape the one part of the
-output that is the effect's own.
+**What it does not cover is `drive`, and that is not small.** The waveshaper's
+level depends on where it is normalised and on what the input's level is; the
+knob moves the wet by about 17 dB on percussive material and by up to 29 dB on
+a quiet tone. So `color` is a crossfade at a fixed drive and not across the
+drive knob. See [ADR 0019](../decisions/0019-drive-moves-the-level-and-the-normalisation-is-why.md).
 
 ## 5.0 Where the band stops
 
-**The grid's ceiling defaults to 1.8 kHz, and the reason is a reversal.**
+**The grid's ceiling defaults to 5 kHz, and it has been two other numbers.**
 
-The design held that extending resonance into the top of the spectrum is what
-makes an effect glare, and took a 9 kHz ceiling from a published range.
-Measured against three commercial colour-bass processors on one source, that is
-false for a resonator bank.
+The design took 9 kHz from a published range, on the reasoning that extending
+resonance into the top of the spectrum is what makes an effect glare. Measured
+against three commercial processors on one source, the top came out sparse and
+a listener called it a bell, so it went to 1.8 kHz — below which the top of the
+output belongs to the source rather than to the bank.
 
-A resonator is narrow. An octave apart at 4 kHz its neighbours are two thousand
-hertz away and its own bandwidth is ten, so the top of the band arrives as a
-handful of isolated sustained sine tones with silence between them — which is
-how a tubular bell is made, and is what it was heard as. It also stops
-following the input, because nothing up there is exciting it but broadband
-noise.
+**Both measurements were right about one source, and the trade has two sides.**
+Swept across six — five paired recordings and a drum loop:
 
 ```text
-grid ceiling   9000   2500   1800   1200      references
-density       0.181  0.221  0.304  0.306   0.192 .. 0.298
-tracking      -0.18  -0.24  -0.33  -0.33   -0.26 .. -0.32
+ ceiling                    1800    3000    5000    9000
+ chord content, 2-9 kHz    0.011   0.099   0.164   0.225
+ spectral density, same    0.448   0.288   0.198   0.162
+ references                                0.192 .. 0.298
 ```
 
-Stopping below about 2 kHz puts both measures inside the references' range,
-**because the top then belongs to the source again** — the input's own high
-band is dense and moves with the music, since the music made it.
+Raising it puts a chord above 2 kHz, which at 1.8 kHz is simply absent: the top
+two bands measure what the source already had and nothing else. Raising it also
+thins that band, and below about 0.19 the top reads as isolated tones, which is
+what a bell is. **5 kHz is where a listener put it across all six**, and it is
+where the chord has arrived and the density has not yet left the references'
+range.
 
-The published range this came from belongs to an effect that drives tuned
-oscillators from a filter bank. Its density up there comes from the analysis
-rather than from the grid, so the number travelled without the mechanism that
-fills it.
+**Per-band excitation changed one half of this and not the other.** Since
+[ADR 0016](../decisions/0016-the-bank-is-excited-per-band.md) a resonator rings
+only on energy the source has near it, so the top follows the music rather than
+being invented by broadband noise. It is still one narrow filter with nothing
+beside it, and the density row above is that sparsity surviving the change. The
+bell risk was reduced, not removed.
 
-**The design's stated goal of glare is not met by this, and is not abandoned.**
-What it costs is stated rather than hidden: raise the ceiling and the top of
-the band returns, as bells.
+**The band edges are tied to this.** `crate::bands::EDGES` are octaves because
+the gain law's share is `BW/W_b`, and they have to reach as far as the grid
+does or the top band spans more than an octave and the resonators in it are
+lifted against their neighbours. Moving the ceiling means checking them.
 
 ## 5.1 Stereo
 
@@ -296,8 +305,9 @@ gain(f) = makeup · tilt(f) · ( (BW(f)/W_b) / (BW_ref/W_ref) )^(-p)
   zero the shaper is an exact bypass, so this costs the default nothing — but
   a `sear` above zero moves the wet's level against the dry and `color` is not
   a crossfade there.
-- **Nor is `drive`.** It moves the wet by about 21 dB across its range, evenly
-  across the bands, and that is uncompensated. See ADR 0019.
+- **Nor is `drive`.** It moves the wet by about 17 dB across its range on
+  percussive material, and by more on quieter input, and that is
+  uncompensated. See ADR 0019.
 
 Above the breakpoint the effective decay is `T60 · f*/f`, and **the decay
 setting stops reaching**. That is the cost the Q cap buys robustness with, and
