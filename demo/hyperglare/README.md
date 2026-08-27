@@ -2,93 +2,90 @@
 
 | File | What it is |
 | --- | --- |
-| `dry.wav` | An FM bass from a Syntakt, growling. A1 (55 Hz), 2.5 s, stereo 32-bit float |
-| `wet-octaves.wav` | The default geometry on an A minor chord, at seven tenths colour |
-| `wet-stretched.wav` | Octave pairs, detuned 35 cents an octave, post-drive after the split |
+| `dry.wav` | Six seconds of a drum pattern. Stereo 32-bit float, 48 kHz |
+| `wet-default.wav` | The defaults, on a G♯ minor pentatonic chord |
+| `wet-flashy.wav` | The far end of the decay, with pairs, stretch and post-drive |
 
 The renders are regenerated rather than recorded, so they follow the DSP
 instead of pinning it. The commands are at the bottom.
 
+## Why this source and not a bass
+
+**It used to be a bass, and that was wrong.** The design held that a resonator
+bank wants a distorted bass where a compressor wants a musical excerpt, so no
+one file could serve both. Measured, the opposite: the drum pattern colours
+better than the bass did, by a wide margin and in every band.
+
+`dry.wav` here is an excerpt of the loop `demo/oxtt/` uses. **It is a copy, not
+a reference** — these become separate repositories
+([ADR 0015](../../docs/decisions/0015-documentation-is-namespaced-by-project.md)),
+and a file two of them shared would belong to neither.
+
 ## What the source has to be, and why
 
-**A distorted bass.** Not a stylistic preference — a requirement of the
-mechanism. A bank of band-pass filters is a filter and not an oscillator, so it
-can only emphasise energy the input already has at the frequencies it is tuned
-to. A clean sine has one partial and the bank has almost nothing to ring on.
+**Whatever the effect is asked to colour has to already be there.** A bank of
+band-pass filters emphasises energy the input has and cannot invent any, and
+since [ADR 0016](../../docs/decisions/0016-the-bank-is-excited-per-band.md)
+that is true band by band: a resonator draws on the input's energy near its own
+frequency, so a band the source is silent in produces nothing at all.
 
-`dry.wav` measures 55 Hz with partials to about 550 Hz, which is a tenth
-harmonic.
-
-**It is a poor source for this effect, and there is now a number for it.**
-[ADR 0016](../../docs/decisions/0016-the-bank-is-excited-per-band.md) is
-*proposed*, not implemented: today's exciter is still broadband, and the
-figures below come from a prototype rather than from this crate. Under that
-proposal a resonator is excited by the input's energy in its own
-neighbourhood, so a band the source is empty in would produce nothing at all —
-the source's own reach becomes the effect's reach, and that can be measured
-before anybody listens:
+**The source's reach is the effect's reach, and it can be measured before
+anybody listens.** Energy per band, loudest band at 0 dB:
 
 ```text
-source's energy per band, loudest band at 0 dB
-                 125-250  250-500   500-1k    1k-2k    2k-4k    4k-8k
- this file           0.0     -4.6    -16.9    -33.1    -54.0    -70.0
- a source that works 0.0     -9.7    -12.4    -12.1     -8.1     -5.0
+                     125-250  250-500   500-1k    1k-2k    2k-4k    4k-8k
+ this file               0.0     -9.7    -12.4    -12.1     -8.1     -5.0
+ the bass it replaced    0.0     -4.6    -16.9    -33.1    -54.0    -70.0
 ```
 
 **Roughly 10 dB per octave of fall is the practical bound**, on the evidence of
-the sources that have worked and the ones that have not. This file falls off a
-cliff: 54 dB down at 2 kHz, 70 at 4. Everything above its tenth harmonic is
-silence, so everything above its tenth harmonic stays silent.
-
-A distorted bass with noise in it, moving under an LFO, is what the effect is
-for. This file is a single sustained FM tone.
+the sources that have worked and the ones that have not. The bass fell off a
+cliff — 54 dB down at 2 kHz — so everything above its tenth harmonic was
+silence, and stayed silence.
 
 | | |
 | --- | --- |
 | Format | Stereo, 32-bit IEEE float WAV — what `hyperglare-render` reads and writes |
-| Length | A few seconds. The renderer appends the tail, so the source does not have to |
-| Content | A bass with obvious saturation. A held note and a couple of moves is plenty |
-| Level | Peaks a few dB below full scale. Loudness is matched, but headroom is not recoverable |
-| Pitch | Around A1–A2 (MIDI 33–45), where the design's figures are quoted |
+| Length | A few seconds. The renderer appends the tail, so the source need not |
+| Content | Energy across the spectrum, and movement in it |
+| Level | Peaks a few dB below full scale. The renderer will not write past −1 dBTP, and reports what that cost |
 
-**Name the chord to match the source.** `dry.wav` is A1, so the default
-`--notes 33,40,45` is rooted on it — A1, E2, A2, which is a root, a fifth and
-an octave rather than a triad. There is no third in it, deliberately: the
-third is the note that decides major from minor, and a grid that states one
-argues with a bass line that meant the other. A chord that has nothing
-to do with the source is a legitimate thing to try — it is what the effect is
-for — but it is not the first thing to listen to.
+**Name the chord to match the source.** This loop sits in G♯ minor, so the
+renders use `--notes 56,59,61,63,66` — a pentatonic set rather than a triad,
+because five pitch classes is closer to what the material this effect is for
+actually uses.
 
-## Why a pattern is not what to record first
+## What these two show
 
-A phrase that moves across the keyboard cannot settle the first question.
+`wet-default.wav` is the shipped settings and nothing else. `wet-flashy.wav`
+takes the decay to 0.6 s rather than the default 0.25, which is where a
+listener put "flashy, and it matches the original concept";
+[ADR 0017](../../docs/decisions/0017-the-wet-path-carries-no-time-constant-of-its-own.md)
+moved the default off that end because colour stops growing at 0.25 s while the
+reverberation does not.
 
-The bank divides out a geometry's density at a fixed reference note, which is
-what stops a growing chord from ducking the notes already ringing. A fixed
-reference is exact at one note only, and under `Geometry::Harmonics` the error
-reaches about 9 dB across three octaves of played note. So on a bass line the
-harmonic geometry sounds thin at the top — and whether that is timbre or level
-cannot be told apart by ear.
-
-**A sustained note near the reference is a fair comparison between the
-geometries. A line is not.**
+**The default stops the grid at 1.8 kHz**, and on this source that leaves the
+top two bands almost uncoloured: pitch-class concentration measures 0.036 above
+2 kHz, against 0.204 with the ceiling at 5 kHz. That ceiling was chosen when
+every resonator was fed the same broadband noise and a sparse top rang as
+bells; ADR 0016 removed the cause and the number has not been revisited. These
+demonstrate the defaults, so they are rendered at them.
 
 ## Regenerating the renders
 
 ```sh
 cargo run --release -p hyperglare-render -- \
-  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-octaves.wav \
-  --notes 33,40,45 --geometry octaves --decay 0.8 --color 0.7
+  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-default.wav \
+  --notes 56,59,61,63,66 --color 0.63
 
 cargo run --release -p hyperglare-render -- \
-  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-stretched.wav \
-  --notes 33,40,45 --geometry octave-pairs --stretch 35 --drift 12 \
-  --decay 1.2 --sear 0.5 --sear-placement before-split --width 1.0 --color 0.9
+  --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-flashy.wav \
+  --notes 56,59,61,63,66 --geometry octave-pairs --stretch 35 --drift 12 \
+  --decay 0.6 --sear 0.5 --sear-placement before-split --width 1.0 --color 0.9
 ```
 
-Read the reported `normalization_gain_db`: a setting that needed a large
-correction was mostly a level change, which is half of what a comparison is
-for. These two need −3.0 dB and −5.1 dB, which is a change from the 12.4 and 4.6
-they needed before the wet was matched to the dry — the wet is now the same
-size as the thing it is mixed against, so the render arrives close to the level
-it should be.
+Read the two numbers the renderer prints. `normalization_gain_db` says how much
+of a setting was a level change, which is half of what a comparison is for —
+these need +4.1 dB and −0.5 dB. `loudness_shortfall_db` says whether the peak
+ceiling stopped the match from landing; both are zero here, so the two are
+level-matched against the source and against each other.

@@ -7,7 +7,7 @@ Accepted, and it closes half of the defect it names.
 Implemented in `ResonatorBank::retune` and by the removal of
 `crates/hyperglare-dsp/src/wet_match.rs`. `color` now crossfades against the
 bank; it does not crossfade against `drive`, which moves the wet about 21 dB
-across its range. That half is [ADR 0019](0019-the-waveshaper-is-a-compressor-and-is-normalised-as-one.md),
+across its range. That half is [ADR 0019](0019-drive-moves-the-level-and-the-normalisation-is-why.md),
 and it is a question about the waveshaper's normalisation rather than about
 the bank's level.
 

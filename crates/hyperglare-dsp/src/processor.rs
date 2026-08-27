@@ -212,9 +212,14 @@ impl<const N: usize> HyperglareProcessor<N> {
     /// Applies a new setting. Control rate, not sample rate.
     ///
     /// The bank is retuned only when something it depends on has moved, so a
-    /// knob that is not a bank knob costs nothing. `color`, the gains, the
-    /// sear and the wet match are all in that group; everything inside
-    /// [`BankParams`] and the chord itself are not.
+    /// knob that is not a bank knob costs nothing. `color`, the gains and the
+    /// stereo width are in that group; everything inside [`BankParams`] and
+    /// the chord itself are not.
+    ///
+    /// Two knobs cost something smaller than a retune and are not free either:
+    /// `sear` rebuilds one [`Shaper`], and anything in [`ExciterParams`]
+    /// rebuilds [`ExciterCoeffs`]. Both are one `exp` or `powf`, taken here so
+    /// that the sample path never does.
     ///
     /// A note that is `NaN` compares unequal to itself, so a chord carrying
     /// one retunes on every call. That is the safe direction to be wrong in,
