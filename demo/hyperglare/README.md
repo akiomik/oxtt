@@ -2,9 +2,9 @@
 
 | File | What it is |
 | --- | --- |
-| `dry.wav` | Six seconds of a drum pattern. Stereo 32-bit float, 48 kHz |
+| `dry.wav` | A drum pattern, whole. Stereo 32-bit float, 48 kHz, 14.75 s |
 | `wet-default.wav` | The defaults, on a G♯ minor pentatonic chord |
-| `wet-flashy.wav` | The far end of the decay, with pairs, stretch and post-drive |
+| `wet-flashy.wav` | The same, with the decay at the far end of its range |
 
 The renders are regenerated rather than recorded, so they follow the DSP
 instead of pinning it. The commands are at the bottom.
@@ -20,6 +20,16 @@ better than the bass did, by a wide margin and in every band.
 a reference** — these become separate repositories
 ([ADR 0015](../../docs/decisions/0015-documentation-is-namespaced-by-project.md)),
 and a file two of them shared would belong to neither.
+
+**It is the whole loop, and shortening it was tried twice.** The pattern has no
+gap in it — hits land every ten to twenty milliseconds — so a cut taken
+anywhere but the ends begins inside the decay of a hit the listener never heard
+begin, and it is audible as a missing attack however carefully the point is
+chosen. Cutting the first six seconds instead leaves the pattern stopping dead
+where the wet is still ringing.
+
+A loop like this has one place it starts and one place it ends. Both are
+already in the file, so the file is what is committed.
 
 ## What the source has to be, and why
 
@@ -57,12 +67,18 @@ actually uses.
 
 ## What these two show
 
-`wet-default.wav` is the shipped settings and nothing else. `wet-flashy.wav`
-takes the decay to 0.6 s rather than the default 0.25, which is where a
-listener put "flashy, and it matches the original concept";
+**One knob apart, deliberately.** `wet-default.wav` is the shipped settings;
+`wet-flashy.wav` changes the decay to 0.6 s and nothing else, so what is heard
+between them is the decay and not five things at once.
 [ADR 0017](../../docs/decisions/0017-the-wet-path-carries-no-time-constant-of-its-own.md)
-moved the default off that end because colour stops growing at 0.25 s while the
-reverberation does not.
+moved the default to 0.25 s because colour stops growing there while the
+reverberation does not; 0.6 s is where a listener put "flashy, and it matches
+the original concept".
+
+The pair these replaced compared two geometries and reached for `--stretch 35`
+to do it. That detune is 175 cents across five octaves, which a three-note
+triad carries and a five-note chord does not: it came out dissonant. A demo
+that changes one thing is a demo of that thing.
 
 **The default stops the grid at 1.8 kHz**, and on this source that leaves the
 top two bands almost uncoloured: pitch-class concentration measures 0.036 above
@@ -80,12 +96,11 @@ cargo run --release -p hyperglare-render -- \
 
 cargo run --release -p hyperglare-render -- \
   --input demo/hyperglare/dry.wav --output demo/hyperglare/wet-flashy.wav \
-  --notes 56,59,61,63,66 --geometry octave-pairs --stretch 35 --drift 12 \
-  --decay 0.6 --sear 0.5 --sear-placement before-split --width 1.0 --color 0.9
+  --notes 56,59,61,63,66 --decay 0.6 --color 0.63
 ```
 
 Read the two numbers the renderer prints. `normalization_gain_db` says how much
 of a setting was a level change, which is half of what a comparison is for —
-these need +4.1 dB and −0.5 dB. `loudness_shortfall_db` says whether the peak
+these need +4.0 dB and +5.3 dB. `loudness_shortfall_db` says whether the peak
 ceiling stopped the match from landing; both are zero here, so the two are
 level-matched against the source and against each other.

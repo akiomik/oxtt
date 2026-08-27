@@ -29,7 +29,19 @@ produced by that effect's offline renderer rather than recorded, so they can be
 regenerated when the DSP changes; the source cannot, which is why it is
 committed.
 
-Keep them small. Every file here is in every clone forever, and the point is to
-demonstrate rather than to master: mono where the effect does not need stereo,
-a few seconds rather than a chorus, and no more of them than answer a question
-somebody actually asked.
+**How many, not how long.** Every file here is in every clone forever, so the
+budget is real — 34 MB across the two directories today, six files of about
+15 seconds each. What keeps that finite is the count: **one source and at most
+two renders per effect**, and a render earns its place by answering a question
+somebody asked rather than by showing another setting.
+
+**Length is the material's to decide, not this file's.** This paragraph used to
+say "a few seconds rather than a chorus", and that rule cost two bad edits
+before it was noticed. `hyperglare`'s source is a drum pattern with no gap in
+it, so every cut starts inside the decay of a hit the listener never heard
+begin. There is exactly one place a loop like that starts and one place it
+ends, and they are the ones the loop already has. A rule that asks for six
+seconds of a fifteen-second loop is asking for an edit nobody would keep.
+
+So: trim when the material has a place to be trimmed at, and when it does not,
+commit the whole thing and spend the budget on having fewer files.
