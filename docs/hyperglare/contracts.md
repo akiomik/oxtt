@@ -257,7 +257,7 @@ a stereo source, which is how it was found.
 
 ```text
 BW(f)   = max( ln(1000)/(pi·T60),  f/q_max )
-gain(f) = tilt(f) · (BW(f) / BW_ref)^(-p)
+gain(f) = makeup · tilt(f) · ( (BW(f)/W_b) / (BW_ref/W_ref) )^(-p)
 ```
 
 - **`BW` is continuous across the breakpoint**, because it is a maximum of the
@@ -266,13 +266,38 @@ gain(f) = tilt(f) · (BW(f) / BW_ref)^(-p)
 - **`BW_ref` is a fixed reference decay, not the current one.** Against the
   current decay the ratio would be one everywhere below the breakpoint and the
   decay compensation would cancel itself out entirely.
-- **The exponent is one judgement, not two.** Below the breakpoint it flattens
-  the decay's effect on level; above it, it sets a slope of `-6.02·p` dB per
-  octave. Both are the same number, so the tonal-versus-broadband question is
-  answered once.
-- **Sweeping the exponent does not move the level at the reference decay**,
-  which is what makes choosing it by ear a comparison of spectrum rather than
-  of loudness.
+- **The share is measured against the band, not in hertz.** Since section 2.0
+  a resonator's excitation is broadband only *within* its band, so what it
+  collects is `BW/W_b`. `W_b` is the band's own width, with the open top band
+  closed at the grid's ceiling so the law does not depend on the sample rate.
+- **The exponent is one judgement, and it now has two effects.** It answers
+  the tonal-versus-broadband question, and because `W_b` grows with frequency
+  it also decides how level the bank sits from band to band. **At `p = 0` both
+  go**: the compensation vanishes and so does the flattening, which leaves
+  about 10 dB of tilt across the bands. That is the right answer for a bank
+  excited tonally and it is not a free setting, so it is stated here rather
+  than found.
+- **Sweeping the exponent does not move the level at the reference decay in
+  the reference band**, which is what makes choosing it by ear a comparison of
+  spectrum rather than of loudness. In the reference band only: a resonator in
+  a wider band moves by `(W_b/W_ref)^p` as the exponent sweeps.
+- **`makeup` is a constant, and `color` needs it.** A resonator collects a
+  small fraction of its band — 2.2 Hz of 130 at the reference decay — so
+  without it the wet arrives some 18 dB under the dry and `color` does nothing
+  until its last tenth. The compensation cannot supply this, because it is
+  deliberately unity at the reference. Nothing in it reads the chord, so it
+  cannot duck.
+- **The two normalisations compose in one place and in this order**: the
+  divisor of section 5 is applied to the summed bank, and everything above is
+  folded into each resonator's own gain at retune. Neither is a follower and
+  neither reads the live chord.
+- **`sear` is outside all of it.** The post-drive runs on the bank's output,
+  after these gains, so its level change is not compensated. At the default of
+  zero the shaper is an exact bypass, so this costs the default nothing — but
+  a `sear` above zero moves the wet's level against the dry and `color` is not
+  a crossfade there.
+- **Nor is `drive`.** It moves the wet by about 21 dB across its range, evenly
+  across the bands, and that is uncompensated. See ADR 0019.
 
 Above the breakpoint the effective decay is `T60 · f*/f`, and **the decay
 setting stops reaching**. That is the cost the Q cap buys robustness with, and

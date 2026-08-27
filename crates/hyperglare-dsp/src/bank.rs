@@ -42,32 +42,68 @@
 //!
 //! # The gain law
 //!
-//! Below the breakpoint the bandwidth is the same everywhere, so each
-//! resonator collects the same energy from a broadband input, and the
-//! compensation is one number for the whole bank. Above it the bandwidth grows
-//! with frequency, and without compensation the top of the bank would take
-//! over — the same domination the per-filter normalisation already removed
-//! once, returning in a weaker form.
-//!
-//! Both cases are one expression:
+//! A resonator collects the part of its excitation that falls inside its own
+//! bandwidth. What that is a *share* of changed with
+//! [ADR 0016](../../../docs/decisions/0016-the-bank-is-excited-per-band.md):
+//! the excitation is no longer one broadband signal but one per band, so the
+//! share is `BW / W_b` and not `BW`.
 //!
 //! ```text
 //! BW(f)   = max( ln(1000)/(pi·T60),  f/q_max )
-//! gain(f) = tilt(f) · (BW(f) / BW_ref)^(-p)
+//! gain(f) = tilt(f) · ( (BW(f)/W_b) / (BW_ref/W_ref) )^(-p)
 //! ```
 //!
 //! `BW` is continuous, so the breakpoint needs no case split and no seam to
-//! check. Below it the expression collapses to a function of the decay alone;
-//! above it the slope is `-6.02·p` dB per octave. At `p = 0` the compensation
-//! disappears, which is the right answer if the bank is being excited tonally
-//! rather than by noise — so the exponent is where that judgement lives, and
-//! it is the same judgement in both halves rather than two that can disagree.
+//! check. What changes with frequency is now `W_b`, and it moves the
+//! compensation in **both** halves — in the opposite directions to before:
+//!
+//! ```text
+//!                    BW(f)         BW(f)/W_b            gain(f)
+//!  below f*        constant   falls as W_b grows   +6.02·p dB per doubling
+//!  above f*             ∝ f      same everywhere         unchanged
+//! ```
+//!
+//! Above the breakpoint a resonator widens exactly as fast as its band does,
+//! so its share stops changing and so does the compensation. Below it the
+//! resonator keeps its width while the band around it grows, so the share
+//! falls and the compensation lifts.
+//!
+//! **It is a step at each edge, not a slope.** `W_b` is one number for a whole
+//! band, so two resonators inside one band are compensated identically however
+//! far apart they are. And the steps are not all the same size, because the
+//! widths are not all in the same ratio:
+//!
+//! ```text
+//!  band      0        1        2        3         4
+//!  spans   0-130  130-260  260-520  520-1040  1040-ceiling
+//!  width    130      130      260      520      ceiling-1040
+//! ```
+//!
+//! The bottom band is open downward, so it is as wide as the one above it and
+//! the first step is flat. From there each width doubles. The old law had a
+//! slope above the breakpoint and nothing below; this one has a staircase
+//! below and nothing above. Neither gained a second mechanism.
+//!
+//! At `p = 0` the compensation disappears, which is the right answer if the
+//! bank is being excited tonally rather than by noise. **The exponent now
+//! carries a second consequence**: it also decides how level the bank sits
+//! from band to band, and at zero that flattening goes with it. One number for
+//! both is deliberate — the same judgement in both halves rather than two that
+//! can disagree — but it is a judgement with two effects, and
+//! `docs/hyperglare/contracts.md` §5 says which.
+//!
+//! ## What this is not
+//!
+//! It is not a per-band normalisation. `W_b` and `BW` are properties of one
+//! resonator and its band; **no term sums over the resonators in a band**, so
+//! a chord that grows in one band gets louder there, which is what §5 requires
+//! and what a divisor over the live chord would take away.
 
 use core::f32::consts::{LN_2, LN_10, PI};
 
 use effectkit::filter::{Svf, SvfCoeffs, max_centre_hz};
 
-use crate::bands::band_of;
+use crate::bands::{REFERENCE_BAND_HZ, band_of, band_width_hz};
 use crate::grid::Grid;
 
 /// `ln(1000)`: the ratio a T60 is defined against.
@@ -104,6 +140,27 @@ pub const REFERENCE_DECAY_S: f32 = 1.0;
 /// joined it, and a bank with a second of tail would duck audibly. A fixed
 /// note makes the divisor a property of the settings alone.
 pub const REFERENCE_NOTE_HZ: f32 = 60.0;
+
+/// What it takes to undo the share loss at the reference point.
+///
+/// A resonator collects the part of its band that falls inside its own
+/// bandwidth, and that is a small fraction: at [`REFERENCE_DECAY_S`] the
+/// bandwidth is 2.2 Hz against a reference band of 130, so the bank comes out
+/// some 18 dB under what went into it. The compensation cannot supply this —
+/// it is deliberately *unity* at the reference, which is what makes an
+/// exponent sweep a level-matched comparison — so the anchor is separate.
+///
+/// **Without it `color` is not a crossfade.** That was `wet_match`'s job, and
+/// removing a follower that measured this leaves the wet where the physics
+/// puts it: audible only in the knob's last tenth.
+///
+/// A constant, not a measurement and not a sum. Nothing here reads the chord,
+/// so a note joining one cannot duck the notes already ringing — the property
+/// `docs/hyperglare/contracts.md` §5 states for the voice count and the
+/// density, held by the same means.
+fn share_makeup() -> f32 {
+    (REFERENCE_BAND_HZ * PI * REFERENCE_DECAY_S / LN_1000).sqrt()
+}
 
 /// Decibels per octave of spectral tilt at full deflection.
 ///
@@ -173,7 +230,11 @@ impl Default for BankParams {
     fn default() -> Self {
         Self {
             grid: Grid::default(),
-            decay_t60_s: 0.6,
+            // The measured knee. Colour saturates here; past it the knob buys
+            // reverberation and nothing else, and the reference it is judged
+            // against holds its source's transients.
+            // See ADR 0017.
+            decay_t60_s: 0.25,
             q_max: 500.0,
             // M0's answers, not neutral values. The compensation's stated
             // range was 0.25 to 0.5, and listening put it at the lower end:
@@ -312,6 +373,8 @@ impl<const N: usize> ResonatorBank<N> {
         let q_max = params.q_max.max(MIN_Q_MAX);
         let bw_floor = LN_1000 / (PI * t60);
         let bw_ref = LN_1000 / (PI * REFERENCE_DECAY_S);
+        let share_ref = bw_ref / REFERENCE_BAND_HZ;
+        let makeup = share_makeup();
         let pivot_hz = (params.grid.low_hz * params.grid.high_hz).sqrt();
 
         let mut written = 0usize;
@@ -338,14 +401,21 @@ impl<const N: usize> ResonatorBank<N> {
             // The excitation this resonator draws on, decided here rather than
             // per sample: a resonator's band is a property of its frequency,
             // and its frequency is settled at retune.
-            *band = u8::try_from(band_of(*hz)).unwrap_or(0);
+            let index = band_of(*hz);
+            *band = u8::try_from(index).unwrap_or(0);
             let q = (t60 * PI * *hz / LN_1000).min(q_max);
             *coeffs = SvfCoeffs::new(*hz, sample_rate, q);
             // `BW` is continuous across the breakpoint because it is a max of
             // the two branches, so this needs no case split.
             let bw = bw_floor.max(*hz / q_max);
-            let compensation = (bw / bw_ref).powf(-params.compensation_exponent);
-            *gain = tilt_gain(*hz, pivot_hz, params.tilt) * compensation;
+            // Measured against the band it draws on rather than in hertz. See
+            // the module documentation: since ADR 0016 the excitation a
+            // resonator sees is broadband only *within a band*, so the share
+            // it collects is `BW / W_b` rather than `BW`.
+            let width = band_width_hz(index, params.grid.high_hz);
+            let share = bw / width;
+            let compensation = (share / share_ref).powf(-params.compensation_exponent);
+            *gain = makeup * tilt_gain(*hz, pivot_hz, params.tilt) * compensation;
         }
 
         // **Every filter above the chord is at rest, always.** A bank starts
@@ -528,7 +598,7 @@ fn db_to_amp(db: f32) -> f32 {
 )]
 mod tests {
     use super::*;
-    use crate::bands::BANDS;
+    use crate::bands::{BANDS, REFERENCE_BAND_HZ};
 
     /// Every band carrying the same sample.
     ///
@@ -637,15 +707,22 @@ mod tests {
         assert!((effective[0] - 0.129).abs() < 0.002, "{effective:?}");
     }
 
-    /// Below the breakpoint the compensation is a function of the decay alone,
-    /// and at the reference decay it is unity whatever the exponent — which is
-    /// what makes an exponent sweep a level-matched comparison there.
+    /// At the reference decay in the reference band the exponent does not
+    /// move the level — which is what makes an exponent sweep a level-matched
+    /// comparison rather than a loudness comparison.
     ///
-    /// It is unity *below the breakpoint only*. Above it the exponent sets a
-    /// slope, and it is supposed to: that is the thing being listened for.
+    /// **In the reference band, not everywhere below the breakpoint.** That
+    /// was the old law's property; since the share is measured against the
+    /// band, a resonator in a wider band is compensated by `(W_b/W_ref)^p`
+    /// even at the reference decay. The reference has to be one point, and
+    /// [`REFERENCE_BAND_HZ`] is where it is.
+    ///
+    /// The gain there is [`share_makeup`] rather than one: the compensation is
+    /// unity, and the makeup that puts the bank at the level of what excited
+    /// it is not. Asserting the number rather than "unchanged across `p`"
+    /// keeps this a test of both.
     #[test]
-    fn the_compensation_is_unity_below_the_breakpoint_for_every_exponent() {
-        let f_star = breakpoint_hz(500.0, REFERENCE_DECAY_S);
+    fn the_exponent_does_not_move_the_level_at_the_reference_point() {
         for p in [0.0f32, 0.25, 0.5] {
             let mut settings = params(REFERENCE_DECAY_S, 500.0);
             settings.compensation_exponent = p;
@@ -658,18 +735,21 @@ mod tests {
                 .frequencies(60.0, max_centre_hz(SR), &mut centres);
             assert_eq!(n, bank.active());
 
+            let f_star = breakpoint_hz(500.0, REFERENCE_DECAY_S);
             let mut checked = 0;
             for (hz, gain) in centres.iter().zip(bank.gains.iter()).take(n) {
-                if *hz > f_star {
+                if *hz >= REFERENCE_BAND_HZ || *hz > f_star {
                     continue;
                 }
                 checked += 1;
                 assert!(
-                    (gain - 1.0).abs() < 0.02,
-                    "p={p}: {hz} Hz is below f*={f_star} and should be unity, got {gain}"
+                    (gain / share_makeup() - 1.0).abs() < 0.02,
+                    "p={p}: {hz} Hz is in the reference band and should sit at \
+                     the makeup {}, got {gain}",
+                    share_makeup()
                 );
             }
-            assert!(checked >= 3, "expected points below f*, checked {checked}");
+            assert!(checked >= 1, "expected points in the reference band");
         }
     }
 
@@ -702,23 +782,72 @@ mod tests {
         );
     }
 
-    /// Above the breakpoint the slope is `-6.02·p` dB per octave — the same
-    /// exponent that flattens the decay below it. One judgement, not two that
-    /// can disagree.
+    /// The staircase, and where it stops.
+    ///
+    /// Below the breakpoint a resonator keeps its width while each band is
+    /// twice the one below, so its share halves at every edge and the
+    /// compensation lifts by `6.02·p` dB. Above the breakpoint the resonator
+    /// widens with frequency exactly as fast as the bands do, so the share
+    /// stops moving and the compensation stops with it.
+    ///
+    /// **Both halves come from one exponent**, which is the property worth
+    /// keeping from the law this replaced: one judgement about how the bank is
+    /// excited, not two that can disagree.
     #[test]
-    fn above_the_breakpoint_the_slope_is_six_db_per_octave_times_the_exponent() {
-        let q_max = 100.0; // breaks near 220 Hz, leaving most of the band above
-        let f_star = breakpoint_hz(q_max, REFERENCE_DECAY_S);
+    fn the_compensation_steps_at_each_band_edge_below_the_breakpoint_and_not_above() {
         for p in [0.25f32, 0.5] {
-            let mut settings = params(REFERENCE_DECAY_S, q_max);
-            settings.compensation_exponent = p;
+            // The step, measured between two bands that are both below f*.
+            let mut low = params(REFERENCE_DECAY_S, 500.0);
+            low.compensation_exponent = p;
             let mut bank = Bank::new();
-            bank.retune(&[60.0], &settings, SR);
-
+            bank.retune(&[60.0], &low, SR);
             let mut centres = [0.0f32; 64];
-            let n = settings
-                .grid
-                .frequencies(60.0, max_centre_hz(SR), &mut centres);
+            let n = low.grid.frequencies(60.0, max_centre_hz(SR), &mut centres);
+            let f_star = breakpoint_hz(500.0, REFERENCE_DECAY_S);
+
+            let mut by_band: [Option<(f32, f32)>; BANDS] = [None; BANDS];
+            for (hz, gain) in centres.iter().zip(bank.gains.iter()).take(n) {
+                if *hz > f_star {
+                    continue;
+                }
+                if let Some(slot) = by_band.get_mut(band_of(*hz))
+                    && slot.is_none()
+                {
+                    *slot = Some((*hz, *gain));
+                }
+            }
+            let seen: Vec<(usize, f32, f32)> = by_band
+                .iter()
+                .enumerate()
+                .filter_map(|(b, v)| v.map(|(hz, g)| (b, hz, g)))
+                .collect();
+            assert!(seen.len() >= 2, "need two bands below f*, got {seen:?}");
+            for pair in seen.windows(2) {
+                let [(b0, hz0, g0), (b1, hz1, g1)] = [pair[0], pair[1]];
+                // From the widths themselves, not from the band index. The
+                // bottom band is open downward and so is as wide as the one
+                // above it, which makes the first step flat — a test that
+                // assumed one step per edge would be testing a paraphrase.
+                let w0 = band_width_hz(b0, low.grid.high_hz);
+                let w1 = band_width_hz(b1, low.grid.high_hz);
+                let expected = 20.0 * p * (w1 / w0).log10();
+                let step = 20.0 * (g1 / g0).log10();
+                assert!(
+                    (step - expected).abs() < 0.2,
+                    "p={p}: {hz0} Hz (band {b0}, {w0} Hz wide) to {hz1} Hz \
+                     (band {b1}, {w1} Hz wide) stepped {step} dB, expected \
+                     {expected}"
+                );
+            }
+
+            // And above the breakpoint it stops. A low cap puts most of the
+            // band there.
+            let mut high = params(REFERENCE_DECAY_S, 100.0);
+            high.compensation_exponent = p;
+            let mut bank = Bank::new();
+            bank.retune(&[60.0], &high, SR);
+            let n = high.grid.frequencies(60.0, max_centre_hz(SR), &mut centres);
+            let f_star = breakpoint_hz(100.0, REFERENCE_DECAY_S);
             let above: Vec<(f32, f32)> = centres
                 .iter()
                 .zip(bank.gains.iter())
@@ -727,14 +856,11 @@ mod tests {
                 .map(|(hz, g)| (*hz, *g))
                 .collect();
             assert!(above.len() >= 2, "need two points above f*, got {above:?}");
-
             let (f0, g0) = above[0];
             let (f1, g1) = *above.last().unwrap();
-            let per_octave = 20.0 * (g1 / g0).log10() / (f1 / f0).log2();
             assert!(
-                (per_octave + 6.02 * p).abs() < 0.1,
-                "p={p}: expected {} dB/oct, got {per_octave}",
-                -6.02 * p
+                (20.0 * (g1 / g0).log10()).abs() < 0.2,
+                "p={p}: {f0} Hz to {f1} Hz should not move, {g0} to {g1}"
             );
         }
     }

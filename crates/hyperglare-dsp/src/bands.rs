@@ -81,6 +81,48 @@ pub fn band_of(hz: f32) -> usize {
     band
 }
 
+/// How wide band `b` is, for the purpose of asking what share of it one
+/// resonator collects.
+///
+/// Every band but the top has two edges and so has a width. **The top band is
+/// open**, and running it to Nyquist would make the gain law depend on the
+/// sample rate — a render at 96 kHz would not match one at 48. It is closed at
+/// the grid's own ceiling instead, which is where resonators stop existing,
+/// and which lives in `BankParams` so a change to it already retunes.
+///
+/// The bottom band is open too and is *not* clipped. Its lower edge is zero
+/// and its width is the same number at every setting, which is what keeps
+/// [`REFERENCE_BAND_HZ`] a fixed reference: the compensation has to be unity
+/// somewhere that does not move, or sweeping the exponent sweeps the loudness
+/// with it.
+///
+/// A ceiling below the top band's floor leaves that band empty, so the value
+/// is never read; it still returns the floor rather than zero or a negative,
+/// because a width divides.
+#[must_use]
+pub fn band_width_hz(band: usize, high_hz: f32) -> f32 {
+    let lo = EDGES.get(band.wrapping_sub(1)).copied().unwrap_or(0.0);
+    EDGES.get(band).map_or_else(
+        || {
+            let width = high_hz - lo;
+            if width > 0.0 { width } else { lo.max(1.0) }
+        },
+        |hi| hi - lo,
+    )
+}
+
+/// The band width [`crate::bank::BankParams::compensation_exponent`] is
+/// measured against.
+///
+/// The bottom band's width, because
+/// [`REFERENCE_NOTE_HZ`](crate::bank::REFERENCE_NOTE_HZ) is 60 Hz and falls in
+/// it. Like the reference decay, this only decides *where* the compensation is
+/// unity — the point at which sweeping the exponent does not also sweep the
+/// loudness — so what is asked of it is that it be fixed and be somewhere a
+/// bass note actually is. [`band_width_hz`] leaves the bottom band unclipped
+/// so that this stays true of it.
+pub const REFERENCE_BAND_HZ: f32 = EDGES[0];
+
 /// The split's coefficients, derived once per sample-rate change.
 ///
 /// Two `sin_cos` per edge, held off the sample path for the reason every other
