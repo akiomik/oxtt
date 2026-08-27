@@ -5,11 +5,17 @@ One directory per effect, for the same reason `docs/` has one
 these become separate repositories, and a shared `dry.wav` would be an asset
 two of them both depended on with no home in either.
 
-Nothing is shared across the directories, and that is not an oversight. What
-demonstrates a multiband compressor is a full-band musical excerpt; what
-demonstrates a resonator bank is a distorted bass, because a bank of band-pass
-filters can only emphasise energy the input already has
-(`docs/hyperglare/contracts.md`). One file cannot be both.
+Nothing is shared across the directories, and that is not an oversight: a file
+two of these depended on would have no home once they are separate
+repositories. Each keeps its own copy of whatever it needs, even where the two
+copies would be identical.
+
+**What each effect needs from a source is not what it was made on.** This
+directory once said a resonator bank needs a distorted bass and a compressor
+needs a musical excerpt, so no one file could serve both. Measurement says
+otherwise — what a resonator bank needs is a source whose own energy reaches
+across the spectrum, which the drum loop here has and the bass does not
+([ADR 0016](../docs/decisions/0016-the-bank-is-excited-per-band.md)).
 
 | Directory | Effect | State |
 | --- | --- | --- |
