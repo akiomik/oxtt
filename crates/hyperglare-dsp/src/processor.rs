@@ -52,7 +52,7 @@ use effectkit::decibels::db_to_amp;
 use effectkit::filter::{Biquad, biquad_coeffs};
 
 use crate::bank::{BankParams, ResonatorBank};
-use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams, shape};
+use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams, Shaper};
 use crate::wet_match::{WetMatch, WetMatchCoeffs};
 
 /// Where the anti-alias low-pass sits, as a fraction of the sample rate.
@@ -152,6 +152,11 @@ pub struct HyperglareProcessor<const N: usize> {
     bank: ResonatorBank<N>,
     exciter: Exciter,
     exciter_coeffs: ExciterCoeffs,
+    /// The post-drive's constants, rebuilt when `sear` moves.
+    ///
+    /// Separate from the exciter's own shaper because they are separate
+    /// knobs; shared type because they are the same curve.
+    sear: Shaper,
     anti_alias: [Biquad; 2],
     wet_match: WetMatch,
     wet_match_coeffs: WetMatchCoeffs,
@@ -174,7 +179,8 @@ impl<const N: usize> HyperglareProcessor<N> {
         let mut processor = Self {
             bank: ResonatorBank::new(),
             exciter: Exciter::new(),
-            exciter_coeffs: ExciterCoeffs::new(sample_rate),
+            exciter_coeffs: ExciterCoeffs::new(sample_rate, &params.exciter),
+            sear: Shaper::new(params.sear),
             anti_alias: [Biquad::default(); 2],
             wet_match: WetMatch::new(),
             wet_match_coeffs: WetMatchCoeffs::new(sample_rate),
@@ -200,7 +206,7 @@ impl<const N: usize> HyperglareProcessor<N> {
     /// which is what it already had.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-        self.exciter_coeffs = ExciterCoeffs::new(sample_rate);
+        self.exciter_coeffs = ExciterCoeffs::new(sample_rate, &self.params.exciter);
         self.wet_match_coeffs = WetMatchCoeffs::new(sample_rate);
         self.wet_match.reset();
         let coeffs = biquad_coeffs(ANTI_ALIAS_RATIO * sample_rate, sample_rate, false);
@@ -233,6 +239,20 @@ impl<const N: usize> HyperglareProcessor<N> {
         let incoming = notes_hz.get(..count).unwrap_or(&[]);
         let retune =
             params.bank != self.params.bank || count != self.note_count || known != incoming;
+        // The derived values the per-sample path sees, kept level with the
+        // settings they came from. Both cost a `powf`, which is why they are
+        // here and not in `process_frame`.
+        if params.exciter != self.params.exciter {
+            self.exciter_coeffs = ExciterCoeffs::new(self.sample_rate, &params.exciter);
+        }
+        // Exact, and deliberately so: the question is whether the knob moved,
+        // not whether two measurements agree. A tolerance here would leave a
+        // small move showing in the output at the old shape.
+        #[allow(clippy::float_cmp)]
+        let sear_moved = params.sear != self.params.sear;
+        if sear_moved {
+            self.sear = Shaper::new(params.sear);
+        }
         self.params = *params;
         if retune {
             for (slot, hz) in self.notes_hz.iter_mut().zip(notes_hz) {
@@ -273,18 +293,16 @@ impl<const N: usize> HyperglareProcessor<N> {
         let (dry_l, dry_r) = (left * input, right * input);
         let mid = f32::midpoint(dry_l, dry_r);
 
-        let excited = self
-            .exciter
-            .process(mid, &self.params.exciter, &self.exciter_coeffs);
+        let excited = self.exciter.process(mid, &self.exciter_coeffs);
 
         let (mut wet_l, mut wet_r) = match self.params.sear_placement {
             SearPlacement::AfterSum => {
-                let seared = shape(self.bank.process(excited), self.params.sear);
+                let seared = self.sear.shape(self.bank.process(excited));
                 (seared, seared)
             }
             SearPlacement::BeforeSplit => {
                 let (l, r) = self.bank.process_split(excited, self.params.width);
-                (shape(l, self.params.sear), shape(r, self.params.sear))
+                (self.sear.shape(l), self.sear.shape(r))
             }
         };
         // After the waveshaper, always: what it folds down is what this is for.
@@ -414,6 +432,76 @@ mod tests {
         }
         let n = counted as f64;
         ((sum.0 / n).sqrt() as f32, (sum.1 / n).sqrt() as f32)
+    }
+
+    /// The knobs that moved into derived values still reach the output.
+    ///
+    /// `drive`, `noise` and `sear` are read from [`ExciterCoeffs`] and
+    /// [`Shaper`] now, not from the parameters, which is what keeps a `powf`
+    /// off the sample path. The cost is a new way to be wrong: an
+    /// `apply_params` that forgets to rebuild one of them leaves a knob that
+    /// does nothing while still reading back the value it was set to.
+    ///
+    /// So the claim is equality rather than difference — a setting applied to
+    /// a running processor produces the same output as one built with it —
+    /// with a second assertion that the knob does something at all, or the
+    /// first would hold for a knob that was ignored twice.
+    #[test]
+    fn a_setting_applied_matches_a_setting_built_in() {
+        let base = HyperglareParams {
+            exciter: ExciterParams {
+                drive: 0.0,
+                noise_amount: 0.0,
+            },
+            sear: 0.0,
+            color: 1.0,
+            ..HyperglareParams::default()
+        };
+        let moved = [
+            (
+                "drive",
+                HyperglareParams {
+                    exciter: ExciterParams {
+                        drive: 1.0,
+                        ..base.exciter
+                    },
+                    ..base
+                },
+            ),
+            (
+                "noise",
+                HyperglareParams {
+                    exciter: ExciterParams {
+                        noise_amount: 1.0,
+                        ..base.exciter
+                    },
+                    ..base
+                },
+            ),
+            ("sear", HyperglareParams { sear: 1.0, ..base }),
+        ];
+
+        let mut untouched = Processor::new(base, SR);
+        untouched.apply_params(&base, &[55.0]);
+        let flat = run(&mut untouched, 0.3, 0.5);
+
+        for (name, changed) in moved {
+            let mut applied = Processor::new(base, SR);
+            applied.apply_params(&changed, &[55.0]);
+            let mut built = Processor::new(changed, SR);
+            built.apply_params(&changed, &[55.0]);
+
+            let (a, b) = (run(&mut applied, 0.3, 0.5), run(&mut built, 0.3, 0.5));
+            assert!(
+                a == b,
+                "{name} applied gave {a:?} where built in gave {b:?}, so the \
+                 derived values did not follow the setting"
+            );
+            assert!(
+                (b.0 - flat.0).abs() > 1e-6,
+                "{name} changed nothing, so the comparison above proves nothing"
+            );
+        }
     }
 
     /// A chord that loses notes leaves the bank as if it had always been

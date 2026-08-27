@@ -102,24 +102,89 @@ impl Default for ExciterParams {
     }
 }
 
-/// The gate's one-pole coefficients, derived once per sample-rate change.
+/// Everything the exciter's per-sample path needs that costs a transcendental.
 ///
 /// Held apart from the state for the same reason [`effectkit::filter::SvfCoeffs`]
-/// is: they come from an `exp`, and the per-sample path should not.
+/// is, and holding the settings for the same reason [`ResonatorBank`] keeps no
+/// [`BankParams`]: **the per-sample path sees derived values and nothing
+/// else**, so it cannot be handed a coefficient and a setting that disagree
+/// about the same knob.
+///
+/// Derived from the sample rate *and* the settings, so a caller rebuilds this
+/// when either moves. Both are control-rate events.
+///
+/// [`ResonatorBank`]: crate::bank::ResonatorBank
+/// [`BankParams`]: crate::bank::BankParams
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExciterCoeffs {
     attack: f32,
     release: f32,
+    drive: Shaper,
+    noise_amount: f32,
 }
 
 impl ExciterCoeffs {
-    /// Derives the gate's coefficients for a sample rate.
+    /// Derives the exciter's coefficients for a sample rate and a setting.
     #[must_use]
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32, params: &ExciterParams) -> Self {
         Self {
             attack: one_pole(GATE_ATTACK_MS, sample_rate),
             release: one_pole(GATE_RELEASE_MS, sample_rate),
+            drive: Shaper::new(params.drive),
+            noise_amount: params.noise_amount.clamp(0.0, 1.0),
         }
+    }
+}
+
+/// The waveshaper's constants for one drive setting.
+///
+/// [`shape`](Self::shape) needs a `10^(x/20)` and the two quantities derived
+/// from it. With the drive held still that is the same number every sample,
+/// and a `powf` there costs two orders of magnitude more than the arithmetic
+/// around it. Deriving it once is the trade the filters already make.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shaper {
+    amount: f32,
+    gain: f32,
+    /// `(1 + gain) / gain`: what it takes to put a full-scale input back at
+    /// full scale after the clip.
+    normalise: f32,
+}
+
+impl Default for Shaper {
+    fn default() -> Self {
+        Self::new(0.0)
+    }
+}
+
+impl Shaper {
+    /// Derives the constants for a drive amount, `0.0` (bypass) to `1.0`.
+    #[must_use]
+    pub fn new(amount: f32) -> Self {
+        let amount = amount.clamp(0.0, 1.0);
+        let gain = db_to_amp(amount * MAX_DRIVE_DB);
+        Self {
+            amount,
+            gain,
+            normalise: (1.0 + gain) / gain,
+        }
+    }
+
+    /// A soft clip, crossfaded so that zero drive is a bypass.
+    ///
+    /// `u / (1 + |u|)`, normalised so that a full-scale input stays full
+    /// scale, then blended against the input. The blend is what makes zero
+    /// drive exactly transparent — without it the shaper's own curve would
+    /// still be in the path, and "drive at zero" would not mean "no drive".
+    #[inline]
+    #[must_use]
+    pub fn shape(&self, x: f32) -> f32 {
+        if self.amount == 0.0 {
+            return x;
+        }
+        let driven = self.gain * x;
+        let shaped = driven / (1.0 + driven.abs()) * self.normalise;
+        self.amount.mul_add(shaped - x, x)
     }
 }
 
@@ -170,7 +235,7 @@ impl Exciter {
 
     /// One sample in, one sample of excitation out.
     #[inline]
-    pub fn process(&mut self, x: f32, params: &ExciterParams, coeffs: &ExciterCoeffs) -> f32 {
+    pub fn process(&mut self, x: f32, coeffs: &ExciterCoeffs) -> f32 {
         let level = x.abs();
         let coefficient = if level > self.envelope {
             coeffs.attack
@@ -185,10 +250,10 @@ impl Exciter {
             envelope
         };
 
-        let shaped = shape(x, params.drive);
+        let shaped = coeffs.drive.shape(x);
         // The gate is the only thing that stops the noise path from sounding
         // into silence. Multiplying by it is the guarantee.
-        let noise = self.next_noise() * params.noise_amount * self.envelope;
+        let noise = self.next_noise() * coeffs.noise_amount * self.envelope;
         shaped + noise
     }
 
@@ -202,27 +267,6 @@ impl Exciter {
         // integer-to-float rounding; the affine map takes that to `[-1, 1)`.
         f32::from_bits((self.rng >> 9) | 0x3f80_0000).mul_add(2.0, -3.0)
     }
-}
-
-/// The waveshaper: a soft clip, crossfaded so that zero drive is a bypass.
-///
-/// `u / (1 + |u|)`, normalised so that a full-scale input stays full-scale,
-/// then blended against the input. The blend is what makes zero drive exactly
-/// transparent — without it the shaper's own curve would still be in the path,
-/// and "drive at zero" would not mean "no drive".
-#[inline]
-pub(crate) fn shape(x: f32, drive: f32) -> f32 {
-    let drive = drive.clamp(0.0, 1.0);
-    if drive == 0.0 {
-        return x;
-    }
-    let gain = db_to_amp(drive * MAX_DRIVE_DB);
-    let driven = gain * x;
-    // `gain / (1 + gain)` is what a full-scale input becomes, so dividing by
-    // it keeps the shaper's output at the scale its input arrived on.
-    let normalise = (1.0 + gain) / gain;
-    let shaped = driven / (1.0 + driven.abs()) * normalise;
-    drive.mul_add(shaped - x, x)
 }
 
 #[cfg(test)]
@@ -243,8 +287,8 @@ mod tests {
 
     const SR: f32 = 48_000.0;
 
-    fn coeffs() -> ExciterCoeffs {
-        ExciterCoeffs::new(SR)
+    fn coeffs(params: ExciterParams) -> ExciterCoeffs {
+        ExciterCoeffs::new(SR, &params)
     }
 
     /// Everything at maximum, which is the only setting at which this can
@@ -263,13 +307,14 @@ mod tests {
     /// multiplication being removed.
     #[test]
     fn silence_in_gives_exactly_silence_out_with_everything_at_maximum() {
-        let (params, coeffs) = (wide_open(), coeffs());
+        let params = wide_open();
+        let coeffs = coeffs(params);
         let mut exciter = Exciter::new();
 
         // Something loud first, so the gate has to have actually closed rather
         // than never having opened.
         for i in 0..4_800 {
-            exciter.process((i as f32 * 0.01).sin(), &params, &coeffs);
+            exciter.process((i as f32 * 0.01).sin(), &coeffs);
         }
         assert!(exciter.gate() > 0.0, "the gate should be open by now");
 
@@ -280,7 +325,7 @@ mod tests {
         let constants = -(envelope_floor().ln());
         let wait = (release_samples * constants * 1.2) as usize;
         for _ in 0..wait {
-            exciter.process(0.0, &params, &coeffs);
+            exciter.process(0.0, &coeffs);
         }
         // Exact comparisons on purpose: the claim is zero, not "small". A
         // tolerance here would pass for a gate that had been removed, which is
@@ -289,7 +334,7 @@ mod tests {
         {
             assert_eq!(exciter.gate(), 0.0, "the gate never fully closed");
             for i in 0..4_800 {
-                let y = exciter.process(0.0, &params, &coeffs);
+                let y = exciter.process(0.0, &coeffs);
                 assert_eq!(y, 0.0, "sample {i} of silence was {y}, not zero");
             }
         }
@@ -299,7 +344,6 @@ mod tests {
     /// contributing. A gate stuck shut would satisfy the test above.
     #[test]
     fn the_noise_path_contributes_while_the_input_is_present() {
-        let coeffs = coeffs();
         let quiet = ExciterParams {
             drive: 0.0,
             noise_amount: 0.0,
@@ -310,13 +354,14 @@ mod tests {
         };
 
         let energy = |params: &ExciterParams| {
+            let coeffs = coeffs(*params);
             let mut exciter = Exciter::new();
             let mut sum = 0.0f64;
             for i in 0..4_800 {
                 // A pure tone: with no drive and no noise, the output is the
                 // input, so any excess is the noise path.
                 let x = (2.0 * PI * 110.0 * i as f32 / SR).sin();
-                let y = exciter.process(x, params, &coeffs);
+                let y = exciter.process(x, &coeffs);
                 sum += f64::from(y - x) * f64::from(y - x);
             }
             sum
@@ -337,17 +382,17 @@ mod tests {
     /// the crossfade the soft clip would still be in the path.
     #[test]
     fn zero_drive_is_transparent() {
-        let coeffs = coeffs();
         let params = ExciterParams {
             drive: 0.0,
             noise_amount: 0.0,
         };
+        let coeffs = coeffs(params);
         let mut exciter = Exciter::new();
         // Exact: "transparent" means the sample comes back unchanged, not
         // approximately unchanged.
         #[allow(clippy::float_cmp)]
         for x in [0.0f32, 0.1, -0.25, 0.5, -1.0, 1.0] {
-            let y = exciter.process(x, &params, &coeffs);
+            let y = exciter.process(x, &coeffs);
             assert_eq!(y, x, "{x} came back as {y}");
         }
     }
@@ -356,7 +401,6 @@ mod tests {
     /// grid points sitting on the root's own harmonics.
     #[test]
     fn drive_adds_harmonics_of_the_input() {
-        let coeffs = coeffs();
         // A pure sine has one partial. Count how much energy leaves the
         // fundamental once the shaper is working.
         let third_harmonic = |drive: f32| {
@@ -364,12 +408,13 @@ mod tests {
                 drive,
                 noise_amount: 0.0,
             };
+            let coeffs = coeffs(params);
             let mut exciter = Exciter::new();
             let (freq, samples) = (220.0f32, 4_800usize);
             let (mut re, mut im) = (0.0f64, 0.0f64);
             for i in 0..samples {
                 let t = i as f32 / SR;
-                let y = exciter.process((2.0 * PI * freq * t).sin(), &params, &coeffs);
+                let y = exciter.process((2.0 * PI * freq * t).sin(), &coeffs);
                 let probe = 2.0 * PI * (3.0 * freq) * t;
                 re += f64::from(y) * f64::from(probe.cos());
                 im += f64::from(y) * f64::from(probe.sin());
@@ -394,23 +439,25 @@ mod tests {
     #[test]
     fn the_shaper_holds_its_scale_across_the_drive_range() {
         for drive in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
-            let y = shape(1.0, drive);
+            let shaper = Shaper::new(drive);
+            let y = shaper.shape(1.0);
             assert!(
                 (y - 1.0).abs() < 1e-5,
                 "drive {drive}: full scale became {y}"
             );
-            assert!((shape(-1.0, drive) + 1.0).abs() < 1e-5);
+            assert!((shaper.shape(-1.0) + 1.0).abs() < 1e-5);
         }
     }
 
     /// Reset rewinds the noise, so two renders of one setting are one file.
     #[test]
     fn reset_makes_a_render_reproducible() {
-        let (params, coeffs) = (wide_open(), coeffs());
+        let params = wide_open();
+        let coeffs = coeffs(params);
         let run = |exciter: &mut Exciter| {
             let mut out = Vec::new();
             for i in 0..512 {
-                out.push(exciter.process((i as f32 * 0.01).sin(), &params, &coeffs));
+                out.push(exciter.process((i as f32 * 0.01).sin(), &coeffs));
             }
             out
         };

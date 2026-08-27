@@ -56,6 +56,24 @@ cost two orders of magnitude more than the filtering itself.
   can see in `active()` and act on; a level drop it could only hear would tell
   it nothing about what to change.
 
+## 2.1 Derived values and the settings they came from
+
+**Nothing on the per-sample path reads a parameter.** `ResonatorBank` keeps no
+`BankParams`, and since the drive's `10^(x/20)` moved off the sample path
+`Exciter` keeps no `ExciterParams` either: both see coefficients that were
+derived at control rate and nothing else.
+
+This is a guarantee about a failure that cannot happen rather than one about
+behaviour. A path that could see both would be a path that can be handed a
+coefficient and a setting disagreeing about the same knob, and the symptom —
+a knob that reads back correctly and does nothing — is one a caller cannot
+diagnose from the outside.
+
+The obligation this puts on a caller is exact: **`ExciterCoeffs` is derived
+from the sample rate *and* the exciter's settings, so it is rebuilt when either
+moves.** `HyperglareProcessor` does this in `apply_params` and
+`set_sample_rate`; a caller driving the pieces directly owns it.
+
 ## 3. Buffer processing
 
 `HyperglareProcessor::process` is a loop over `process_frame` and nothing else,
