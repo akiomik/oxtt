@@ -19,13 +19,26 @@ to. A clean sine has one partial and the bank has almost nothing to ring on.
 `dry.wav` measures 55 Hz with partials to about 550 Hz, which is a tenth
 harmonic.
 
-**It is a poor source for this effect, and worth keeping as the example of
-why.** Measured against three commercial colour-bass processors and their
-shared source loop, what a source needs is energy *between* its partials and
-movement over time. This one has neither: its spectral flatness is 0.00006
-against about 0.5 for the reference material, and its frame-to-frame movement
-is 0.15 against 0.48. A resonator bank fed a clean harmonic series can only
-return a clean harmonic series, which is an organ.
+**It is a poor source for this effect, and there is now a number for it.**
+[ADR 0016](../../docs/decisions/0016-the-bank-is-excited-per-band.md) is
+*proposed*, not implemented: today's exciter is still broadband, and the
+figures below come from a prototype rather than from this crate. Under that
+proposal a resonator is excited by the input's energy in its own
+neighbourhood, so a band the source is empty in would produce nothing at all —
+the source's own reach becomes the effect's reach, and that can be measured
+before anybody listens:
+
+```text
+source's energy per band, loudest band at 0 dB
+                 125-250  250-500   500-1k    1k-2k    2k-4k    4k-8k
+ this file           0.0     -4.6    -16.9    -33.1    -54.0    -70.0
+ a source that works 0.0     -9.7    -12.4    -12.1     -8.1     -5.0
+```
+
+**Roughly 10 dB per octave of fall is the practical bound**, on the evidence of
+the sources that have worked and the ones that have not. This file falls off a
+cliff: 54 dB down at 2 kHz, 70 at 4. Everything above its tenth harmonic is
+silence, so everything above its tenth harmonic stays silent.
 
 A distorted bass with noise in it, moving under an LFO, is what the effect is
 for. This file is a single sustained FM tone.
@@ -39,7 +52,10 @@ for. This file is a single sustained FM tone.
 | Pitch | Around A1–A2 (MIDI 33–45), where the design's figures are quoted |
 
 **Name the chord to match the source.** `dry.wav` is A1, so the default
-`--notes 33,40,45` is an A minor triad rooted on it. A chord that has nothing
+`--notes 33,40,45` is rooted on it — A1, E2, A2, which is a root, a fifth and
+an octave rather than a triad. There is no third in it, deliberately: the
+third is the note that decides major from minor, and a grid that states one
+argues with a bass line that meant the other. A chord that has nothing
 to do with the source is a legitimate thing to try — it is what the effect is
 for — but it is not the first thing to listen to.
 

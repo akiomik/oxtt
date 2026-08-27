@@ -264,5 +264,10 @@ See [`docs/effectkit/realtime.md`](../effectkit/realtime.md).
 
 What lands where, in this crate: `ResonatorBank::process` is the per-sample
 path, and `retune` and `Grid::frequencies` are on the callback too — under Bela
-a chord change arrives inside `render_pre`. All three carry `#[no_panic]`
-proofs, checked at link time by `cargo test --release`.
+a chord change arrives inside `render_pre`.
+
+**Six functions carry `#[no_panic]` proofs**, checked at link time by
+`cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,
+the exciter, the wet matcher's `correction`, and the processor's own frame. The
+list lives in `crates/hyperglare-dsp/src/lib.rs`; this paragraph is a summary
+of it and the tests are what enforce it.

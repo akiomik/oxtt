@@ -277,8 +277,11 @@ impl Grid {
                         return;
                     }
                     if paired {
+                        // Both ends, not just the top: a negative spread puts
+                        // the partner *below* its primary, and the band's
+                        // floor is as real a boundary as its ceiling.
                         let paired_hz = f * spread;
-                        if paired_hz < high && !emit(paired_hz) {
+                        if paired_hz >= self.low_hz && paired_hz < high && !emit(paired_hz) {
                             return;
                         }
                     }

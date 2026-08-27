@@ -183,7 +183,7 @@ mod proofs {
     fn the_wet_matcher_cannot_panic() {
         #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
         fn run(m: &mut WetMatch, dry: f32, wet: f32, amount: f32, c: &WetMatchCoeffs) -> f32 {
-            m.process(dry, wet, amount, c)
+            m.correction(dry, wet, amount, c)
         }
 
         let coeffs = WetMatchCoeffs::new(48_000.0);

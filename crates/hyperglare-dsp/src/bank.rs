@@ -246,7 +246,7 @@ impl<const N: usize> ResonatorBank<N> {
     pub fn new() -> Self {
         Self {
             filters: [Svf::new(); N],
-            coeffs: [SvfCoeffs::new(1_000.0, 48_000.0, 1.0); N],
+            coeffs: [idle_coeffs(); N],
             gains: [0.0; N],
             active: 0,
             voice_norm: 1.0,
@@ -344,6 +344,23 @@ impl<const N: usize> ResonatorBank<N> {
         {
             f.reset_state();
         }
+        // Slots past the chord are never read — `process` and `process_split`
+        // both stop at `active` — so what they hold cannot be heard. It can
+        // still be compared: this type derives `PartialEq`, and leaving
+        // whatever a previous, larger chord wrote would make two banks that
+        // sound identical compare unequal because of history. A shrinking
+        // retune is not hypothetical; dropping the sample rate far enough
+        // shortens the grid on its own.
+        let idle = idle_coeffs();
+        for (coeffs, gain) in self
+            .coeffs
+            .iter_mut()
+            .zip(self.gains.iter_mut())
+            .skip(written)
+        {
+            *coeffs = idle;
+            *gain = 0.0;
+        }
         self.active = written;
         // Resonators are mutually incoherent, so the sum grows as the square
         // root of their number: divide by the square root of how many the
@@ -415,6 +432,15 @@ impl<const N: usize> ResonatorBank<N> {
         }
         sum * self.voice_norm
     }
+}
+
+/// What an unused coefficient slot holds.
+///
+/// Any value would do for the audio, since nothing reads past `active`. One
+/// value is what makes equality mean "these two banks are the same bank"
+/// rather than "these two banks were reached the same way".
+fn idle_coeffs() -> SvfCoeffs {
+    SvfCoeffs::new(1_000.0, 48_000.0, 1.0)
 }
 
 /// The detune ratio for one voice, spread deterministically across the chord.

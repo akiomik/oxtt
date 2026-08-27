@@ -156,6 +156,14 @@ pub struct HyperglareProcessor<const N: usize> {
     wet_match: WetMatch,
     wet_match_coeffs: WetMatchCoeffs,
     params: HyperglareParams,
+    /// The chord [`apply_params`](Self::apply_params) was last given.
+    ///
+    /// Kept so that a sample-rate change can retune from it. Sized to the
+    /// bank's capacity because that is already the point past which
+    /// [`ResonatorBank::retune`] stops reading, so this remembers everything
+    /// a retune could have used and nothing more.
+    notes_hz: [f32; N],
+    note_count: usize,
     sample_rate: f32,
 }
 
@@ -171,6 +179,8 @@ impl<const N: usize> HyperglareProcessor<N> {
             wet_match: WetMatch::new(),
             wet_match_coeffs: WetMatchCoeffs::new(sample_rate),
             params,
+            notes_hz: [0.0; N],
+            note_count: 0,
             sample_rate,
         };
         processor.set_sample_rate(sample_rate);
@@ -178,6 +188,16 @@ impl<const N: usize> HyperglareProcessor<N> {
     }
 
     /// Rebuilds everything that depends on the sample rate, and clears state.
+    ///
+    /// **The bank included.** Its coefficients came from a `tan` of the old
+    /// rate, so leaving them detunes the whole chord by the ratio of the two
+    /// rates; its filter state is a tail counted in the old rate's samples, so
+    /// leaving that rings the old tuning through the change. Both are why the
+    /// chord is kept in [`notes_hz`](Self#structfield.notes_hz) — there is
+    /// nothing else here to retune from.
+    ///
+    /// A processor that has never been given a chord retunes to no notes,
+    /// which is what it already had.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         self.exciter_coeffs = ExciterCoeffs::new(sample_rate);
@@ -189,15 +209,38 @@ impl<const N: usize> HyperglareProcessor<N> {
             stage.reset_state();
         }
         self.exciter.reset();
+        // The tails belong to the old rate; the tuning is rebuilt for the new
+        // one. Copied out first because both live behind the same `&mut self`.
+        self.bank.reset_state();
+        let (notes, count, bank) = (self.notes_hz, self.note_count, self.params.bank);
+        self.bank
+            .retune(notes.get(..count).unwrap_or(&notes), &bank, sample_rate);
     }
 
     /// Applies a new setting. Control rate, not sample rate.
     ///
     /// The bank is retuned only when something it depends on has moved, so a
-    /// knob that is not a bank knob costs nothing.
+    /// knob that is not a bank knob costs nothing. `color`, the gains, the
+    /// sear and the wet match are all in that group; everything inside
+    /// [`BankParams`] and the chord itself are not.
+    ///
+    /// A note that is `NaN` compares unequal to itself, so a chord carrying
+    /// one retunes on every call. That is the safe direction to be wrong in,
+    /// and it costs nothing a caller passing `NaN` was going to get anyway.
     pub fn apply_params(&mut self, params: &HyperglareParams, notes_hz: &[f32]) {
+        let count = notes_hz.len().min(N);
+        let known = self.notes_hz.get(..count).unwrap_or(&[]);
+        let incoming = notes_hz.get(..count).unwrap_or(&[]);
+        let retune =
+            params.bank != self.params.bank || count != self.note_count || known != incoming;
         self.params = *params;
-        self.bank.retune(notes_hz, &params.bank, self.sample_rate);
+        if retune {
+            for (slot, hz) in self.notes_hz.iter_mut().zip(notes_hz) {
+                *slot = *hz;
+            }
+            self.note_count = count;
+            self.bank.retune(notes_hz, &params.bank, self.sample_rate);
+        }
     }
 
     /// How many resonators are sounding.
@@ -251,16 +294,9 @@ impl<const N: usize> HyperglareProcessor<N> {
         // balance and print it onto a wet that has no image of its own, which
         // is a width manufactured from a level rather than one that is there.
         let wet_mid = f32::midpoint(wet_l, wet_r);
-        let matched =
+        let correction =
             self.wet_match
-                .process(mid, wet_mid, self.params.wet_match, &self.wet_match_coeffs);
-        // The correction is a ratio, so apply it as one rather than replacing
-        // the pair with the mid it was measured on.
-        let correction = if wet_mid.abs() > f32::EPSILON {
-            matched / wet_mid
-        } else {
-            1.0
-        };
+                .correction(mid, wet_mid, self.params.wet_match, &self.wet_match_coeffs);
         wet_l *= correction;
         wet_r *= correction;
 
@@ -371,6 +407,84 @@ mod tests {
         }
         let n = counted as f64;
         ((sum.0 / n).sqrt() as f32, (sum.1 / n).sqrt() as f32)
+    }
+
+    /// A rate change rebuilds the bank, and not only the parts around it.
+    ///
+    /// The strongest statement available: a processor moved to a new rate is
+    /// **indistinguishable** from one built at that rate and given the same
+    /// chord. Anything left behind at the old rate — a coefficient, a tail, a
+    /// forgotten note — makes the two differ.
+    ///
+    /// **3 kHz is in the list on purpose.** At the ordinary rates the grid
+    /// generates the same number of points whatever the rate, because the
+    /// band's ceiling is well below every Nyquist involved — so a test that
+    /// stopped at 96 kHz would pass without ever exercising a retune that
+    /// *shrinks*, which is the case that catches a stale coefficient past the
+    /// end of the chord. Raising the band's ceiling would put 96 kHz in the
+    /// same class; 3 kHz is here so the property does not quietly stop being
+    /// tested when it does.
+    #[test]
+    fn changing_the_sample_rate_retunes_the_bank() {
+        let params = HyperglareParams::default();
+        let notes = [55.0f32, 82.4, 110.0];
+
+        for rate in [96_000.0f32, 44_100.0, 3_000.0] {
+            let mut moved = Processor::new(params, SR);
+            moved.apply_params(&params, &notes);
+            moved.set_sample_rate(rate);
+
+            let mut built = Processor::new(params, rate);
+            built.apply_params(&params, &notes);
+
+            assert_eq!(
+                moved.active(),
+                built.active(),
+                "at {rate} Hz the moved processor sounds {} resonators, the \
+                 freshly built one {}",
+                moved.active(),
+                built.active()
+            );
+            assert!(
+                moved == built,
+                "a processor moved to {rate} Hz still differs from one built there"
+            );
+        }
+    }
+
+    /// The claim `apply_params` makes about cost.
+    ///
+    /// A knob outside `BankParams` must leave the bank untouched — not
+    /// "retuned to the same thing", untouched — because retuning runs a `tan`
+    /// and a `powf` per resonator and the doc promises it does not happen.
+    #[test]
+    fn a_knob_outside_the_bank_does_not_retune_it() {
+        let params = HyperglareParams::default();
+        let notes = [55.0f32, 82.4, 110.0];
+        let mut processor = Processor::new(params, SR);
+        processor.apply_params(&params, &notes);
+        let tuned = processor.bank;
+
+        let mut quieter = params;
+        quieter.color = 0.25;
+        quieter.output_gain_db = -6.0;
+        processor.apply_params(&quieter, &notes);
+        assert!(processor.bank == tuned, "a mix knob retuned the bank");
+
+        // And the guard is not simply "never": the things it does watch still
+        // get through, or the chord could never change.
+        let mut higher = quieter;
+        higher.bank.decay_t60_s = params.bank.decay_t60_s * 4.0;
+        processor.apply_params(&higher, &notes);
+        assert!(processor.bank != tuned, "a decay change did not retune");
+
+        processor.apply_params(&higher, &notes);
+        let settled = processor.bank;
+        // Not an octave of the first chord. Under `Geometry::Octaves` a
+        // transposition by an octave generates the *same* set of frequencies,
+        // so a bank that never noticed the change would pass anyway.
+        processor.apply_params(&higher, &[61.7, 92.5, 123.5]);
+        assert!(processor.bank != settled, "a chord change did not retune");
     }
 
     /// The invariant `docs/hyperglare/contracts.md` §4 warns is no longer
@@ -601,7 +715,6 @@ mod tests {
         );
     }
 
-    /// Nothing the processor can be asked for escapes into a host as a
     /// Nothing the processor can be asked for escapes into a host as a
     /// non-finite sample or as an unbounded one.
     #[test]

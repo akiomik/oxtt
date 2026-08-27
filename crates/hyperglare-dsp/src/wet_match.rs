@@ -151,14 +151,20 @@ impl WetMatch {
         self.gain
     }
 
-    /// Observes one frame and returns the wet, scaled to the dry.
+    /// Observes one frame and returns the factor the wet should be scaled by.
     ///
-    /// `amount` interpolates the correction in decibels: `0.0` leaves the wet
-    /// exactly as the bank produced it, `1.0` matches it to the dry. The
+    /// **A factor rather than the scaled sample**, because the caller has a
+    /// stereo pair and this is measured on their mid. Handing back the scaled
+    /// mid would leave the caller to recover the factor by dividing, which is
+    /// undefined exactly when an anti-phase pair sums to nothing — a case that
+    /// has a perfectly good correction and no mid to divide by.
+    ///
+    /// `amount` interpolates the correction in decibels: `0.0` returns exactly
+    /// one, `1.0` returns the factor that matches the wet to the dry. The
     /// middle is a real setting rather than a fudge — a source that wants some
     /// of the bank's own dynamics back asks for less than all of it.
     #[inline]
-    pub fn process(&mut self, dry: f32, wet: f32, amount: f32, coeffs: &WetMatchCoeffs) -> f32 {
+    pub fn correction(&mut self, dry: f32, wet: f32, amount: f32, coeffs: &WetMatchCoeffs) -> f32 {
         let level = dry.abs();
         let c = coeffs.follower;
         self.dry = c.mul_add(self.dry - level, level);
@@ -185,8 +191,7 @@ impl WetMatch {
         let amount = amount.clamp(0.0, 1.0);
         // Interpolated in decibels rather than linearly, so that half of a
         // 20 dB correction is 10 dB and not a fifth of the way to it.
-        let applied = powf_from_db(amount * amp_to_db(self.gain));
-        wet * applied
+        powf_from_db(amount * amp_to_db(self.gain))
     }
 }
 
@@ -228,7 +233,7 @@ mod tests {
             let phase = 2.0 * PI * 220.0 * i as f32 / SR;
             let dry = phase.sin() * dry_level;
             let wet = (phase * 1.5).sin() * wet_level;
-            last = matcher.process(dry, wet, amount, &coeffs);
+            last = wet * matcher.correction(dry, wet, amount, &coeffs);
         }
         (matcher.gain(), last)
     }
@@ -278,7 +283,10 @@ mod tests {
         for i in 0..4_800 {
             let phase = 2.0 * PI * 220.0 * i as f32 / SR;
             let wet = phase.sin() * 0.01;
-            assert_eq!(matcher.process(phase.sin() * 0.5, wet, 0.0, &coeffs), wet);
+            assert_eq!(
+                wet * matcher.correction(phase.sin() * 0.5, wet, 0.0, &coeffs),
+                wet
+            );
         }
     }
 
@@ -294,14 +302,15 @@ mod tests {
         let mut matcher = WetMatch::new();
         for i in 0..(SR as usize * 3) {
             let phase = 2.0 * PI * 220.0 * i as f32 / SR;
-            matcher.process(phase.sin() * 0.5, (phase * 1.5).sin() * 0.05, 1.0, &coeffs);
+            let w = (phase * 1.5).sin() * 0.05;
+            matcher.correction(phase.sin() * 0.5, w, 1.0, &coeffs);
         }
 
         // Half a second into the tail, by which time the detector has closed.
         let mut early = 0.0;
         for i in 0..(SR as usize * 2) {
             let decay = (-(i as f32) / SR).exp();
-            matcher.process(0.0, decay * 0.05, 1.0, &coeffs);
+            matcher.correction(0.0, decay * 0.05, 1.0, &coeffs);
             if i == SR as usize / 2 {
                 early = matcher.gain();
             }
@@ -320,7 +329,7 @@ mod tests {
         let mut matcher = WetMatch::new();
         #[allow(clippy::float_cmp)]
         for _ in 0..4_800 {
-            assert_eq!(matcher.process(0.0, 0.0, 1.0, &coeffs), 0.0);
+            assert_eq!(0.0 * matcher.correction(0.0, 0.0, 1.0, &coeffs), 0.0);
         }
     }
 
