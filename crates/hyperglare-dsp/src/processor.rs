@@ -409,6 +409,75 @@ mod tests {
         ((sum.0 / n).sqrt() as f32, (sum.1 / n).sqrt() as f32)
     }
 
+    /// A chord that loses notes leaves the bank as if it had always been
+    /// small.
+    ///
+    /// The same principle the rate test rests on, reached by the path a host
+    /// actually takes. `retune` stops writing at the chord's length, so a
+    /// shrink leaves the slots above it holding the tail of a chord that is no
+    /// longer sounding. Nothing reads them — both process paths stop at
+    /// `active` — so the two processors below are bit-identical forever, and
+    /// an equality that noticed the difference would be reporting history
+    /// rather than behaviour.
+    ///
+    /// **The silence is load-bearing.** Without it the surviving resonators
+    /// are still ringing the old chord, which is deliberate and would make
+    /// these two differ for a reason that has nothing to do with the point.
+    ///
+    /// The claim is about the bank rather than the whole processor, because
+    /// the processor holds one piece of history that is not inaudible: the
+    /// noise generator's position. Two of those are silent together only
+    /// while the gate is shut.
+    #[test]
+    fn a_chord_that_loses_notes_leaves_no_trace_above_it() {
+        let params = HyperglareParams {
+            bank: BankParams {
+                decay_t60_s: 0.05,
+                ..BankParams::default()
+            },
+            ..HyperglareParams::default()
+        };
+        let big = [55.0f32, 61.7, 65.4, 82.4, 110.0];
+        let small = [55.0f32];
+
+        let mut shrunk = Processor::new(params, SR);
+        shrunk.apply_params(&params, &big);
+        for i in 0..(SR as usize) {
+            let x = tone(i, 55.0) * 0.5;
+            shrunk.process_frame(x, x);
+        }
+        shrunk.apply_params(&params, &small);
+        // Long enough for the survivors to cross the filter's denormal floor,
+        // which is where "decaying" becomes "silent".
+        for _ in 0..(2.0 * SR) as usize {
+            shrunk.process_frame(0.0, 0.0);
+        }
+
+        let mut fresh = Processor::new(params, SR);
+        fresh.apply_params(&params, &small);
+
+        for i in 0..(SR as usize) {
+            let a = shrunk.process_frame(0.0, 0.0);
+            let b = fresh.process_frame(0.0, 0.0);
+            assert!(a == b, "frame {i} differs: {a:?} against {b:?}");
+        }
+        assert!(
+            shrunk.bank == fresh.bank,
+            "the two sound the same forever and their banks still compare unequal"
+        );
+        // **Not the whole processor.** The exciter's noise generator has been
+        // advanced by everything the shrunk one has played, and two generators
+        // at different positions really are different: they are silent only
+        // while the gate is shut, and produce different noise the moment it
+        // opens. That inequality is reporting a difference that can be heard,
+        // which is exactly the line the bank's own normalisation draws.
+        assert!(
+            shrunk != fresh,
+            "if these ever compare equal, the noise generator has stopped \
+             being state and this comment is wrong"
+        );
+    }
+
     /// A rate change rebuilds the bank, and not only the parts around it.
     ///
     /// The strongest statement available: a processor moved to a new rate is

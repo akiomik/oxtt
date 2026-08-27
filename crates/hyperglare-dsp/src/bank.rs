@@ -349,17 +349,28 @@ impl<const N: usize> ResonatorBank<N> {
         // still be compared: this type derives `PartialEq`, and leaving
         // whatever a previous, larger chord wrote would make two banks that
         // sound identical compare unequal because of history. A shrinking
-        // retune is not hypothetical; dropping the sample rate far enough
-        // shortens the grid on its own.
+        // retune is not hypothetical; a chord that loses a note does it, and
+        // so does dropping the sample rate far enough to shorten the grid.
+        //
+        // **The state goes with the coefficients**, for the same reason and
+        // with no cost to the tails. The filters below `written` keep theirs,
+        // which is what makes a chord change a portamento rather than a click;
+        // the ones above it have already stopped being summed, so their tails
+        // ended at the retune whatever this does. They are reset before they
+        // could ever be reused anyway — the loop below this one does it when
+        // the chord grows back — so this only decides whether a dead tail is
+        // also an invisible one.
         let idle = idle_coeffs();
-        for (coeffs, gain) in self
+        for ((coeffs, gain), filter) in self
             .coeffs
             .iter_mut()
             .zip(self.gains.iter_mut())
+            .zip(self.filters.iter_mut())
             .skip(written)
         {
             *coeffs = idle;
             *gain = 0.0;
+            filter.reset_state();
         }
         self.active = written;
         // Resonators are mutually incoherent, so the sum grows as the square
