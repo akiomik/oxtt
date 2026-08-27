@@ -158,6 +158,41 @@ It holds while the input is silent. A ratio of two decaying envelopes says
 nothing, and sweeping the gain across a tail would reshape the one part of the
 output that is the effect's own.
 
+## 5.0 Where the band stops
+
+**The grid's ceiling defaults to 1.8 kHz, and the reason is a reversal.**
+
+The design held that extending resonance into the top of the spectrum is what
+makes an effect glare, and took a 9 kHz ceiling from a published range.
+Measured against three commercial colour-bass processors on one source, that is
+false for a resonator bank.
+
+A resonator is narrow. An octave apart at 4 kHz its neighbours are two thousand
+hertz away and its own bandwidth is ten, so the top of the band arrives as a
+handful of isolated sustained sine tones with silence between them — which is
+how a tubular bell is made, and is what it was heard as. It also stops
+following the input, because nothing up there is exciting it but broadband
+noise.
+
+```text
+grid ceiling   9000   2500   1800   1200      references
+density       0.181  0.221  0.304  0.306   0.192 .. 0.298
+tracking      -0.18  -0.24  -0.33  -0.33   -0.26 .. -0.32
+```
+
+Stopping below about 2 kHz puts both measures inside the references' range,
+**because the top then belongs to the source again** — the input's own high
+band is dense and moves with the music, since the music made it.
+
+The published range this came from belongs to an effect that drives tuned
+oscillators from a filter bank. Its density up there comes from the analysis
+rather than from the grid, so the number travelled without the mechanism that
+fills it.
+
+**The design's stated goal of glare is not met by this, and is not abandoned.**
+What it costs is stated rather than hidden: raise the ceiling and the top of
+the band returns, as bells.
+
 ## 5.1 Stereo
 
 **The wet path is mono under `SearPlacement::AfterSum`.** Once the resonators

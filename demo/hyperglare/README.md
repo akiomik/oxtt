@@ -17,11 +17,18 @@ can only emphasise energy the input already has at the frequencies it is tuned
 to. A clean sine has one partial and the bank has almost nothing to ring on.
 
 `dry.wav` measures 55 Hz with partials to about 550 Hz, which is a tenth
-harmonic — dark for this effect on its own, and enough once the excitation
-stage is doing its job. Measured against the dry file, at drive 0.6 and noise
-0.6, the render adds **37 dB in the 3–9 kHz band**; with the noise path alone
-it adds 47 dB. That is the glare, and it comes almost entirely from the noise
-path, exactly as `crate::exciter` says it does.
+harmonic.
+
+**It is a poor source for this effect, and worth keeping as the example of
+why.** Measured against three commercial colour-bass processors and their
+shared source loop, what a source needs is energy *between* its partials and
+movement over time. This one has neither: its spectral flatness is 0.00006
+against about 0.5 for the reference material, and its frame-to-frame movement
+is 0.15 against 0.48. A resonator bank fed a clean harmonic series can only
+return a clean harmonic series, which is an organ.
+
+A distorted bass with noise in it, moving under an LFO, is what the effect is
+for. This file is a single sustained FM tone.
 
 | | |
 | --- | --- |
@@ -65,7 +72,7 @@ cargo run --release -p hyperglare-render -- \
 
 Read the reported `normalization_gain_db`: a setting that needed a large
 correction was mostly a level change, which is half of what a comparison is
-for. These two need −0.9 dB and −4.7 dB, which is a change from the 12.4 and
-4.6 they needed before the wet was matched to the dry — the wet is now the
-same size as the thing it is mixed against, so the render arrives close to the
-level it should be.
+for. These two need −3.0 dB and −5.1 dB, which is a change from the 12.4 and 4.6
+they needed before the wet was matched to the dry — the wet is now the same
+size as the thing it is mixed against, so the render arrives close to the level
+it should be.

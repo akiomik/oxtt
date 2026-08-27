@@ -575,9 +575,17 @@ mod tests {
             rendered.push((name, report, frames));
         }
 
-        // Densities really do differ by the order of magnitude that makes the
-        // comparison worth level-matching.
-        assert!(rendered[2].1.active_resonators > 10 * rendered[0].1.active_resonators);
+        // Densities really do differ by the several-fold factor that makes
+        // the comparison worth level-matching. A multiple rather than a count,
+        // because the ratio follows the band's width: it is about four at the
+        // default ceiling and fifteen at 9 kHz, since a harmonic series grows
+        // with the ceiling and an octave grid grows with its logarithm.
+        assert!(
+            rendered[2].1.active_resonators > 4 * rendered[0].1.active_resonators,
+            "{} harmonics against {} octaves",
+            rendered[2].1.active_resonators,
+            rendered[0].1.active_resonators
+        );
 
         for (name, report, _) in &rendered {
             assert!(

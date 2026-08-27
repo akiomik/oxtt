@@ -60,9 +60,43 @@ pub const DEFAULT_LOW_HZ: f32 = 65.0;
 
 /// Highest frequency a grid point is generated at, before Nyquist.
 ///
-/// The top of the same reference's range, and about where "bright" stops being
-/// distinguishable from "hissy" on the material this is for.
-pub const DEFAULT_HIGH_HZ: f32 = 9_000.0;
+/// # This used to be 9 kHz, and that was the wrong end of a real trade
+///
+/// The design this was built from held that extending resonance into the top
+/// of the spectrum is what makes an effect glare, and took 9 kHz from
+/// N-PRYSM's published range. Measured against three commercial colour-bass
+/// processors on the same source, the opposite is true for *this* mechanism.
+///
+/// A resonator is a narrow thing. Spaced an octave apart at 4 kHz, its
+/// neighbours are two thousand hertz away and its own bandwidth is ten, so
+/// what arrives up there is a handful of isolated sustained sine tones with
+/// silence between them — which is how a tubular bell is synthesised, and it
+/// is what a listener called a bell. It also stops following the input,
+/// because nothing at those frequencies is exciting it except broadband noise.
+///
+/// Two measures against the references, on the same six-second loop
+/// (2-9 kHz spectral flatness, and how closely the top follows the source's
+/// low end):
+///
+/// ```text
+/// grid ceiling   9000   2500   1800   1200      references
+/// density       0.181  0.221  0.304  0.306   0.192 .. 0.298
+/// tracking      -0.18  -0.24  -0.33  -0.33   -0.26 .. -0.32
+/// ```
+///
+/// **Stopping the grid below about 2 kHz puts both inside the references'
+/// range, and the reason is that the top then belongs to the source again.**
+/// The input's own high band is dense and moves with the music, because it was
+/// made by the music; nothing a sparse bank of resonators adds up there can
+/// be either.
+///
+/// N-PRYSM's 9 kHz is not wrong for N-PRYSM. It drives tuned *oscillators*
+/// from a filter bank, so its density up there comes from the analysis rather
+/// than from the grid. Carrying the number across to a resonator bank carried
+/// the range without the mechanism that fills it.
+///
+/// Raise it for a source with nothing of its own up there, and expect bells.
+pub const DEFAULT_HIGH_HZ: f32 = 1_800.0;
 
 /// Lowest octave step generated, relative to the played note.
 ///
@@ -72,9 +106,10 @@ pub const MIN_OCTAVE_STEP: i32 = -9;
 
 /// Highest octave step generated, relative to the played note.
 ///
-/// `DEFAULT_LOW_HZ` to `DEFAULT_HIGH_HZ` is `log2(9000/65) = 7.11` octaves, so
-/// nine steps either way covers the band from any note in it; the rest is
-/// clipped by the band.
+/// The default band is `log2(1800/65) = 4.79` octaves, so nine steps either
+/// way covers it from any note inside it several times over; the rest is
+/// clipped by the band. Deliberately generous, because the band is a runtime
+/// setting and a caller that widens it should not also have to know this.
 pub const MAX_OCTAVE_STEP: i32 = 9;
 
 /// How a note's frequency is replicated into a set of resonator frequencies.
@@ -96,6 +131,14 @@ pub enum Geometry {
     /// may simply be too sparse to sound like anything, and because two
     /// resonators a few cents apart beat against each other on every attack —
     /// the only motion the bank has otherwise.
+    ///
+    /// **A close pair is not two independent resonators.** They sum in phase,
+    /// so the bank's level divisor — which assumes the resonators are mutually
+    /// incoherent — under-corrects, and a pair reads louder than the count
+    /// suggests. Measured against an octave grid: +2.2 dB at seven cents,
+    /// +0.6 at fifty, and nothing by two hundred, with three decibels the
+    /// bound at zero spread. Widening the spread trades the beating for the
+    /// level being predictable.
     OctavePairs,
     /// `f0 · k^s`, `k = 1, 2, 3, …`. One bell's overtones per note.
     ///
@@ -305,7 +348,10 @@ fn harmonic_ln(k: usize) -> f32 {
 
 /// Ceiling on partials per voice under [`Geometry::Harmonics`].
 ///
-/// **Reaching 9 kHz from a 60 Hz fundamental takes 150 partials**, not the
+/// **Reaching the top of the band from a 60 Hz fundamental takes one partial
+/// per 60 Hz of it**: thirty at the default ceiling of 1.8 kHz, and 150 at the
+/// 9 kHz the default used to be. The ceiling is a runtime setting, so this
+/// constant is sized for the wide case rather than for the default. Not the
 /// forty a stretched series would need. Forty is the figure for an exponent of
 /// 1.35, which in this type's unit is 420 cents per octave — four times the
 /// range [`Grid::detune_cents_per_octave`] offers, because that range was
@@ -357,8 +403,8 @@ mod tests {
     fn an_octave_grid_spans_the_band_in_single_digits() {
         let f = collect(&Grid::default(), BASS_HZ);
         assert!(
-            (7..=8).contains(&f.len()),
-            "expected the band to take 7-8 octave steps, got {}: {f:?}",
+            (4..=5).contains(&f.len()),
+            "expected the band to take 4-5 octave steps, got {}: {f:?}",
             f.len()
         );
         assert!(*f.first().unwrap() >= DEFAULT_LOW_HZ);
@@ -378,16 +424,20 @@ mod tests {
             ..Grid::default()
         };
         let f = collect(&grid, BASS_HZ);
+        // One partial per fundamental's-worth of band, so the count follows
+        // the ceiling: about thirty at the default and 150 at 9 kHz. Asserted
+        // against the ceiling rather than against a number, because the
+        // ceiling is a setting.
+        let expected = DEFAULT_HIGH_HZ / BASS_HZ;
+        let count = f.len() as f32;
         assert!(
-            f.len() > 100,
-            "an unstretched harmonic series needs about 150 partials to cover \
-             the band, got {}",
-            f.len()
+            count >= expected - 3.0 && count <= expected,
+            "expected about {expected} partials, got {count}"
         );
-        assert!(*f.last().unwrap() > DEFAULT_HIGH_HZ / 2.0);
-        // Twenty times the octave grid's count, for the same band. This is the
-        // number the geometry has to justify by sounding better.
-        assert!(f.len() > 15 * collect(&Grid::default(), BASS_HZ).len());
+        assert!(*f.last().unwrap() > DEFAULT_HIGH_HZ * 0.9);
+        // Several times the octave grid's count, for the same band. This is
+        // the number the geometry has to justify by sounding better.
+        assert!(f.len() > 4 * collect(&Grid::default(), BASS_HZ).len());
     }
 
     /// A negative detune crowds a harmonic series together, and the ceiling
@@ -396,10 +446,15 @@ mod tests {
     /// what the geometry has to answer for.
     #[test]
     fn a_negative_detune_leaves_a_harmonic_series_short_of_the_band() {
+        // At a wide ceiling, because that is where the partial limit bites. At
+        // the default's 1.8 kHz a compressed series still reaches the top —
+        // the ceiling only runs out when the band is wide enough to need more
+        // partials than there are.
         let reach = |detune: f32| {
             let grid = Grid {
                 geometry: Geometry::Harmonics,
                 detune_cents_per_octave: detune,
+                high_hz: 9_000.0,
                 ..Grid::default()
             };
             let f = collect(&grid, BASS_HZ);
@@ -407,9 +462,9 @@ mod tests {
         };
         let (_, top_flat) = reach(0.0);
         let (n_low, top_low) = reach(-100.0);
-        assert!(top_flat > DEFAULT_HIGH_HZ * 0.9, "{top_flat}");
+        assert!(top_flat > 9_000.0 * 0.9, "{top_flat}");
         assert!(
-            top_low < DEFAULT_HIGH_HZ * 0.75,
+            top_low < 9_000.0 * 0.75,
             "a negative detune should fall short of the band, reached {top_low}"
         );
         // Short because of the partial ceiling, not because of the buffer.
@@ -421,8 +476,8 @@ mod tests {
     /// loudness constant across the keyboard.
     ///
     /// The bound is one octave step's worth of points, and it is not zero: the
-    /// band is `log2(9000/65) = 7.11` octaves wide, so a grid catches seven
-    /// steps or eight depending on where the note falls between them. One step
+    /// band is `log2(1800/65) = 4.79` octaves wide, so a grid catches four
+    /// steps or five depending on where the note falls between them. One step
     /// is one point under [`Geometry::Octaves`] and two under
     /// [`Geometry::OctavePairs`], so the tolerance is derived from the
     /// geometry rather than picked.
@@ -431,7 +486,10 @@ mod tests {
         // Deliberately *not* all octaves of one note: those share an offset
         // into the band and so cannot differ, which would leave the bound
         // untested. This set spans both counts.
-        let notes = [32.7, 41.2, 55.0, 65.4, 110.0, 261.6, 440.0];
+        // Deliberately *not* all octaves of one note: those share an offset
+        // into the band and so cannot differ. 58.3 and 61.7 are the two here
+        // that fall on the short side of the band's 4.79 octaves.
+        let notes = [32.7, 41.2, 55.0, 58.3, 61.7, 110.0, 440.0];
         for (geometry, points_per_step) in [(Geometry::Octaves, 1), (Geometry::OctavePairs, 2)] {
             let grid = Grid {
                 geometry,
@@ -501,11 +559,11 @@ mod tests {
     fn detune_is_per_octave_and_independent_of_the_bands_width() {
         let narrow = Grid {
             detune_cents_per_octave: 50.0,
-            high_hz: 2_000.0,
+            high_hz: 700.0,
             ..Grid::default()
         };
         let wide = Grid {
-            high_hz: DEFAULT_HIGH_HZ,
+            high_hz: 9_000.0,
             ..narrow
         };
         let (a, b) = (collect(&narrow, BASS_HZ), collect(&wide, BASS_HZ));
@@ -539,9 +597,16 @@ mod tests {
             "a hundred cents per octave should be {steps_up} semitones out \
              after {steps_up} octaves, got {semitones}"
         );
-        // Six semitones by the top of the band is the figure the knob's range
-        // was chosen for.
-        assert!(semitones >= 5.9, "top of the band is only {semitones} out");
+        // How far out the top gets is the band's width times the knob, so it
+        // follows the ceiling rather than being a number: 4.79 octaves at a
+        // hundred cents each is about four semitones at the default, and six
+        // at the 9 kHz ceiling the knob's range was originally chosen against.
+        let octaves = (DEFAULT_HIGH_HZ / DEFAULT_LOW_HZ).log2();
+        assert!(
+            semitones >= octaves - 1.5,
+            "the top should be about {octaves} semitones out at a hundred \
+             cents an octave, got {semitones}"
+        );
     }
 
     /// Zero detune puts the grid on the input's own harmonics — the

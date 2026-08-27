@@ -14,7 +14,7 @@ filters can only emphasise energy the input already has
 | Directory | Effect | State |
 | --- | --- | --- |
 | [`oxtt/`](oxtt/) | The 3-band upward/downward compressor | A source and two renders |
-| [`hyperglare/`](hyperglare/) | The resonator bank | Waiting on a source — see its README |
+| [`hyperglare/`](hyperglare/) | The resonator bank | A source and two renders |
 
 ## What belongs here
 

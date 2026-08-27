@@ -101,6 +101,13 @@ struct ParamsArgs {
     #[arg(long, value_name = "CENTS", default_value_t = 0.0)]
     drift: f32,
 
+    /// Cents between the members of a pair, under `octave-pairs`.
+    ///
+    /// Wide spreads turn each grid point into a cluster, which is what fills
+    /// the high band; narrow ones beat against each other instead.
+    #[arg(long, value_name = "CENTS", default_value_t = 7.0)]
+    pair_spread: f32,
+
     /// Voice count the level is normalised for. Not the number of notes.
     #[arg(long, default_value_t = 4)]
     voices: usize,
@@ -189,7 +196,7 @@ impl From<&ParamsArgs> for HyperglareParams {
                 grid: Grid {
                     geometry: args.geometry.into(),
                     detune_cents_per_octave: args.stretch,
-                    pair_spread_cents: Grid::default().pair_spread_cents,
+                    pair_spread_cents: args.pair_spread,
                     low_hz: args.low_hz,
                     high_hz: args.high_hz,
                 },

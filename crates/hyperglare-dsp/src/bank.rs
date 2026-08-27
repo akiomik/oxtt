@@ -741,18 +741,39 @@ mod tests {
 
         // The densities really do differ by the order of magnitude that makes
         // this worth compensating.
+        // How far apart the densities are follows the band's width — the
+        // harmonic series grows with it and the octave grid grows with its
+        // logarithm — so this asserts the ordering and a several-fold gap
+        // rather than a multiple that only held at one ceiling.
         assert!(n_pair >= 2 * n_oct, "{n_oct} vs {n_pair}");
-        assert!(n_harm > 15 * n_oct, "{n_oct} vs {n_harm}");
+        assert!(n_harm > 4 * n_oct, "{n_oct} vs {n_harm}");
 
-        for (name, db) in [("pairs", pair), ("harmonics", harm)] {
+        for (name, db, bound) in [("pairs", pair, COHERENT_PAIR_DB), ("harmonics", harm, 2.0)] {
             assert!(
-                (db - oct).abs() < 2.0,
+                (db - oct).abs() < bound,
                 "{name} is {} dB from octaves ({oct} vs {db}); the geometries \
                  must be compared at the same loudness",
                 db - oct
             );
         }
     }
+
+    /// How far a pair may sit above the octave grid before the level match
+    /// is considered broken.
+    ///
+    /// The divisor assumes the resonators are mutually incoherent, which is
+    /// true of neighbours an octave apart and not of a pair a few cents apart:
+    /// those sum in phase and read louder than the square root predicts.
+    /// Measured against the octave grid, at a decay of 0.6:
+    ///
+    /// ```text
+    /// spread    7c     50c    200c   600c
+    /// offset  +2.2dB +0.6dB -0.4dB -0.1dB
+    /// ```
+    ///
+    /// Fully coherent would be +3 dB, so that is the bound rather than a
+    /// tolerance chosen to make this pass.
+    const COHERENT_PAIR_DB: f32 = 3.0;
 
     /// Density is read at a fixed note, so a chord that grows does not duck
     /// the notes already ringing — the same property the voice count has.
@@ -788,9 +809,14 @@ mod tests {
         };
         let mut roomy = ResonatorBank::<1024>::new();
         roomy.retune(&[60.0], &settings, SR);
-        let mut cramped = ResonatorBank::<32>::new();
+        let mut cramped = ResonatorBank::<6>::new();
         cramped.retune(&[60.0], &settings, SR);
-        assert!(roomy.active() > 4 * cramped.active());
+        assert!(
+            roomy.active() > 4 * cramped.active(),
+            "{} vs {}",
+            roomy.active(),
+            cramped.active()
+        );
 
         let db = 20.0 * (noise_rms(&mut cramped, 3.0) / noise_rms(&mut roomy, 3.0)).log10();
         assert!(
@@ -946,31 +972,32 @@ mod tests {
     fn capacity_is_spent_in_order_so_the_last_voices_are_the_ones_dropped() {
         let settings = params(0.6, 500.0);
         let per_voice = settings.grid.count(110.0, max_centre_hz(SR));
-        assert!(per_voice >= 6, "expected a useful count, got {per_voice}");
+        assert!(per_voice >= 4, "expected a useful count, got {per_voice}");
 
-        // Room for one voice and a little more.
-        let mut bank = ResonatorBank::<9>::new();
+        // Room for one voice and a little more. Sized against the count so
+        // that the band's width does not decide whether this tests anything.
+        let mut bank = ResonatorBank::<7>::new();
         bank.retune(&[110.0, 220.0, 440.0], &settings, SR);
-        assert_eq!(bank.active(), 9);
+        assert_eq!(bank.active(), 7);
 
         // The first voice is whole, the second gets what is left, and the
         // third never starts.
-        let mut first = ResonatorBank::<9>::new();
+        let mut first = ResonatorBank::<7>::new();
         first.retune(&[110.0], &settings, SR);
         let whole = first.active();
         assert!(
-            whole < 9,
-            "the first voice should fit with room to spare, took {whole} of 9"
+            whole < 7,
+            "the first voice should fit with room to spare, took {whole} of 7"
         );
         assert!(
             bank.active() > whole,
-            "the second voice should get the remainder: {whole} of 9"
+            "the second voice should get the remainder: {whole} of 7"
         );
 
         // Adding the third voice changes nothing, because there is nothing
         // left for it. That is what "the last voices are the ones dropped"
         // means, as against thinning every voice evenly.
-        let mut two = ResonatorBank::<9>::new();
+        let mut two = ResonatorBank::<7>::new();
         two.retune(&[110.0, 220.0], &settings, SR);
         assert_eq!(
             two.active(),
