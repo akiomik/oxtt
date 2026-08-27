@@ -42,6 +42,8 @@
 
 use effectkit::decibels::{FLOOR_DB, db_to_amp};
 
+use crate::bands::{BANDS, Split, SplitCoeffs};
+
 /// Gain at full drive, before the shaper.
 ///
 /// Thirty decibels: enough that a bass fundamental grows a dense series of
@@ -121,6 +123,7 @@ pub struct ExciterCoeffs {
     release: f32,
     drive: Shaper,
     noise_amount: f32,
+    split: SplitCoeffs,
 }
 
 impl ExciterCoeffs {
@@ -132,6 +135,7 @@ impl ExciterCoeffs {
             release: one_pole(GATE_RELEASE_MS, sample_rate),
             drive: Shaper::new(params.drive),
             noise_amount: params.noise_amount.clamp(0.0, 1.0),
+            split: SplitCoeffs::new(sample_rate),
         }
     }
 }
@@ -199,7 +203,8 @@ fn one_pole(time_ms: f32, sample_rate: f32) -> f32 {
 /// Turns an input into something a resonator bank can ring on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Exciter {
-    envelope: f32,
+    split: Split,
+    envelope: [f32; BANDS],
     rng: u32,
 }
 
@@ -211,50 +216,80 @@ impl Default for Exciter {
 
 impl Exciter {
     /// An exciter at rest.
+    ///
+    /// Not `const`: the split holds biquads, whose `Default` is derived and so
+    /// cannot run in a `const` context. Nothing needs one, and a constructor
+    /// that runs is cheaper than a shared crate growing an API for this.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            envelope: 0.0,
+            split: Split::new(),
+            envelope: [0.0; BANDS],
             // Any non-zero seed. Fixed rather than random so that two renders
             // of the same settings are the same file and can be compared.
             rng: 0x2545_f491,
         }
     }
 
-    /// Clears the gate and rewinds the noise, so a render is reproducible.
-    pub const fn reset(&mut self) {
-        self.envelope = 0.0;
+    /// Clears the gates and the split and rewinds the noise, so a render is
+    /// reproducible.
+    pub fn reset(&mut self) {
+        self.split.reset_state();
+        self.envelope = [0.0; BANDS];
         self.rng = 0x2545_f491;
     }
 
-    /// The gate's current opening, `0.0` when the input has been silent.
+    /// One band's gate opening, `0.0` when that band has been silent.
+    ///
+    /// Out of range returns `0.0`: a band that does not exist has not heard
+    /// anything.
     #[must_use]
-    pub const fn gate(&self) -> f32 {
-        self.envelope
+    pub fn gate(&self, band: usize) -> f32 {
+        self.envelope.get(band).copied().unwrap_or(0.0)
     }
 
-    /// One sample in, one sample of excitation out.
-    #[inline]
-    pub fn process(&mut self, x: f32, coeffs: &ExciterCoeffs) -> f32 {
-        let level = x.abs();
-        let coefficient = if level > self.envelope {
-            coeffs.attack
-        } else {
-            coeffs.release
-        };
-        let envelope = coefficient.mul_add(self.envelope - level, level);
-        // Flushed, so silence arrives at zero rather than approaching it.
-        self.envelope = if envelope < envelope_floor() {
-            0.0
-        } else {
-            envelope
-        };
+    /// Whether any band's gate is open at all.
+    ///
+    /// What a caller asking "is this exciter silent" wants, and what the
+    /// silence guarantee is stated over. The per-band opening is for a caller
+    /// asking which part of the source is doing the work.
+    #[must_use]
+    pub fn any_open(&self) -> bool {
+        self.envelope.iter().any(|e| *e > 0.0)
+    }
 
-        let shaped = coeffs.drive.shape(x);
-        // The gate is the only thing that stops the noise path from sounding
-        // into silence. Multiplying by it is the guarantee.
-        let noise = self.next_noise() * coeffs.noise_amount * self.envelope;
-        shaped + noise
+    /// One sample in, one sample of excitation per band out.
+    ///
+    /// Both paths are taken from the band rather than from the input, so a
+    /// band the source is silent in produces exactly zero and the resonators
+    /// drawing on it stay silent — which is the whole of ADR 0016.
+    #[inline]
+    pub fn process(&mut self, x: f32, coeffs: &ExciterCoeffs) -> [f32; BANDS] {
+        let split = self.split.process(x, &coeffs.split);
+        // **One draw for the frame, shared across the bands.** The bands
+        // partition the spectrum, so two resonators reading the same draw are
+        // at different frequencies and extract uncorrelated parts of it; a
+        // draw per band would cost four more xorshifts to make no audible
+        // difference. What must not be shared is the gate, and that is not.
+        let noise = self.next_noise() * coeffs.noise_amount;
+
+        let mut out = [0.0; BANDS];
+        for ((slot, band), envelope) in out.iter_mut().zip(split).zip(self.envelope.iter_mut()) {
+            let level = band.abs();
+            let coefficient = if level > *envelope {
+                coeffs.attack
+            } else {
+                coeffs.release
+            };
+            let next = coefficient.mul_add(*envelope - level, level);
+            // Flushed, so silence arrives at zero rather than approaching it.
+            *envelope = if next < envelope_floor() { 0.0 } else { next };
+            // The gate is the only thing that stops the noise path from
+            // sounding into silence. Multiplying by it is the guarantee, and
+            // it is now a guarantee per band.
+            *slot = noise.mul_add(*envelope, coeffs.drive.shape(band));
+        }
+        out
     }
 
     /// A uniform sample in `[-1, 1)`, from a xorshift.
@@ -316,7 +351,7 @@ mod tests {
         for i in 0..4_800 {
             exciter.process((i as f32 * 0.01).sin(), &coeffs);
         }
-        assert!(exciter.gate() > 0.0, "the gate should be open by now");
+        assert!(exciter.any_open(), "no band's gate opened");
 
         // Long enough for a one-pole release to cross the silence floor from
         // full scale, derived rather than guessed so that this keeps testing
@@ -332,10 +367,14 @@ mod tests {
         // the one failure this test exists to catch.
         #[allow(clippy::float_cmp)]
         {
-            assert_eq!(exciter.gate(), 0.0, "the gate never fully closed");
+            assert!(!exciter.any_open(), "a gate never fully closed");
+            for band in 0..BANDS {
+                assert_eq!(exciter.gate(band), 0.0, "band {band} never closed");
+            }
             for i in 0..4_800 {
-                let y = exciter.process(0.0, &coeffs);
-                assert_eq!(y, 0.0, "sample {i} of silence was {y}, not zero");
+                for (band, y) in exciter.process(0.0, &coeffs).into_iter().enumerate() {
+                    assert_eq!(y, 0.0, "sample {i} of band {band} was {y}, not zero");
+                }
             }
         }
     }
@@ -353,27 +392,35 @@ mod tests {
             noise_amount: 1.0,
         };
 
-        let energy = |params: &ExciterParams| {
-            let coeffs = coeffs(*params);
+        // The two differ only in the noise, so their difference is it. The
+        // bands do not sum to the input any more, so this compares the
+        // exciter against itself rather than against `x`.
+        let run = |params: ExciterParams| {
+            let coeffs = coeffs(params);
             let mut exciter = Exciter::new();
-            let mut sum = 0.0f64;
+            let mut out = Vec::new();
             for i in 0..4_800 {
-                // A pure tone: with no drive and no noise, the output is the
-                // input, so any excess is the noise path.
                 let x = (2.0 * PI * 110.0 * i as f32 / SR).sin();
-                let y = exciter.process(x, &coeffs);
-                sum += f64::from(y - x) * f64::from(y - x);
+                out.push(exciter.process(x, &coeffs));
             }
-            sum
+            out
+        };
+        let added = |params: ExciterParams| {
+            run(quiet)
+                .into_iter()
+                .zip(run(params))
+                .flat_map(|(a, b)| a.into_iter().zip(b))
+                .map(|(a, b)| f64::from(b - a) * f64::from(b - a))
+                .sum::<f64>()
         };
 
         // Exact: asking for no noise must add none, not merely little.
         #[allow(clippy::float_cmp)]
         {
-            assert_eq!(energy(&quiet), 0.0, "no noise asked for, none added");
+            assert_eq!(added(quiet), 0.0, "no noise asked for, none added");
         }
         assert!(
-            energy(&noisy) > 1.0,
+            added(noisy) > 1.0,
             "the noise path should be audible while the input is present"
         );
     }
@@ -388,12 +435,19 @@ mod tests {
         };
         let coeffs = coeffs(params);
         let mut exciter = Exciter::new();
-        // Exact: "transparent" means the sample comes back unchanged, not
-        // approximately unchanged.
+        // The bands no longer sum to the input, so "transparent" is stated
+        // against the split rather than against the sample: with no drive and
+        // no noise, what comes out of a band is exactly what the split put in
+        // it, with the shaper's curve nowhere in the path.
+        let split_coeffs = SplitCoeffs::new(SR);
+        let mut split = Split::new();
         #[allow(clippy::float_cmp)]
-        for x in [0.0f32, 0.1, -0.25, 0.5, -1.0, 1.0] {
-            let y = exciter.process(x, &coeffs);
-            assert_eq!(y, x, "{x} came back as {y}");
+        for x in [0.0f32, 0.1, -0.25, 0.5, -1.0, 1.0, 0.3, -0.7] {
+            let gated = exciter.process(x, &coeffs);
+            let bare = split.process(x, &split_coeffs);
+            for (band, (y, expected)) in gated.into_iter().zip(bare).enumerate() {
+                assert_eq!(y, expected, "band {band} of {x} came back as {y}");
+            }
         }
     }
 
@@ -414,7 +468,13 @@ mod tests {
             let (mut re, mut im) = (0.0f64, 0.0f64);
             for i in 0..samples {
                 let t = i as f32 / SR;
-                let y = exciter.process((2.0 * PI * freq * t).sin(), &coeffs);
+                // Summed across the bands: the shaper puts the third
+                // harmonic two bands above the fundamental, so a single band
+                // would measure the split instead of the drive.
+                let y: f32 = exciter
+                    .process((2.0 * PI * freq * t).sin(), &coeffs)
+                    .iter()
+                    .sum();
                 let probe = 2.0 * PI * (3.0 * freq) * t;
                 re += f64::from(y) * f64::from(probe.cos());
                 im += f64::from(y) * f64::from(probe.sin());

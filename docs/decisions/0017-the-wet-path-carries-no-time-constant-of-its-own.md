@@ -96,6 +96,41 @@ Two consequences follow, and both are decided here:
    introduces, and the compensation is a static function of the bank's
    parameters wherever the gain law can supply one.
 
+### The alternative, and why it is not one
+
+Compensating the *excitation* per band instead of the wet looks equivalent and
+is not. It was proposed while implementing this, on the reasoning that the wet
+is summed and so cannot be attributed to a band.
+
+**That reasoning is wrong.** A band is a property of the resonator, not of the
+signal — [ADR 0016](0016-the-bank-is-excited-per-band.md) assigns it by
+frequency — so the sum can be grouped by band before it is taken:
+
+```text
+wet = Σᵢ gainᵢ · bpᵢ(exc_b(i))  =  Σ_b [ Σ_{i∈b} gainᵢ · bpᵢ(exc_b) ]
+```
+
+The two differ in the operation, and that is what decides it. **Compensating
+the wet multiplies; normalising the excitation divides.** ADR 0016 guarantees
+a band the source is silent in produces exactly zero excitation, and a finite
+compensation leaves that alone: `c_b · 0 = 0`. Dividing by a small band's
+level lifts an empty band back up, which is the property ADR 0016 exists to
+create, removed.
+
+So the compensation belongs on the wet, and the excitation is left as the
+source made it.
+
+**And it costs nothing per sample.** Because `c_b` is a static function of the
+bank's parameters rather than a measurement, the band grouping above collapses:
+
+```text
+wet = Σᵢ (c_b(i) · gainᵢ) · bpᵢ
+```
+
+`c_b` folds into `gains[i]` at retune. No per-band wet array, no new state, no
+new time constant — which is this ADR's title, met in the strongest form
+available rather than by choosing a fast follower.
+
 **What is deliberately not decided:** whether any residual per-band follower is
 needed once the excitation is per band, and if so how fast. The prototype
 suggests a partial match still helps brightness on some material, but a

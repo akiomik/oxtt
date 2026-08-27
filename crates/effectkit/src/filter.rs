@@ -140,8 +140,14 @@ impl Biquad {
 }
 
 /// Zero for anything smaller than [`DENORMAL_FLOOR`], and unchanged otherwise.
+///
+/// Public because the constant it compares against is a decision, and an
+/// effect building a filter of its own should reach for the decision rather
+/// than for the number. Two copies of `1e-20` in two crates is one copy that
+/// will be revised.
 #[inline]
-fn flush(x: f32) -> f32 {
+#[must_use]
+pub fn flush(x: f32) -> f32 {
     if x.abs() < DENORMAL_FLOOR { 0.0 } else { x }
 }
 
@@ -251,7 +257,7 @@ impl SvfCoeffs {
 /// Four hundred decibels below full scale, so this is a numerical decision
 /// rather than an audibility one: no effect's idea of silence is anywhere near
 /// it, which is what keeps the constant appropriate to a shared primitive.
-const DENORMAL_FLOOR: f32 = 1e-20;
+pub const DENORMAL_FLOOR: f32 = 1e-20;
 
 /// A topology-preserving state-variable filter, band-pass branch.
 ///

@@ -56,6 +56,28 @@ cost two orders of magnitude more than the filtering itself.
   can see in `active()` and act on; a level drop it could only hear would tell
   it nothing about what to change.
 
+## 2.0 Excitation is per band
+
+**A resonator is excited by the input's energy near its own frequency, not by
+the input as a whole** ([ADR 0016](../decisions/0016-the-bank-is-excited-per-band.md)).
+`Exciter::process` returns one sample per band; `ResonatorBank::process` takes
+them as a slice and each resonator reads the one its frequency maps to.
+
+- **A band the source is silent in produces exactly zero.** The gate is per
+  band now, so the silence guarantee in section 4 holds band by band rather
+  than only for the whole.
+- **The band a resonator draws on is decided at retune**, from its centre
+  frequency, and does not change until the next one. `crate::bands::band_of`
+  is the map, and it is total: zero, the negatives and `NaN` all land in the
+  bottom band.
+- **A slice shorter than the band count is silence, not an error.** A missing
+  band reads as zero. There is nothing an audio callback could do with a
+  failure here, and a bank that goes quiet is a symptom a caller can find.
+- **The bands do not sum back to the input.** Each is its own band-pass, not a
+  branch of a crossover. Nothing downstream reconstructs the source, so the
+  split owes isolation rather than reconstruction — 12 dB per octave on each
+  side, which is about 10 dB down an octave outside a band and 22 dB down two.
+
 ## 2.1 Derived values and the settings they came from
 
 **Nothing on the per-sample path reads a parameter.** `ResonatorBank` keeps no
@@ -280,9 +302,10 @@ Both are decided when there is a host with a switch on it.
 
 See [`docs/effectkit/realtime.md`](../effectkit/realtime.md).
 
-What lands where, in this crate: `ResonatorBank::process` is the per-sample
-path, and `retune` and `Grid::frequencies` are on the callback too — under Bela
-a chord change arrives inside `render_pre`.
+What lands where, in this crate: `ResonatorBank::process` and
+`Exciter::process` are the per-sample path, and `retune` and
+`Grid::frequencies` are on the callback too — under Bela a chord change arrives
+inside `render_pre`.
 
 **Six functions carry `#[no_panic]` proofs**, checked at link time by
 `cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,

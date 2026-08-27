@@ -297,11 +297,11 @@ impl<const N: usize> HyperglareProcessor<N> {
 
         let (mut wet_l, mut wet_r) = match self.params.sear_placement {
             SearPlacement::AfterSum => {
-                let seared = self.sear.shape(self.bank.process(excited));
+                let seared = self.sear.shape(self.bank.process(&excited));
                 (seared, seared)
             }
             SearPlacement::BeforeSplit => {
-                let (l, r) = self.bank.process_split(excited, self.params.width);
+                let (l, r) = self.bank.process_split(&excited, self.params.width);
                 (self.sear.shape(l), self.sear.shape(r))
             }
         };
@@ -502,6 +502,54 @@ mod tests {
                 "{name} changed nothing, so the comparison above proves nothing"
             );
         }
+    }
+
+    /// **What ADR 0016 is for**, at the level a listener would hear it.
+    ///
+    /// A source with energy in one band only must colour that band and leave
+    /// the others alone. Under broadband excitation every resonator was fed
+    /// the same gated noise, so the whole chord sounded whatever the source
+    /// was doing — which is what "the chord is sitting on top" meant.
+    #[test]
+    fn a_source_in_one_band_does_not_colour_the_others() {
+        let params = HyperglareParams {
+            color: 1.0,
+            exciter: ExciterParams {
+                drive: 0.6,
+                noise_amount: 1.0,
+            },
+            ..HyperglareParams::default()
+        };
+        // A chord spread across the bands: 55 Hz sits in band 0, and its
+        // octaves reach the top of the grid.
+        let notes = [55.0f32, 82.4, 110.0];
+
+        // Energy at the top of the grid, for a source that is only ever low.
+        let high_energy = |hz: f32| {
+            let mut processor = Processor::new(params, SR);
+            processor.apply_params(&params, &notes);
+            let mut sum = 0.0f64;
+            for i in 0..(SR as usize) {
+                let x = tone(i, hz) * 0.5;
+                let (left, _) = processor.process_frame(x, x);
+                // Past the attack, so this is the ringing rather than the hit.
+                if i > SR as usize / 2 {
+                    sum += f64::from(left) * f64::from(left);
+                }
+            }
+            sum
+        };
+
+        let low_only = high_energy(55.0);
+        let across = high_energy(900.0);
+        // A 900 Hz source reaches the bands the upper resonators draw on; a
+        // 55 Hz one does not, and the difference is the whole decision.
+        assert!(
+            across > low_only * 4.0,
+            "a source in the upper bands produced {across} against {low_only} \
+             for one that never leaves the bottom, which is too little \
+             difference for the excitation to be per band at all"
+        );
     }
 
     /// A chord that loses notes leaves the bank as if it had always been
@@ -760,22 +808,45 @@ mod tests {
             for i in 0..(SR as usize / 2) {
                 processor.process_frame(tone(i, 55.0), tone(i, 55.0));
             }
-            // Two stages in series, not one. The gate goes on feeding the
-            // bank while it closes — about fourteen of its own 30 ms
-            // constants, so a bit under half a second — and only then does the
-            // tail start decaying toward the filter's floor, which is another
-            // seven decay times. Doubled for margin.
-            let gate_arrival = SR * 0.45;
-            let tail_arrival = SR * decay * 8.0;
-            let wait = ((gate_arrival + tail_arrival) * 2.0) as usize;
-            for _ in 0..wait {
-                processor.process_frame(0.0, 0.0);
+            // **Three stages in series, and the middle one is amplified.**
+            // The gate goes on feeding the bank while it closes; the band
+            // split runs down into the waveshaper, which at full drive
+            // multiplies what is left by about thirty; and only then does the
+            // bank's own tail decay to the filter's floor. Measured at 2.2 s
+            // for these settings.
+            //
+            // So the arrival is found rather than waited out. A fixed wait
+            // would either be flaky or silently generous, and this way a
+            // change to the chain shows up as a number instead of as a
+            // failure with nothing to read.
+            let budget = (SR * 6.0) as usize;
+            let mut arrived = None;
+            #[allow(clippy::float_cmp)]
+            for i in 0..budget {
+                let (l, r) = processor.process_frame(0.0, 0.0);
+                if l == 0.0 && r == 0.0 {
+                    arrived = Some(i);
+                    break;
+                }
             }
+            assert!(
+                arrived.is_some(),
+                "{placement:?}: silence never arrived within {budget} samples"
+            );
+            let arrived = arrived.unwrap_or(budget);
+            // Then it stays there. Arrival is not enough on its own: a filter
+            // that touched zero on its way past would satisfy it.
             #[allow(clippy::float_cmp)]
             for i in 0..4_800 {
                 let (l, r) = processor.process_frame(0.0, 0.0);
-                assert_eq!(l, 0.0, "{placement:?}: left sample {i} was {l}");
-                assert_eq!(r, 0.0, "{placement:?}: right sample {i} was {r}");
+                assert_eq!(
+                    l, 0.0,
+                    "{placement:?}: left sample {i} was {l} after arriving at {arrived}"
+                );
+                assert_eq!(
+                    r, 0.0,
+                    "{placement:?}: right sample {i} was {r} after arriving at {arrived}"
+                );
             }
         }
     }

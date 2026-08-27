@@ -6,6 +6,7 @@
 //! Everything on the per-sample path holds itself to the audio callback's
 //! prohibitions (`docs/effectkit/realtime.md`), because that is where it runs.
 
+pub mod bands;
 pub mod bank;
 pub mod exciter;
 pub mod grid;
@@ -21,6 +22,7 @@ mod proofs {
     //! `#[no_panic]` only holds under full optimisation, so these are checked
     //! by `cargo test --release` and are inert in a debug build.
 
+    use crate::bands::BANDS;
     use crate::bank::{BankParams, ResonatorBank};
     use crate::exciter::{Exciter, ExciterCoeffs, ExciterParams};
     use crate::grid::{Geometry, Grid};
@@ -62,17 +64,22 @@ mod proofs {
 
     /// The per-sample path: this runs inside the audio callback for every
     /// frame, so it owes the strongest form of the guarantee.
+    ///
+    /// **The excitation arrives as a slice**, so its length is part of what
+    /// this proves. A slice shorter than the band count is not an error the
+    /// audio thread can report: the bank reads a missing band as silence and
+    /// carries on, which is the right way for this to break.
     #[test]
     fn the_banks_sample_path_cannot_panic() {
         #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-        fn run(bank: &mut ResonatorBank<32>, x: f32) -> f32 {
-            bank.process(x)
+        fn run(bank: &mut ResonatorBank<32>, bands: &[f32]) -> f32 {
+            bank.process(bands)
         }
 
         let mut bank = ResonatorBank::<32>::new();
         // Before any retune, and then tuned to a chord with every knob at an
         // extreme.
-        assert!(run(&mut bank, 0.5).is_finite());
+        assert!(run(&mut bank, &[0.5; BANDS]).is_finite());
         bank.retune(
             &[55.0, 82.4, 110.0],
             &BankParams {
@@ -88,7 +95,19 @@ mod proofs {
         // the state does: it will not. What is being proved here is the
         // absence of a panic, so the return values are deliberately unused.
         for x in [0.0, 1.0, -1.0, f32::MAX] {
-            let _ = run(&mut bank, x);
+            // Too few bands, exactly enough, and too many.
+            let _ = run(&mut bank, &[]);
+            let _ = run(&mut bank, &[x]);
+            let _ = run(&mut bank, &[x; BANDS]);
+            let _ = run(&mut bank, &[x; BANDS + 1]);
+        }
+        // An empty slice is silence in, and from a bank at rest that is
+        // silence out. Reset first: this bank has just been fed `f32::MAX`,
+        // and resonators go on ringing whatever arrives afterwards.
+        bank.reset_state();
+        #[allow(clippy::float_cmp)]
+        {
+            assert_eq!(run(&mut bank, &[]), 0.0);
         }
     }
 
@@ -117,7 +136,7 @@ mod proofs {
     #[test]
     fn the_exciters_sample_path_cannot_panic() {
         #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
-        fn run(exciter: &mut Exciter, coeffs: ExciterCoeffs, x: f32) -> f32 {
+        fn run(exciter: &mut Exciter, coeffs: ExciterCoeffs, x: f32) -> [f32; BANDS] {
             exciter.process(x, &coeffs)
         }
 

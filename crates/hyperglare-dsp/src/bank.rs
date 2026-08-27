@@ -67,6 +67,7 @@ use core::f32::consts::{LN_2, LN_10, PI};
 
 use effectkit::filter::{Svf, SvfCoeffs, max_centre_hz};
 
+use crate::bands::band_of;
 use crate::grid::Grid;
 
 /// `ln(1000)`: the ratio a T60 is defined against.
@@ -230,6 +231,13 @@ pub struct ResonatorBank<const N: usize> {
     filters: [Svf; N],
     coeffs: [SvfCoeffs; N],
     gains: [f32; N],
+    /// Which band each resonator draws its excitation from.
+    ///
+    /// A `u8` rather than a `usize` because there are five of them and this
+    /// array is `N` long — the bank's largest use is a harmonic series with
+    /// hundreds of resonators, and the index is a label rather than an
+    /// address.
+    bands: [u8; N],
     active: usize,
     voice_norm: f32,
 }
@@ -248,6 +256,7 @@ impl<const N: usize> ResonatorBank<N> {
             filters: [Svf::new(); N],
             coeffs: [idle_coeffs(); N],
             gains: [0.0; N],
+            bands: [0; N],
             active: 0,
             voice_norm: 1.0,
         }
@@ -319,12 +328,17 @@ impl<const N: usize> ResonatorBank<N> {
             written = written.saturating_add(params.grid.frequencies(detuned, nyquist, room));
         }
 
-        for ((hz, coeffs), gain) in scratch
+        for (((hz, coeffs), gain), band) in scratch
             .iter()
             .zip(self.coeffs.iter_mut())
             .zip(self.gains.iter_mut())
+            .zip(self.bands.iter_mut())
             .take(written)
         {
+            // The excitation this resonator draws on, decided here rather than
+            // per sample: a resonator's band is a property of its frequency,
+            // and its frequency is settled at retune.
+            *band = u8::try_from(band_of(*hz)).unwrap_or(0);
             let q = (t60 * PI * *hz / LN_1000).min(q_max);
             *coeffs = SvfCoeffs::new(*hz, sample_rate, q);
             // `BW` is continuous across the breakpoint because it is a max of
@@ -357,15 +371,17 @@ impl<const N: usize> ResonatorBank<N> {
         // is not hypothetical: a chord that loses a note does it, and so does
         // dropping the sample rate far enough to shorten the grid.
         let idle = idle_coeffs();
-        for ((coeffs, gain), filter) in self
+        for (((coeffs, gain), filter), band) in self
             .coeffs
             .iter_mut()
             .zip(self.gains.iter_mut())
             .zip(self.filters.iter_mut())
+            .zip(self.bands.iter_mut())
             .skip(written)
         {
             *coeffs = idle;
             *gain = 0.0;
+            *band = 0;
             filter.reset_state();
         }
         self.active = written;
@@ -402,18 +418,20 @@ impl<const N: usize> ResonatorBank<N> {
     /// through a waveshaper the individual resonators are no longer separable,
     /// which is why the order of the two is a choice rather than a detail.
     #[inline]
-    pub fn process_split(&mut self, x: f32, width: f32) -> (f32, f32) {
+    pub fn process_split(&mut self, bands: &[f32], width: f32) -> (f32, f32) {
         let width = width.clamp(0.0, 1.0);
         let mut left = 0.0f32;
         let mut right = 0.0f32;
-        for (index, ((filter, coeffs), gain)) in self
+        for (index, (((filter, coeffs), gain), band)) in self
             .filters
             .iter_mut()
             .zip(self.coeffs.iter())
             .zip(self.gains.iter())
+            .zip(self.bands.iter())
             .take(self.active)
             .enumerate()
         {
+            let x = bands.get(usize::from(*band)).copied().unwrap_or(0.0);
             let value = gain * filter.process_bandpass(coeffs, x);
             // Alternate sides, so the two channels carry interleaved octaves
             // rather than a split band.
@@ -426,15 +444,17 @@ impl<const N: usize> ResonatorBank<N> {
 
     /// One sample through every sounding resonator.
     #[inline]
-    pub fn process(&mut self, x: f32) -> f32 {
+    pub fn process(&mut self, bands: &[f32]) -> f32 {
         let mut sum = 0.0f32;
-        for ((filter, coeffs), gain) in self
+        for (((filter, coeffs), gain), band) in self
             .filters
             .iter_mut()
             .zip(self.coeffs.iter())
             .zip(self.gains.iter())
+            .zip(self.bands.iter())
             .take(self.active)
         {
+            let x = bands.get(usize::from(*band)).copied().unwrap_or(0.0);
             sum = gain.mul_add(filter.process_bandpass(coeffs, x), sum);
         }
         sum * self.voice_norm
@@ -508,6 +528,17 @@ fn db_to_amp(db: f32) -> f32 {
 )]
 mod tests {
     use super::*;
+    use crate::bands::BANDS;
+
+    /// Every band carrying the same sample.
+    ///
+    /// What the bank saw before ADR 0016 split the excitation, and what these
+    /// tests want: they are about level, decay and geometry, and a resonator
+    /// that received nothing because of its band would be measuring the split
+    /// instead. The routing has its own tests.
+    fn every_band(x: f32) -> [f32; BANDS] {
+        [x; BANDS]
+    }
     use crate::grid::Geometry;
 
     const SR: f32 = 48_000.0;
@@ -531,7 +562,7 @@ mod tests {
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
             let x = ((state >> 40) as f32 / 8_388_608.0) - 1.0;
-            let y = bank.process(x);
+            let y = bank.process(&every_band(x));
             if i > n / 2 {
                 sum_sq += f64::from(y) * f64::from(y);
                 counted += 1;
@@ -920,7 +951,7 @@ mod tests {
             let mut acc = (0.0f64, 0.0f64, 0.0f64);
             for i in 0..9_600 {
                 let x = if i % 480 < 8 { 1.0 } else { 0.0 };
-                let (l, r) = bank.process_split(x, width);
+                let (l, r) = bank.process_split(&every_band(x), width);
                 acc.0 += f64::from(l) * f64::from(l);
                 acc.1 += f64::from(r) * f64::from(r);
                 acc.2 += f64::from(l - r).abs();
@@ -967,12 +998,12 @@ mod tests {
         let settings = params(2.0, 500.0);
         bank.retune(&[110.0], &settings, SR);
         for i in 0..4_800 {
-            bank.process(if i < 48 { 1.0 } else { 0.0 });
+            bank.process(&every_band(if i < 48 { 1.0 } else { 0.0 }));
         }
         bank.retune(&[164.8], &settings, SR);
         let mut peak = 0.0f32;
         for _ in 0..4_800 {
-            peak = peak.max(bank.process(0.0).abs());
+            peak = peak.max(bank.process(&every_band(0.0)).abs());
         }
         assert!(peak > 1e-4, "the tail was silenced by the retune: {peak}");
     }
@@ -1061,7 +1092,10 @@ mod tests {
         );
         let mut peak = 0.0f32;
         for i in 0..(SR as usize) {
-            peak = peak.max(bank.process(if i % 480 < 8 { 1.0 } else { 0.0 }).abs());
+            peak = peak.max(
+                bank.process(&every_band(if i % 480 < 8 { 1.0 } else { 0.0 }))
+                    .abs(),
+            );
         }
         assert!(bank.is_finite(), "bank state went non-finite");
         assert!(peak.is_finite(), "output went non-finite");
