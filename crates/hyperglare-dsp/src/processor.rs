@@ -520,9 +520,26 @@ mod tests {
         let loud = processor.active();
 
         processor.apply_params(&params, &small);
-        for _ in 0..(2.0 * SR) as usize {
-            processor.process_frame(0.0, 0.0);
+        // Silence has to actually arrive before the rest of this means
+        // anything: a gate still trickling would ring the resonators that grow
+        // back whatever state they are in, which is the other way this test
+        // could fail. So the wait is measured rather than assumed.
+        let wait = (2.0 * SR) as usize;
+        let mut arrived = None;
+        for i in 0..wait {
+            let (left, right) = processor.process_frame(0.0, 0.0);
+            if arrived.is_none() && left == 0.0 && right == 0.0 {
+                arrived = Some(i);
+            }
         }
+        let arrived = arrived.expect("the small chord never reached silence");
+        assert!(
+            arrived * 5 < wait * 4,
+            "silence arrived at frame {arrived} of {wait}, which is close \
+             enough to the end that this test is about the wait rather than \
+             about the tails"
+        );
+
         // Back to the chord that was ringing, into an input that is not.
         processor.apply_params(&params, &big);
         assert_eq!(processor.active(), loud, "the chord did not grow back");
@@ -531,8 +548,9 @@ mod tests {
             let (left, right) = processor.process_frame(0.0, 0.0);
             assert!(
                 left == 0.0 && right == 0.0,
-                "frame {i} rang at {left}/{right} into silence, so a returning \
-                 resonator kept a tail from before the chord shrank"
+                "frame {i} rang at {left}/{right} into silence. The gate had \
+                 arrived at frame {arrived}, so this is a returning resonator \
+                 keeping a tail from before the chord shrank"
             );
         }
     }
