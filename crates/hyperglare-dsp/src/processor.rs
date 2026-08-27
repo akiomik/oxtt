@@ -238,6 +238,13 @@ impl<const N: usize> HyperglareProcessor<N> {
             for (slot, hz) in self.notes_hz.iter_mut().zip(notes_hz) {
                 *slot = *hz;
             }
+            // Past the chord, for the reason `ResonatorBank::retune` clears
+            // its own unused slots: `note_count` stops anything from reading
+            // here, so a leftover note cannot be heard, and leaving it would
+            // make two processors that behave identically compare unequal.
+            for slot in self.notes_hz.iter_mut().skip(count) {
+                *slot = 0.0;
+            }
             self.note_count = count;
             self.bank.retune(notes_hz, &params.bank, self.sample_rate);
         }
@@ -465,17 +472,69 @@ mod tests {
             shrunk.bank == fresh.bank,
             "the two sound the same forever and their banks still compare unequal"
         );
-        // **Not the whole processor.** The exciter's noise generator has been
-        // advanced by everything the shrunk one has played, and two generators
-        // at different positions really are different: they are silent only
-        // while the gate is shut, and produce different noise the moment it
-        // opens. That inequality is reporting a difference that can be heard,
-        // which is exactly the line the bank's own normalisation draws.
+        // **Not the whole processor**, and the difference is named rather
+        // than assumed. The exciter's noise generator has been advanced by
+        // everything the shrunk one played, and two generators at different
+        // positions really are different: they are silent together only while
+        // the gate is shut, and produce different noise the moment it opens.
+        // That is a difference which can be heard, and it is the line the
+        // bank's own normalisation draws.
+        //
+        // Asserted on the exciter and not on the processor, because the
+        // processor has more than one thing left in it — the wet matcher's
+        // followers approach rest without arriving — and `shrunk != fresh`
+        // would go on passing on the strength of the other one long after this
+        // paragraph stopped being true.
         assert!(
-            shrunk != fresh,
-            "if these ever compare equal, the noise generator has stopped \
-             being state and this comment is wrong"
+            shrunk.exciter != fresh.exciter,
+            "the noise generator did not advance, so this test says nothing \
+             about why two processors differ"
         );
+    }
+
+    /// A resonator coming back into use starts from silence, not from the
+    /// chord that stopped playing.
+    ///
+    /// This is the audible half of what `retune` clears above the chord, and
+    /// it has exactly one enforcement point. Growing a chord back reaches
+    /// slots a previous shrink left behind; if their tails were still in
+    /// there, they would ring into an input that is silent.
+    #[test]
+    fn a_chord_that_grows_back_does_not_resurrect_the_old_tails() {
+        let params = HyperglareParams {
+            bank: BankParams {
+                decay_t60_s: 0.05,
+                ..BankParams::default()
+            },
+            ..HyperglareParams::default()
+        };
+        let big = [55.0f32, 61.7, 65.4, 82.4, 110.0];
+        let small = [55.0f32];
+
+        let mut processor = Processor::new(params, SR);
+        processor.apply_params(&params, &big);
+        for i in 0..(SR as usize) {
+            let x = tone(i, 55.0) * 0.5;
+            processor.process_frame(x, x);
+        }
+        let loud = processor.active();
+
+        processor.apply_params(&params, &small);
+        for _ in 0..(2.0 * SR) as usize {
+            processor.process_frame(0.0, 0.0);
+        }
+        // Back to the chord that was ringing, into an input that is not.
+        processor.apply_params(&params, &big);
+        assert_eq!(processor.active(), loud, "the chord did not grow back");
+
+        for i in 0..(SR as usize) {
+            let (left, right) = processor.process_frame(0.0, 0.0);
+            assert!(
+                left == 0.0 && right == 0.0,
+                "frame {i} rang at {left}/{right} into silence, so a returning \
+                 resonator kept a tail from before the chord shrank"
+            );
+        }
     }
 
     /// A rate change rebuilds the bank, and not only the parts around it.

@@ -334,32 +334,28 @@ impl<const N: usize> ResonatorBank<N> {
             *gain = tilt_gain(*hz, pivot_hz, params.tilt) * compensation;
         }
 
-        // Filters that have just come into use start from rest; the ones that
-        // were already sounding keep their state, tails and all.
-        for f in self
-            .filters
-            .iter_mut()
-            .skip(self.active)
-            .take(written.saturating_sub(self.active))
-        {
-            f.reset_state();
-        }
-        // Slots past the chord are never read — `process` and `process_split`
-        // both stop at `active` — so what they hold cannot be heard. It can
-        // still be compared: this type derives `PartialEq`, and leaving
-        // whatever a previous, larger chord wrote would make two banks that
-        // sound identical compare unequal because of history. A shrinking
-        // retune is not hypothetical; a chord that loses a note does it, and
-        // so does dropping the sample rate far enough to shorten the grid.
+        // **Every filter above the chord is at rest, always.** A bank starts
+        // that way, `reset_state` restores it, and this loop is the only thing
+        // that preserves it through a retune — so a resonator coming into use
+        // on some later chord starts from silence rather than from a chord
+        // that stopped playing. The filters *below* `written` keep their
+        // state, which is what makes a chord change a portamento rather than a
+        // click.
         //
-        // **The state goes with the coefficients**, for the same reason and
-        // with no cost to the tails. The filters below `written` keep theirs,
-        // which is what makes a chord change a portamento rather than a click;
-        // the ones above it have already stopped being summed, so their tails
-        // ended at the retune whatever this does. They are reset before they
-        // could ever be reused anyway — the loop below this one does it when
-        // the chord grows back — so this only decides whether a dead tail is
-        // also an invisible one.
+        // Maintained here and nowhere else, deliberately. A chord that grows
+        // only ever reaches slots this loop has already cleared, so it needs
+        // no reset of its own; the cost of the invariant living in one place
+        // is that deleting this loop hands the next chord the previous one's
+        // tails, with nothing else to catch it.
+        //
+        // The coefficients and the gains go with the state, which buys
+        // something smaller and still worth having. Nothing above the chord is
+        // read — `process` and `process_split` both stop at `active` — so what
+        // is left there cannot be heard; but this type derives `PartialEq`,
+        // and would otherwise report two banks that sound identical as
+        // different because one of them used to be bigger. A shrinking retune
+        // is not hypothetical: a chord that loses a note does it, and so does
+        // dropping the sample rate far enough to shorten the grid.
         let idle = idle_coeffs();
         for ((coeffs, gain), filter) in self
             .coeffs
