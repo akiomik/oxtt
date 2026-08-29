@@ -82,12 +82,12 @@ jobs:
         run: cargo build -p oxtt --features pi-controls --locked
 
   bela-device:
-    # Type-checks the half of `oxtt-bela` that only exists on the board:
-    # everything behind `cfg(bela_device)`, which nothing above compiles. The
-    # rest of the package needs no job of its own — `bela`'s device code is
-    # behind a `bela_device` cfg its build script sets only for aarch64 Linux,
-    # so on an x86-64 runner `oxtt-bela` is an ordinary workspace member that
-    # `lint` and `test` already cover.
+    # Type-checks the half of the two Bela hosts that only exists on the
+    # board: everything behind `cfg(bela_device)`, which nothing above
+    # compiles. The rest of each package needs no job of its own — `bela`'s
+    # device code is behind a `bela_device` cfg its build script sets only for
+    # aarch64 Linux, so on an x86-64 runner they are ordinary workspace
+    # members that `lint` and `test` already cover.
     #
     # `cargo clippy` does not link, so this needs neither `libbela` nor the
     # 800 MB sysroot a real device build copies off the board — only the
@@ -109,7 +109,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: cargo clippy --target aarch64-unknown-linux-gnu
-        run: cargo clippy -p oxtt-bela --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
+        run: |
+          cargo clippy -p oxtt-bela -p hyperglare-bela \
+            --all-targets --target aarch64-unknown-linux-gnu -- -D warnings
 
   msrv:
     name: MSRV (1.88.0)

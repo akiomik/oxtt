@@ -1,6 +1,11 @@
-# Building and running oxtt on a Bela Gem Stereo
+# Building and running a Bela Gem Stereo host
 
-`oxtt-bela` is cross-compiled on a development machine and copied to the board.
+**Two effects share this page.** `oxtt-bela` and `hyperglare-bela` are built
+and deployed the same way and differ only in which package the scripts are
+pointed at, so `BELA_PACKAGE` selects one and everything else below is common.
+`oxtt-bela` is the default because it is the one that has run on the board.
+
+A host is cross-compiled on a development machine and copied to the board.
 That is the integration model Bela supports — a standalone binary that links
 `libbela` and defines the render callbacks — and it is the only one here: the
 board is not a build host.
@@ -53,6 +58,21 @@ export BELA_SYSROOT="$HOME/bela-sysroot"
 scripts/bela-build.sh
 scripts/bela-deploy.sh -- --preset safe-start
 ```
+
+For the other effect, set `BELA_PACKAGE` for both halves:
+
+```sh
+export BELA_SYSROOT="$HOME/bela-sysroot"
+export BELA_PACKAGE=hyperglare-bela
+scripts/bela-build.sh
+scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
+```
+
+**`hyperglare-bela` has never been run on a board**, which is what it exists to
+change. Read `active_resonators` next to `cpu_percentage` in what it prints on
+exit: the per-sample cost is two biquads per band plus one filter per resonator
+that is *sounding*, so a CPU figure without the count says nothing. ADR 0016
+and ADR 0020 were both accepted with this unmeasured.
 
 A successful build produces
 `target/aarch64-unknown-linux-gnu/release/oxtt-bela`, an AArch64 ELF linked

@@ -8,25 +8,32 @@
 set -euo pipefail
 
 TARGET=aarch64-unknown-linux-gnu
-BINARY="target/${TARGET}/release/oxtt-bela"
+# Which host to deploy. Matches scripts/bela-build.sh's BELA_PACKAGE, so a
+# build and a deploy of the same effect need the same one variable set.
+PACKAGE="${BELA_PACKAGE:-oxtt-bela}"
+BINARY="target/${TARGET}/release/${PACKAGE}"
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/bela-deploy.sh [--host root@bela.local] [--no-run] [-- oxtt args...]
+  scripts/bela-deploy.sh [--host root@bela.local] [--no-run] [-- host args...]
 
-Copies target/aarch64-unknown-linux-gnu/release/oxtt-bela to the board and,
-unless --no-run is given, runs it there.
+Copies target/aarch64-unknown-linux-gnu/release/$BELA_PACKAGE to the board
+and, unless --no-run is given, runs it there.
 
   --host HOST   ssh destination. Default root@bela.local.
   --no-run      Copy only.
-  --            Everything after this is passed to oxtt-bela on the board.
+  --            Everything after this is passed to the binary on the board.
+
+  BELA_PACKAGE  Which host to deploy: oxtt-bela (default) or
+                hyperglare-bela. The same variable scripts/bela-build.sh
+                reads.
 
 The board runs `bela_daemon` on boot, which holds the audio hardware, so this
-stops it before starting oxtt. It stays stopped until the board is rebooted or
+stops it before starting the host. It stays stopped until the board is rebooted or
 the service is started again.
 
-ssh is run with -t so that Ctrl-C reaches oxtt rather than the local ssh --
+ssh is run with -t so that Ctrl-C reaches the host rather than the local ssh --
 without a tty the signal never arrives and the run has to be killed from
 another session.
 USAGE
@@ -78,5 +85,5 @@ fi
 
 # `${ARGS[*]}` rather than a quoted expansion: this is a remote shell command
 # line, and the arguments are flags chosen by whoever ran this script.
-echo "bela-deploy: stopping bela_daemon and running oxtt-bela ${ARGS[*]:-}"
-exec ssh -t "$HOST" "systemctl stop bela_daemon && ./oxtt-bela ${ARGS[*]:-}"
+echo "bela-deploy: stopping bela_daemon and running $PACKAGE ${ARGS[*]:-}"
+exec ssh -t "$HOST" "systemctl stop bela_daemon && ./${PACKAGE} ${ARGS[*]:-}"

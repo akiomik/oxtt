@@ -8,6 +8,8 @@ members = ["crates/*"]
 default-members = [
     "crates/effectkit",
     "crates/effectkit-controls",
+    "crates/hyperglare-args",
+    "crates/hyperglare-bela",
     "crates/hyperglare-dsp",
     "crates/hyperglare-render",
     "crates/oxtt",
