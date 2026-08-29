@@ -160,7 +160,7 @@ refused for the reason `EDGES` already gives: deriving them would make
 `SplitCoeffs::new` depend on `BankParams` where it depends on the sample rate
 alone, and that dependency is what keeps
 `HyperglareProcessor::set_sample_rate` a statement about the rate. Buying
-0.73 dB with that is not a trade worth making.
+0.74 dB with that is not a trade worth making.
 
 ### Why not move the ceiling to 4160 or 8320
 
