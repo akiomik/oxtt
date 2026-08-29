@@ -189,11 +189,11 @@ get it wrong:
   Both factors vary within one voice and `k` varies more. The compensation
   steps 1.51 dB per band, **6.02 dB** from the bottom band to the widest —
   four upward steps, since the first edge is flat and the last goes down. `k`
-  is `1/min(T60·π·f/ln1000, q_max)`, and over the seven octaves one voice
-  spans it runs from 0.135 at 65 Hz to 0.008 wherever the cap bites, which at
-  the command lines' defaults is everything above 1100 Hz: **24.6 dB inside a
-  single block.** Dropping `k` would read a voice with its energy high in the
-  band as louder than it is, systematically.
+  is `1/min(T60·π·f/ln1000, q_max)`, and over the six octaves one voice's
+  seven points span it runs from 0.135 at 65 Hz to 0.008 wherever the cap
+  bites — which at the command lines' defaults is everything above 1100 Hz.
+  **24.6 dB inside a single block.** Dropping `k` would read a voice with its
+  energy high in the band as louder than it is, systematically.
 
   Neither factor is a measurement, so `(gainᵢ · kᵢ)²` is settled at retune and
   the allocator reads it rather than computing it.
@@ -206,8 +206,9 @@ get it wrong:
   contribution and energies add. A note spread thinly over seven resonators is
   not quieter than one concentrated in two, and a maximum would say it was.
 
-Squaring the envelope is what removes the square root, so the whole thing is
-`S` multiply-adds and no transcendental, once per note-on at control rate.
+Squaring the envelope is what removes the square root, so what is left is
+three multiplies and two adds per resonator and no transcendental at all,
+once per note-on at control rate.
 
 **A stolen voice is reset rather than glided.** Keeping the state gives the
 Context's first failure — a tail arriving at a pitch nobody played — and
