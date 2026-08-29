@@ -2,8 +2,9 @@
 
 Measured on a PocketBeagle 2 (AM6254, Cortex-A53), Bela Debian Bookworm image
 2026-03-25, at 48 kHz with a period of 16 and one render thread — the settings
-`hyperglare-bela` asks for. Runs of 11 to 19 seconds, `--report-cpu 4`, nothing
-connected to the input.
+`hyperglare-bela` asks for. Runs of 11 to 19 seconds, `--report-cpu 4`, first with
+nothing connected to the input and then with music into it at `--adc-gain-db
+12`, which peaked at −14 dBFS without clipping.
 
 **This is the measurement ADR 0016 and ADR 0020 were accepted without.** Both
 delegated a number to "the CPU decides", and neither could be checked because
@@ -20,6 +21,8 @@ delegated a number to "the CPU decides", and neither could be checked because
  octave pairs, five notes at 9 kHz                       72   23.0          0
  harmonics at capacity                                  256   51.1          0
 ```
+
+Six more runs with signal at the input measured the same, and are below.
 
 **No configuration underran, including the one that fills the bank.** The
 defaults sit at 13.5%, below `oxtt`'s measured 19% on the same board.
@@ -54,16 +57,25 @@ that is not the binding constraint.
 four resonators and 0.6 points. ADR 0020's choice was made on sound, and
 nothing here argues with it.
 
-**Not settled: what it sounds like on this board.** The input peaked at
-−70 dBFS in every run, which is a board with nothing plugged into it. The
-resonator loop runs regardless — the filters are not gated — but the noise
-path is multiplied by a gate that never opened, so what these numbers do *not*
-include is whatever that path costs when it is doing something. It should be
-nothing, since the multiplication happens either way, but it has not been
-measured.
+**Settled: the load does not depend on the input.** The first sweep ran on a
+board with nothing plugged in, so the gate that multiplies the noise path never
+opened. Repeated with music at the input, peaking at −14 dBFS:
 
-**Not settled: latency, or the audio.** No signal has been through this. What
-the run proves is that the DSP keeps up.
+```text
+ settings                          resonators   silent    signal
+ defaults                                  32     13.5      13.5
+ octave pairs at 9 kHz                     72     23.0      23.2
+ harmonics at capacity                    256     51.1      47.9
+```
+
+Within a third of a point, and the largest configuration measured *lower* with
+signal than without. The filters run whatever arrives and the gate is a
+multiplication that happens either way, so this is what the arithmetic said it
+would be — but it was worth measuring rather than asserting, because a bank
+that only ran cheaply into silence would be no use.
+
+**Not settled: latency, or the audio.** The output was disconnected for these
+runs. What they prove is that the DSP keeps up, not what it sounds like.
 
 ## Reproducing
 
@@ -76,4 +88,14 @@ scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
 
 `--adc-gain-db` is not optional with a source connected: the board's default of
 +16 dB clips a line-level input (`docs/oxtt/bela/noise-floor.md`, which is
-about the board rather than about `oxtt`).
+about the board rather than about `oxtt`). Measured on one source, the codec
+follows the request one for one and clips nowhere in the usable range:
+
+```text
+ --adc-gain-db     -12     -6      0      6     12
+ input peak      -39.2  -33.6  -27.6  -21.8  -14.8   dBFS, none clipped
+```
+
+That source never came near full scale, so the ceiling above +12 dB is
+untested; find it per source with `--report-on-exit` rather than assuming this
+one.

@@ -350,8 +350,10 @@ Bela's render callback on a Gem Stereo: the defaults cost 13.5% of one core at
 costs 51%. The per-sample cost is 5.8% fixed plus 0.222% per resonator that is
 *sounding*, which is why the host reports `active_resonators` beside the load —
 a figure without the count cannot be acted on.
-[`bela/cpu.md`](bela/cpu.md) has the sweep, and says what it does not settle:
-nothing has been played through it.
+The load does not depend on the input: measured with music at the input it is
+within a third of a point of the same run into silence.
+[`bela/cpu.md`](bela/cpu.md) has both sweeps, and says what they do not settle
+— the output was disconnected, so nothing has been *heard* from this board.
 
 **Six functions carry `#[no_panic]` proofs**, checked at link time by
 `cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,
