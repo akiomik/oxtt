@@ -100,6 +100,6 @@ cargo run --release -p hyperglare-render -- \
 
 Read the two numbers the renderer prints. `normalization_gain_db` says how much
 of a setting was a level change, which is half of what a comparison is for —
-these need +5.0 dB and +6.0 dB. `loudness_shortfall_db` says whether the peak
+these need the amounts the commands print. `loudness_shortfall_db` says whether the peak
 ceiling stopped the match from landing; both are zero here, so the two are
 level-matched against the source and against each other.

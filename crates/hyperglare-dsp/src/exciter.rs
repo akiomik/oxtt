@@ -44,6 +44,28 @@ use effectkit::decibels::{FLOOR_DB, db_to_amp};
 
 use crate::bands::{BANDS, Split, SplitCoeffs};
 
+/// The input level the waveshaper passes at unity gain, in dBFS.
+///
+/// **The shaper compresses, so it is exact at one input level and wrong at
+/// every other one**, and this is that level. Chosen by ear across three
+/// sources over the range from full scale to small-signal
+/// ([ADR 0019](../../../docs/decisions/0019-drive-moves-the-level-and-the-normalisation-is-why.md)).
+///
+/// It decides two things a listener notices. **How much `drive` moves the
+/// level**: at full scale the knob adds 10 to 14 dB across its range at the
+/// default mix, which makes it a mix control rather than a drive control and
+/// contradicts what `docs/hyperglare/contracts.md` §5 says about `color`; here
+/// it adds 2 to 4, or about 8 measured on the wet alone. And **how much the
+/// character depends on how hard the input is driven**: normalising at full
+/// scale lets a 12 dB louder input crush the crest factor from 17 to 10 dB and
+/// move the spectrum by 4.1 dB rms, against 1.6 dB here.
+///
+/// Zero is not neutral, it is one end of the line. The other end distorts
+/// *less* rather than more — dividing by `g` alone lowers the whole curve out
+/// of its own bend — which is the opposite of what was assumed before it was
+/// measured.
+pub const NORMALISE_AT_DBFS: f32 = -12.0;
+
 /// Gain at full drive, before the shaper.
 ///
 /// Thirty decibels: enough that a bass fundamental grows a dense series of
@@ -163,23 +185,30 @@ impl Default for Shaper {
 
 impl Shaper {
     /// Derives the constants for a drive amount, `0.0` (bypass) to `1.0`.
+    ///
+    /// The curve passes unity gain at [`NORMALISE_AT_DBFS`]:
+    /// `N = (1 + g·at) / g`, which would be `(1 + g)/g` at full scale and
+    /// `1/g` in the limit.
     #[must_use]
     pub fn new(amount: f32) -> Self {
         let amount = amount.clamp(0.0, 1.0);
         let gain = db_to_amp(amount * MAX_DRIVE_DB);
+        let at = db_to_amp(NORMALISE_AT_DBFS);
         Self {
             amount,
             gain,
-            normalise: (1.0 + gain) / gain,
+            normalise: gain.mul_add(at, 1.0) / gain,
         }
     }
 
     /// A soft clip, crossfaded so that zero drive is a bypass.
     ///
-    /// `u / (1 + |u|)`, normalised so that a full-scale input stays full
-    /// scale, then blended against the input. The blend is what makes zero
-    /// drive exactly transparent — without it the shaper's own curve would
-    /// still be in the path, and "drive at zero" would not mean "no drive".
+    /// `u / (1 + |u|)`, normalised so that an input at
+    /// [`NORMALISE_AT_DBFS`] comes back unchanged, then blended against the
+    /// input. The blend
+    /// is what makes zero drive exactly transparent — without it the shaper's
+    /// own curve would still be in the path, and "drive at zero" would not
+    /// mean "no drive".
     #[inline]
     #[must_use]
     pub fn shape(&self, x: f32) -> f32 {
@@ -494,19 +523,50 @@ mod tests {
         );
     }
 
-    /// A full-scale input stays full-scale however hard it is driven, so the
-    /// drive knob is not also a volume knob.
+    /// An input at the normalisation point comes back unchanged however hard
+    /// it is driven, so the drive knob is not also a volume knob **there**.
+    ///
+    /// **It cannot be true everywhere.** The curve compresses, so one input
+    /// level passes at unity and the rest do not; which one is the decision
+    /// [`NORMALISE_AT_DBFS`] records. This used to hold at full scale, which
+    /// is why a quiet input was lifted by up to 30 dB.
     #[test]
-    fn the_shaper_holds_its_scale_across_the_drive_range() {
+    fn the_shaper_holds_its_scale_at_the_normalisation_point() {
+        let at = db_to_amp(NORMALISE_AT_DBFS);
         for drive in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
             let shaper = Shaper::new(drive);
-            let y = shaper.shape(1.0);
+            let y = shaper.shape(at);
             assert!(
-                (y - 1.0).abs() < 1e-5,
-                "drive {drive}: full scale became {y}"
+                (y / at - 1.0).abs() < 1e-5,
+                "drive {drive}: {at} came back as {y}"
             );
-            assert!((shaper.shape(-1.0) + 1.0).abs() < 1e-5);
+            assert!((shaper.shape(-at) / at + 1.0).abs() < 1e-5);
         }
+    }
+
+    /// And above the normalisation point it compresses, which is the other
+    /// half of the same fact.
+    ///
+    /// A full-scale input comes back under full scale, further under it the
+    /// harder the drive — the peaks are held down rather than the quiet parts
+    /// lifted. That direction is what keeps the character from depending on
+    /// how hard the input is driven.
+    #[test]
+    fn the_shaper_holds_peaks_down_rather_than_lifting_what_is_under_them() {
+        let mut previous = 1.0f32;
+        for drive in [0.25f32, 0.5, 0.75, 1.0] {
+            let y = Shaper::new(drive).shape(1.0);
+            assert!(
+                y < previous,
+                "drive {drive}: full scale came back at {y}, not below the \
+                 {previous} a lighter drive gave"
+            );
+            previous = y;
+        }
+        assert!(
+            previous < 0.9,
+            "full drive should visibly hold a peak down, got {previous}"
+        );
     }
 
     /// Reset rewinds the noise, so two renders of one setting are one file.

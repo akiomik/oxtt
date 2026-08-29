@@ -197,10 +197,11 @@ own: those are the properties the follower this replaced could not keep, and
 [ADR 0017](../decisions/0017-the-wet-path-carries-no-time-constant-of-its-own.md)
 records why it was removed rather than tuned.
 
-**What it does not cover is `drive`, and that is not small.** The waveshaper's
-level depends on where it is normalised and on what the input's level is; the
-knob moves the wet by about 17 dB on percussive material and by up to 29 dB on
-a quiet tone. So `color` is a crossfade at a fixed drive and not across the
+**What it does not cover is `drive`, and it is small rather than absent.** The
+waveshaper compresses, so its level depends on where the curve is normalised
+and on how loud the input is; at the chosen normalisation point the knob moves
+the output by 2 to 4 dB across its range against the 10 to 14 it moved before.
+So `color` is a crossfade at a fixed drive and approximately one across the
 drive knob. See [ADR 0019](../decisions/0019-drive-moves-the-level-and-the-normalisation-is-why.md).
 
 ## 5.0 Where the band stops
@@ -305,9 +306,10 @@ gain(f) = makeup · tilt(f) · ( (BW(f)/W_b) / (BW_ref/W_ref) )^(-p)
   zero the shaper is an exact bypass, so this costs the default nothing — but
   a `sear` above zero moves the wet's level against the dry and `color` is not
   a crossfade there.
-- **Nor is `drive`.** It moves the wet by about 17 dB across its range on
-  percussive material, and by more on quieter input, and that is
-  uncompensated. See ADR 0019.
+- **Nor is `drive`.** It moves the output by 2 to 4 dB across its range, which
+  is uncompensated and is what a drive knob is expected to do. ADR 0019 chose
+  the normalisation point that makes it that rather than the 10 to 14 dB it
+  was.
 
 Above the breakpoint the effective decay is `T60 · f*/f`, and **the decay
 setting stops reaching**. That is the cost the Q cap buys robustness with, and

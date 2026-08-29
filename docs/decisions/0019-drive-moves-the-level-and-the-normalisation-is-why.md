@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed
+Accepted.
+
+Implemented as `NORMALISE_AT_DBFS` in `crates/hyperglare-dsp/src/exciter.rs`.
+The parameter and the `--normalise-at` flag that made the sweep possible are
+gone again, as this ADR said they would be: a normalisation point is a design
+constant, not something a player reaches for.
 
 ## Scope
 
@@ -16,6 +21,17 @@ Completes what [ADR 0017](0017-the-wet-path-carries-no-time-constant-of-its-own.
 left open. That ADR replaced a level follower with a static compensation and
 said `color` would become a real crossfade. It became one against the bank; it
 did not become one against `drive`, and this is why.
+
+**It also withdraws two things ADR 0017 says about that number.** ADR 0017
+gives it as "about 21 dB" and as "evenly across the bands"; both came from the
+prototype rig — band-limited input into a band-limited grid — rather than from
+the effect. Measured on the effect the figure is about 19 dB and the bands are
+8.7 dB apart. **ADR 0017's decision stands**; what is withdrawn is the
+measurement it quoted in passing, and the reasoning that rested on the bands
+being even is redone below.
+
+`docs/hyperglare/contracts.md` carries the current figures, as the living
+document; ADR 0017 keeps what it was accepted with.
 
 ## Context
 
@@ -33,17 +49,20 @@ wrong at every other one**. Holding the peak still means lifting everything
 below it, and everything below it is where music lives.
 
 Every figure below is the same measurement: `duck`, the paired recording, wet
-only, taken from `--raw-output` so that loudness matching is not in it.
+only, taken from `--raw-output` so that loudness matching is not in it, at the
+defaults — **grid ceiling 5 kHz, `bands::EDGES` six entries, seven bands**. The
+ceiling has moved twice already and the band edges move with it, so a figure
+here without that line is a figure nobody can check later.
 
 ```text
  drive     wet RMS    against drive 0    small-signal theory
-  0.0      -25.24 dB          +0.0 dB               +0.0 dB
-  0.3      -21.99 dB          +3.2 dB               +5.3 dB
-  0.6      -15.94 dB          +9.3 dB              +15.2 dB
-  1.0       -7.84 dB         +17.4 dB              +30.3 dB
+  0.0      -27.45 dB          +0.0 dB               +0.0 dB
+  0.3      -23.97 dB          +3.5 dB               +5.3 dB
+  0.6      -17.57 dB          +9.9 dB              +15.2 dB
+  1.0       -8.78 dB         +18.7 dB              +30.3 dB
 ```
 
-**The knob moves the wet by 17 dB on this source**, which is the same order as
+**The knob moves the wet by 19 dB on this source**, which is the same order as
 the 18 dB the bank sits under the dry before `makeup` corrects it. So the
 defect ADR 0017 named is only half shut: `color` crossfades between the dry and
 a wet whose level is set by a different knob.
@@ -51,8 +70,8 @@ a wet whose level is set by a different knob.
 Three things about the number:
 
 - **It is not uniform across the bands, and the spread cannot be compensated
-  either.** The same render, per band: 24.4 / 19.5 / 15.7 / 17.2 / 17.4 dB
-  from the bottom band up — 8.7 dB apart. That is not a global scalar, but it
+  either.** The same render, per band, from the bottom up:
+  24.6 / 19.7 / 15.8 / 17.4 / 20.0 / 19.9 / 19.0 dB — 8.7 dB apart. That is not a global scalar, but it
   is not a static one either: the shaper is applied to each band separately
   now, so how much each one saturates is set by how loud *that band of that
   source* happens to be. A per-band term in the gain law would have to know the
@@ -76,30 +95,50 @@ Three things about the number:
 
 ## Decision
 
-**Not taken.** What the options are is settled and which one is right is not.
+**The curve passes unity gain at −12 dBFS.**
 
-The diagnosis above says the choice is one-dimensional rather than a menu.
-`Shaper` normalises so that the curve is unity-gain at *some* input level, and
-every level is available:
+The choice is one-dimensional rather than a menu: `Shaper` normalises so that
+the curve is unity-gain at *some* input level, and every level is available.
+Full scale is one end of that line, not a neutral default. Swept across three
+sources — `duck`, `laser` and the drum loop — **at the default `color` of 0.63
+and with loudness matching switched off**, because what a listener hears the
+knob do is the output rather than the wet, and because the level *is* the
+question:
 
 ```text
- normalise at ...   drive at maximum does ...        what it costs
-  full scale        lifts everything below by ~17 dB  today's behaviour
-  −12 dBFS          splits the difference             untried
-  zero (small       crushes peaks by ~30 dB           the least like a
-  signal)                                             drive knob
+ normalise at    drive 0 → 1 moves the output by   character vs input level
+  full scale          +10.1 to +14.3 dB               4.07 dB rms
+  −12 dBFS             +1.6 to  +4.2 dB               1.63 dB rms
+  −24 dBFS             −1.6 to  −0.8 dB               1.21 dB rms
+  small signal         −2.9 to  −2.0 dB               0.95 dB rms
 ```
 
-**Today's setting is one end of that line, not a neutral default.** The
-question is where on the line the effect wants to be, and it is a question
-about what a drive knob should sound like — turning it up making things louder
-is what drive knobs do, and 17 dB is more than that idiom usually means.
+**The wet alone moves more than the output does**, because the dry dilutes it:
+on `duck` at the chosen point the wet rises 7.7 dB where the output rises 4.2.
+The Context table above is the wet, this one is the output; neither is wrong
+and they do not answer the same question.
 
-Two treatments exist and are recorded as treatments rather than options:
-compensating from the small-signal gain over-corrects by 13 dB at maximum on
+The right-hand column is how far the wet's spectrum moves, level removed, when
+the input is driven 12 dB harder. **At full scale the character depends on the
+input's level four times as much**, because a 12 dB louder input crushes the
+crest factor from 17.2 dB to 10.4 where every other point holds it near 17.8.
+
+−12 dBFS is where the knob still behaves like a drive knob — two to four
+decibels, which is what the idiom means — without becoming a mix control. Ten
+to fourteen is a mix control, and contradicts what §5 says about `color`.
+
+**Two things this measurement corrected.** The first draft said small-signal
+normalisation "crushes peaks by about 30 dB" and called it the least like a
+drive knob. It is the reverse: dividing by `g` alone lowers the whole curve out
+of its own bend, so it distorts *less* and holds the crest factor. And the
+normalisation point barely changes how much distortion there is at all —
+brightness moves 1.0 to 2.6 dB across the whole line. What it changes is the
+level and the level-dependence.
+
+The alternative treatment is recorded as a treatment rather than an option:
+compensating from the small-signal gain over-corrects by 12 dB at maximum on
 `duck` and by 1 dB on a quiet tone, so the knob's level would move
-unpredictably with the material rather than not at all; and leaving it alone
-contradicts what §5 says about `color` being a crossfade. Neither addresses the
+unpredictably with the material rather than not at all. It does not address the
 normalisation point, which is the thing that produced the number.
 
 ## Consequences
@@ -111,13 +150,16 @@ normalisation point, which is the thing that produced the number.
   `ExciterParams` moves, which arrived with the commit that took the `powf` off
   the sample path rather than with ADR 0016. The bank's retune gate is not
   involved either way, because nothing here belongs in the gain law's share.
-- **Every render changes**, and the drive knob's character changes with it —
-  that is the point of it and also its risk. The current curve is what M0
-  listened to.
+- **Every render changes.** The shaper's small-signal gain drops by about
+  12 dB, so the wet arrives quieter at any drive above zero, and the offline
+  renderer's loudness matching hides that while a live host will not.
 - **Until this is decided, §5 and §6 carry the exception.** They record that
   `sear` and `drive` are outside the compensation, which is honest and is not a
   design.
-- **What decides it is a listening test.** The numbers above already say what
-  each normalisation point does to the level. What none of them says is which
-  one sounds like a drive knob, and the effect has never been heard normalised
-  anywhere but at full scale.
+- **`sear` moves with it.** The post-drive is the same `Shaper`, and it sits
+  outside the compensation, so its level behaviour changed too. At the default
+  of zero it is an exact bypass, so nothing at the defaults moved.
+- **What is not closed is `color` across `drive`.** Two to four decibels is
+  small enough to live with and is not zero, so §5's crossfade claim holds
+  approximately rather than exactly. Making it exact means compensating a
+  quantity that depends on the material, which is what this ADR declined.
