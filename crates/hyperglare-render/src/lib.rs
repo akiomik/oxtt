@@ -47,7 +47,7 @@ use ebur128::{EbuR128, Mode};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use thiserror::Error;
 
-use hyperglare_dsp::note::note_hz;
+use hyperglare_args::chord_hz;
 use hyperglare_dsp::processor::{HyperglareParams, HyperglareProcessor};
 
 /// Stereo, because the processor is.
@@ -198,7 +198,7 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
     #[allow(clippy::cast_precision_loss)]
     let sample_rate = spec.sample_rate as f32;
 
-    let notes: Vec<f32> = options.notes.iter().copied().map(note_hz).collect();
+    let notes = chord_hz(&options.notes);
     let mut processor = HyperglareProcessor::<CAPACITY>::new(options.params, sample_rate);
     processor.apply_params(&options.params, &notes);
 

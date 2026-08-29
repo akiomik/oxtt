@@ -58,31 +58,47 @@
 //! compensation in **both** halves — in the opposite directions to before:
 //!
 //! ```text
-//!                    BW(f)         BW(f)/W_b            gain(f)
-//!  below f*        constant   falls as W_b grows   +6.02·p dB per doubling
-//!  above f*             ∝ f      same everywhere         unchanged
+//!                    BW(f)              BW(f)/W_b                gain(f)
+//!  below f*        constant     one number for the band    +6.02·p dB per band
+//!  above f*             ∝ f     rises with f, halved at    -6.02·p dB/octave,
+//!                               each edge                  +6.02·p dB per edge
 //! ```
 //!
-//! Above the breakpoint a resonator widens exactly as fast as its band does,
-//! so its share stops changing and so does the compensation. Below it the
-//! resonator keeps its width while the band around it grows, so the share
-//! falls and the compensation lifts.
+//! Below the breakpoint the resonator keeps its width while the band around it
+//! grows, so its share falls and the compensation lifts, in a step at each
+//! edge. Above it the resonator widens with frequency while `W_b` does not, so
+//! the share climbs across a band and is halved back at every edge: a sawtooth
+//! whose *band-to-band envelope* is flat, which is the property the old law
+//! had smoothly and this one has on average.
 //!
-//! **It is a step at each edge, not a slope.** `W_b` is one number for a whole
-//! band, so two resonators inside one band are compensated identically however
-//! far apart they are. And the steps are not all the same size, because the
-//! widths are not all in the same ratio:
+//! **Below the breakpoint it is a step at each edge and not a slope**, because
+//! `W_b` is one number for a whole band, so two resonators inside one band are
+//! compensated identically however far apart they are. **Above it that is
+//! false** — they differ by 6.02·p dB per octave between them. At the defaults
+//! the breakpoint sits at 4.4 kHz, so almost the whole grid is in the first
+//! case; lengthening the decay moves it down, and at `decay_t60_s = 0.6` it is
+//! at 1.8 kHz and the top three bands are in the second.
+//!
+//! The steps are not all the same size either, because the widths are not all
+//! in the same ratio:
 //!
 //! ```text
-//!  band      0        1        2        3         4
-//!  spans   0-130  130-260  260-520  520-1040  1040-ceiling
-//!  width    130      130      260      520      ceiling-1040
+//!  band     0       1       2       3        4         5          6
+//!  spans  0-130 130-260 260-520 520-1040 1040-2080 2080-4160 4160-ceiling
+//!  width   130     130     260     520      1040      2080    ceiling-4160
 //! ```
 //!
 //! The bottom band is open downward, so it is as wide as the one above it and
-//! the first step is flat. From there each width doubles. The old law had a
-//! slope above the breakpoint and nothing below; this one has a staircase
-//! below and nothing above. Neither gained a second mechanism.
+//! the first step is flat. From there each width doubles — **except the top
+//! one, which is closed at the grid's ceiling rather than at an edge.** At the
+//! default ceiling of 5 kHz that leaves it 840 Hz wide against the 2080 below
+//! it, so the step at 4160 Hz is **-1.97 dB where every other edge is +1.51**.
+//! That is a defect rather than a design: see
+//! [`bands::EDGES`](crate::bands::EDGES).
+//!
+//! The old law had a slope above the breakpoint and nothing below; this one
+//! has a staircase below and a sawtooth above. Neither gained a second
+//! mechanism.
 //!
 //! At `p = 0` the compensation disappears, which is the right answer if the
 //! bank is being excited tonally rather than by noise. **The exponent now
@@ -236,14 +252,18 @@ impl Default for BankParams {
             // See ADR 0017.
             decay_t60_s: 0.25,
             q_max: 500.0,
-            // M0's answers, not neutral values. The compensation's stated
-            // range was 0.25 to 0.5, and listening put it at the lower end:
-            // at 0.5 the slope above the breakpoint is -3 dB per octave, and
-            // over the three octaves to the top of the band that is a
-            // deliberate 9 dB of darkening nobody asked for. At 0.25 it is
-            // -1.5 dB per octave, and a tilt of 0.5 is +1.5 — so the two
-            // together leave the band about flat above the breakpoint, which
-            // is where the comparison landed.
+            // M0's answers, arrived at by listening, and held on that alone.
+            // The arithmetic once given for them — that 0.5 costs 3 dB an
+            // octave above the breakpoint against 1.5 at 0.25, so 0.25 with a
+            // tilt of 0.5 leaves the band flat there — described the gain law
+            // as it stood before ADR 0017 made the share band-relative. Under
+            // the present law the shape above the breakpoint is a sawtooth
+            // with a flat envelope and the slope is below it, so that
+            // reasoning no longer reaches these numbers.
+            //
+            // They are left where listening put them rather than re-derived,
+            // because the derivation is not what chose them. Re-deriving them
+            // for the present law is open, and ADR 0018 says what it takes.
             compensation_exponent: 0.25,
             tilt: 0.5,
             drift_cents: 0.0,

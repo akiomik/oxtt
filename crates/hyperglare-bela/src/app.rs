@@ -36,10 +36,15 @@ const AUDIO_CHANNELS: usize = 2;
 
 /// Resonators the board's bank has room for.
 ///
-/// **The same number the offline renderer uses**, so that a render and a run
-/// of the same settings are the same bank rather than two banks that truncate
-/// differently. Capacity costs memory and not time — the per-sample loop runs
-/// over `active`, not over `N` — so this is about ten kilobytes and no cycles.
+/// **A quarter of what the offline renderer carries**, which is a difference
+/// worth knowing rather than one to close: `hyperglare-render` sizes for the
+/// harmonic geometry at the top of its range, and this sizes for what a board
+/// is asked to play. Settings that fit both give the same bank; settings that
+/// truncate here and not there give two banks that differ, and `active()` in
+/// `--report-on-exit` is where that shows.
+///
+/// Capacity costs memory and not time — the per-sample loop runs over
+/// `active`, not over `N` — so this is about four kilobytes and no cycles.
 ///
 /// It is enough for the octave geometries at any chord worth playing, and not
 /// enough for a harmonic series at the top of its range, which truncates.
@@ -130,6 +135,17 @@ impl BelaApplication for HyperglareApplication {
             return Err(
                 "hyperglare renders on one thread: its resonators carry their tails across frames",
             );
+        }
+
+        // `pin_mode` and `digital_write` panic on a channel the board does not
+        // have, and `render_pre` calls both every block. Refused here so an
+        // out-of-range `--clip-led` ends the program with a message instead of
+        // ending it from inside the audio callback.
+        if let Some((channel, _)) = self.clip_led {
+            let digital = usize::try_from(settings.num_digital_channels()).unwrap_or(0);
+            if let Some(reason) = clip_led_refusal(channel, settings.use_digital(), digital) {
+                return Err(reason);
+            }
         }
         Ok(())
     }
@@ -239,6 +255,27 @@ pub struct RunDiagnostics {
     pub cpu_percentage: Option<f32>,
 }
 
+/// Why a clip-indicator channel cannot be used, if it cannot.
+///
+/// Separate from [`BelaApplication::validate_settings`] because a
+/// `ResolvedSettings` is deliberately not constructible outside the audio
+/// system — what makes it *resolved* is where it comes from — so the rule
+/// itself is what gets tested.
+///
+/// Shorter than `oxtt-bela`'s by one clause: there is no control surface here,
+/// so no channel is reserved for a bypass switch and every channel the board
+/// delivers is free.
+const fn clip_led_refusal(
+    channel: usize,
+    use_digital: bool,
+    digital_channels: usize,
+) -> Option<&'static str> {
+    if !use_digital || digital_channels <= channel {
+        return Some("the clip indicator needs a digital channel the board delivers");
+    }
+    None
+}
+
 /// The input meters of every render thread, combined.
 fn input_meter(states: &[HyperglareRenderState]) -> InputMeter {
     states
@@ -263,5 +300,30 @@ impl fmt::Display for RunDiagnostics {
             self.input.peak_dbfs(),
             self.input.clipped_frames()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clip_led_refusal;
+
+    #[test]
+    fn a_channel_the_board_delivers_is_accepted() {
+        assert!(clip_led_refusal(0, true, 16).is_none());
+        assert!(clip_led_refusal(15, true, 16).is_none());
+    }
+
+    #[test]
+    fn a_channel_past_the_board_is_refused() {
+        // The bound is exclusive: sixteen channels are numbered 0 through 15,
+        // and it is channel 16 that would index past the mask `pin_mode`
+        // builds and panic inside `render_pre`.
+        assert!(clip_led_refusal(16, true, 16).is_some());
+        assert!(clip_led_refusal(usize::MAX, true, 16).is_some());
+    }
+
+    #[test]
+    fn no_channel_is_usable_without_digital_io() {
+        assert!(clip_led_refusal(0, false, 16).is_some());
     }
 }

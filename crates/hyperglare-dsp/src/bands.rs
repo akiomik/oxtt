@@ -62,6 +62,27 @@ use effectkit::filter::{Biquad, biquad_coeffs};
 /// bottom and top bands are open-ended, so a caller who widens the grid gets a
 /// wider band rather than a broken one.
 ///
+/// # The top edge is one too many
+///
+/// **Known defect, measured and not yet fixed.** `4160.0` sits close enough to
+/// the default ceiling of 5 kHz that the band above it is 840 Hz wide against
+/// the 2080 below, and the gain law reads a narrower band as a smaller share:
+///
+/// ```text
+///  edge      130     260     520    1040    2080    4160
+///  step   +0.00   +1.51   +1.51   +1.51   +1.51   -1.97   dB
+/// ```
+///
+/// Every edge steps up by `6.02·p` dB except the last, which steps down. With
+/// `4160.0` dropped the top band spans 2080 Hz to the ceiling and the last
+/// step is `+2.24` dB — still off the pattern, and in the direction the rest
+/// of the ladder goes.
+///
+/// Left in place because it changes how the effect sounds and
+/// [ADR 0020](../../../docs/decisions/0020-the-grids-ceiling-is-five-kilohertz.md)
+/// names both edges; see
+/// [ADR 0022](../../../docs/decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
+///
 /// [`BankParams`]: crate::bank::BankParams
 pub const EDGES: [f32; 6] = [130.0, 260.0, 520.0, 1040.0, 2080.0, 4160.0];
 

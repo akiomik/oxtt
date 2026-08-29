@@ -13,15 +13,31 @@
 //! are not: the third of a chord is not in the root's series, and neither is a
 //! detuned octave. Those need something aperiodic.
 //!
+//! Since [ADR 0016](../../../docs/decisions/0016-the-bank-is-excited-per-band.md)
+//! both paths run **per band**, and what a resonator receives
+//! is the entry for the band its own frequency falls in:
+//!
 //! ```text
-//! excite(x) = shape(x, drive) + noise_amount · gate(x) · noise()
+//! excite_b(x) = shape(split_b(x), drive) + noise_amount · gate_b(x) · noise()
 //! ```
 //!
 //! - **`shape`** supplies the root-coincident points. More drive, more
-//!   partials of the input, so more of them ring.
+//!   partials of the input, so more of them ring. It is driven by the band
+//!   rather than by the whole input, so a band the source is empty in shapes
+//!   nothing.
 //! - **`gate · noise`** supplies everything else. It is not a garnish: above
 //!   the Q cap's breakpoint, ordinary tuning drift is wider than a resonator's
 //!   bandwidth, so the high end of the bank is fed by this path almost alone.
+//! - **`noise()` is drawn once per frame and shared**; `gate_b` is not shared,
+//!   and that is the half the silence guarantee rests on. [`Exciter::process`]
+//!   says why one draw is enough.
+//!
+//! **The division of labour above is the design's claim and not a measured
+//! one.** ADR 0016 rendered with `--drive 0` and with `--noise 0` and got
+//! waveforms correlating at 0.94–0.96 on both a tonal and a percussive source:
+//! whatever the two paths are meant to feed, the bank could not be shown to
+//! tell them apart. Whether per-band excitation changed that has not been
+//! re-measured, and the ADR leaves it open.
 //!
 //! # The gate is load-bearing
 //!
