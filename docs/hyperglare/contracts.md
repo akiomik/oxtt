@@ -352,8 +352,15 @@ costs 51%. The per-sample cost is 5.8% fixed plus 0.222% per resonator that is
 a figure without the count cannot be acted on.
 The load does not depend on the input: measured with music at the input it is
 within a third of a point of the same run into silence.
-[`bela/cpu.md`](bela/cpu.md) has both sweeps, and says what they do not settle
-— the output was disconnected, so nothing has been *heard* from this board.
+[`bela/cpu.md`](bela/cpu.md) has both sweeps.
+
+**And it sounds like itself.** Recorded off the board and measured against the
+offline renderer on the same settings, the chord content matches to 0.016 and
+the band profiles have the same shape
+([`bela/audio-verification.md`](bela/audio-verification.md)). What that
+document adds by ear is the limit this section's neighbours state by
+measurement: colour is unmistakable on sparse material and inaudible inside a
+full mix, because the source's reach is the effect's reach.
 
 **Six functions carry `#[no_panic]` proofs**, checked at link time by
 `cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,
