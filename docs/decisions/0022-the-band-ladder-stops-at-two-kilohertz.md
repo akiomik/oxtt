@@ -15,8 +15,25 @@ on the gain law, not a rendering.
 `hyperglare`.
 
 Removes one element from `crates/hyperglare-dsp/src/bands.rs`'s `EDGES`, so
-`BANDS` goes from seven to six. No other change: the split is built from
-`EDGES`, the band map is derived from it, and nothing else names the value.
+`BANDS` goes from seven to six.
+
+**No other change to the code.** The split is built from `EDGES`, `BANDS` is
+`EDGES.len() + 1`, `SplitCoeffs` is sized from it and `REFERENCE_BAND_HZ` is
+`EDGES[0]`; nothing counts bands by hand.
+
+**Four documents do name the values**, and all four move with it:
+
+- `bank.rs`'s module documentation — the seven-band spans-and-widths table,
+  and the paragraph giving the step at 4160 Hz.
+- `bands.rs`'s "the top edge is one too many" section, which goes from a known
+  defect to a fixed one.
+- [`cpu.md`](../hyperglare/bela/cpu.md) — "the band split's twelve biquads,
+  the exciter's seven gates" become ten and six, and "**Seven bands are twelve
+  biquads**" with them. Those biquads are itemised inside the 5.8% fixed term
+  of `CPU% = 5.8 + 0.222 × resonators`, so **the constant moves** and is worth
+  re-measuring rather than adjusting on paper.
+- [`contracts.md`](../hyperglare/contracts.md) §5.0, for the reason in the
+  decision below.
 
 **Withdraws one number from [ADR 0020](0020-the-grids-ceiling-is-five-kilohertz.md).**
 That ADR's decision reads "**`bands::EDGES` reach up with it**, to 2080 and
@@ -62,7 +79,7 @@ Where the breakpoint sits changes almost everything else about the shape and
 does not touch this, so the figures hold under `BankParams::default` and under
 the command lines' `--breakpoint-hz` of 1100 Hz alike.
 
-The 3.48 dB reversal at 4160 Hz is not something anyone chose; it is what a
+The 3.47 dB reversal at 4160 Hz is not something anyone chose; it is what a
 ladder of octaves does when it is asked to stop at a frequency that is not one
 of its rungs.
 
@@ -87,10 +104,54 @@ the last step is `+2.24` dB where the pattern is `+1.51`:
 
 **Still off the pattern, and that is accepted.** A fixed ladder cannot land on
 a ceiling that is a runtime setting, so some band is always the odd one; the
-choice is which error to carry. `+0.73` dB above the trend is smaller than
-`-3.48` below it, and it points the same way the rest of the ladder does,
+choice is which error to carry. `+0.74` dB above the trend is smaller than
+`-3.47` below it, and it points the same way the rest of the ladder does,
 which is the part that matters — a listener hears a reversal and does not hear
 a rung that is slightly tall.
+
+### It breaks §5.0's letter and serves what §5.0 is for
+
+`contracts.md` §5.0 says the edges are octaves for a reason, and names the
+condition this decision creates:
+
+> `crate::bands::EDGES` are octaves because the gain law's share is `BW/W_b`,
+> and they have to reach as far as the grid does **or the top band spans more
+> than an octave and the resonators in it are lifted against their
+> neighbours.**
+
+The top band this decision makes is 2080 Hz to the ceiling, which at 5 kHz is
+**1.27 octaves**. So the letter is broken, plainly and on purpose.
+
+What the sentence is protecting is the second half: resonators inside an
+over-wide band being lifted against their neighbours. Measured, this decision
+**halves that**. Above the breakpoint the compensation falls `6.02·p` dB per
+octave *inside* a band, so the spread from 2080 Hz to the ceiling is:
+
+```text
+                        band 5    edge at 4160   band 6    total
+ today (7 bands)         -1.51          -1.97     -0.40    -3.87
+ this decision           -1.90              -         -    -1.90
+```
+
+**Three and nine-tenths of a decibel of spread becomes one and nine-tenths.**
+The rung that the letter forbids is worth less than the reversal the letter's
+own arithmetic produces at 4160.
+
+So §5.0's sentence has to be revised: not to drop the reason, which is sound,
+but because "reach as far as the grid does" is unachievable when the grid's
+ceiling is a runtime setting and the ladder is fixed octaves. What is true
+instead is that the edges are octaves and the top band absorbs whatever the
+ceiling leaves — and that the check when the ceiling moves is on the *spread*,
+which is measurable, rather than on the octave count, which is a proxy that
+has now been wrong once.
+
+**This is where `q_max` comes back.** The steps at the edges do not depend on
+it, but the within-band slope is the breakpoint's own doing, so the table
+above is the command lines' default of `f*` = 1100 Hz, where all of
+2080–5000 Hz is above the breakpoint. Under `BankParams::default`'s 4.4 kHz
+most of that range is below it and flat, and the same two figures are
+**-2.25 dB and -0.28 dB** — the same direction, a smaller effect. The decision
+is unchanged either way; the size of what it buys is not.
 
 ### Why not derive the edges from the ceiling instead
 
