@@ -174,17 +174,29 @@ full table produces.
 **What "quietest" measures.** A voice holds
 
 ```text
- Σᵢ  gainᵢ² · (ic1eqᵢ² + ic2eqᵢ²)      over the resonators in its block
+ Σᵢ  (gainᵢ · kᵢ)² · (ic1eqᵢ² + ic2eqᵢ²)     over the resonators in its block
 ```
 
 and the smallest wins. Three choices are in that line and each one is a way to
 get it wrong:
 
-- **`gainᵢ` is included**, because what a listener hears is the state through
-  the gain, and the gain is not a constant across a voice: the compensation
-  alone steps 1.51 dB per band, about 7.5 dB across the ladder, before the
-  tilt. Comparing bare state compares a voice low in the band against one high
-  in it on the wrong terms.
+- **The weight is the whole path from state to output**, which is
+  `gainᵢ · kᵢ` and not `gainᵢ`. The bank sounds
+  `gain * filter.process_bandpass(coeffs, x)`, and `process_bandpass` is
+  `k · process_bandpass_raw` with `k = 1/q`; the integrator states are the
+  *unnormalised* ones, so what a listener hears is `gainᵢ · kᵢ · v1ᵢ`.
+
+  Both factors vary within one voice and `k` varies more. The compensation
+  steps 1.51 dB per band, **6.02 dB** from the bottom band to the widest —
+  four upward steps, since the first edge is flat and the last goes down. `k`
+  is `1/min(T60·π·f/ln1000, q_max)`, and over the seven octaves one voice
+  spans it runs from 0.135 at 65 Hz to 0.008 wherever the cap bites, which at
+  the command lines' defaults is everything above 1100 Hz: **24.6 dB inside a
+  single block.** Dropping `k` would read a voice with its energy high in the
+  band as louder than it is, systematically.
+
+  Neither factor is a measurement, so `(gainᵢ · kᵢ)²` is settled at retune and
+  the allocator reads it rather than computing it.
 - **The two integrator states are combined as `ic1² + ic2²`**, not as one of
   them or as a sum of absolute values. They are in quadrature at resonance, so
   their root-sum-square is a smooth envelope while either one alone crosses
@@ -319,8 +331,9 @@ which is worse to explain than either end of the trade.
 - **`effectkit::filter::Svf` has to report how much it holds.** `ic1eq` and
   `ic2eq` are private and the type offers `is_finite` and nothing else that
   reads them, so the allocator's criterion cannot be computed from outside the
-  crate today. It is one accessor, and it belongs to `effectkit` rather than
-  to this ADR — but nothing here works without it.
+  crate today. `k` is already reachable — `SvfCoeffs::q` returns `1/k` — so it
+  is the state and only the state that is missing. One accessor, belonging to
+  `effectkit` rather than to this ADR, and nothing here works without it.
 - **`Grid` needs to report its maximum count**, since `S` is a property of the
   grid rather than of any note. It has `count(note_hz, nyquist)` and nothing
   that maximises over notes — and the maximum has to be taken over the detune
