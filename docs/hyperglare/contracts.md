@@ -344,15 +344,14 @@ What lands where, in this crate: `ResonatorBank::process` and
 `Grid::frequencies` are on the callback too — under Bela a chord change arrives
 inside `render_pre`.
 
-**There is a host, and it has never been run.** `hyperglare-bela` puts this
-crate under Bela's render callback, cross-compiles, and type-checks for the
-board. What it has not done is play: two of the decisions this document rests
-on — the band count of section 2.0 and the ceiling of section 5.0 — were
-accepted with the CPU explicitly unmeasured, because there was no host to
-measure it with. The host reports `active_resonators` beside its CPU figure,
-because the per-sample cost is two biquads per band plus one filter per
-resonator that is *sounding*, and a load without the count is not a number
-anybody can act on.
+**There is a host, and it has run.** `hyperglare-bela` puts this crate under
+Bela's render callback on a Gem Stereo: the defaults cost 13.5% of one core at
+48 kHz with no underruns, and a bank filled to its capacity of 256 resonators
+costs 51%. The per-sample cost is 5.8% fixed plus 0.222% per resonator that is
+*sounding*, which is why the host reports `active_resonators` beside the load —
+a figure without the count cannot be acted on.
+[`bela/cpu.md`](bela/cpu.md) has the sweep, and says what it does not settle:
+nothing has been played through it.
 
 **Six functions carry `#[no_panic]` proofs**, checked at link time by
 `cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,

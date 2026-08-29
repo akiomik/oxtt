@@ -68,11 +68,11 @@ scripts/bela-build.sh
 scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
 ```
 
-**`hyperglare-bela` has never been run on a board**, which is what it exists to
-change. Read `active_resonators` next to `cpu_percentage` in what it prints on
-exit: the per-sample cost is two biquads per band plus one filter per resonator
-that is *sounding*, so a CPU figure without the count says nothing. ADR 0016
-and ADR 0020 were both accepted with this unmeasured.
+Read `active_resonators` next to `cpu_percentage` in what it prints on exit:
+the per-sample cost is 5.8% of one core fixed plus 0.222% per resonator that is
+*sounding*, so a CPU figure without the count says nothing. What that costs
+across the settings is in
+[`docs/hyperglare/bela/cpu.md`](hyperglare/bela/cpu.md).
 
 A successful build produces
 `target/aarch64-unknown-linux-gnu/release/oxtt-bela`, an AArch64 ELF linked
