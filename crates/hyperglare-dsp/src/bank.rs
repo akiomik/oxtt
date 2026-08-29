@@ -74,10 +74,20 @@
 //! **Below the breakpoint it is a step at each edge and not a slope**, because
 //! `W_b` is one number for a whole band, so two resonators inside one band are
 //! compensated identically however far apart they are. **Above it that is
-//! false** — they differ by 6.02·p dB per octave between them. At the defaults
-//! the breakpoint sits at 4.4 kHz, so almost the whole grid is in the first
-//! case; lengthening the decay moves it down, and at `decay_t60_s = 0.6` it is
-//! at 1.8 kHz and the top three bands are in the second.
+//! false** — they differ by 6.02·p dB per octave between them.
+//!
+//! Which case a resonator is in depends on where `f*` is, and that is not
+//! [`BankParams::default`]'s answer. That default's `q_max` of 500 puts it at
+//! 4.4 kHz, but no binary runs it: both command lines derive the cap with
+//! [`q_max_for_breakpoint`] from `--breakpoint-hz`, whose default is 1100 Hz.
+//! **So at the shipped default `f*` is 1100 Hz**, and everything above it —
+//! the top of band 3 and all of bands 4, 5 and 6 — is in the second case
+//! rather than the first.
+//!
+//! And `--decay` does not move it. Deriving the cap from a frequency is what
+//! makes `f*` independent of the decay, which is the point of doing it that
+//! way round: the breakpoint is a thing an ear can be pointed at, and it
+//! should stay where it was pointed when another knob turns.
 //!
 //! The steps are not all the same size either, because the widths are not all
 //! in the same ratio:

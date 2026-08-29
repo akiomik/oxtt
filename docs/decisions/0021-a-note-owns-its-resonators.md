@@ -138,9 +138,10 @@ Three parts, and the third is the one that carries the level contract.
 3. **`voices` becomes the size of the voice table.** It keeps its present job
    as the level's divisor and gains the job of bounding the polyphony.
 
-   A note arriving with no voice free **takes the one released longest ago,
-   and resets its state before retuning it**. Failing that — every voice
-   held — it takes the one held longest, on the same terms.
+   A note arriving with no voice free **takes the quietest released voice,
+   measured from its filters' own state, and resets it before retuning it**.
+   Failing that — every voice held — it takes the one held longest, on the
+   same terms.
 
 ### Stealing brings the defect back, and that is the point of the ordering
 
@@ -149,25 +150,38 @@ over a ringing filter, and stealing does exactly that.** This ADR does not
 remove them. What it does is confine them to one case — the table being full —
 and then make that case as quiet as it can be made.
 
-The ordering is what does the work. A voice released long ago has been
-decaying at its `T60` ever since, so by the time it is the oldest candidate
-its state is small and what is written over it is close to silence. The
-allocator therefore spends released voices first, longest-released first, and
+The ordering is what does the work, and **the criterion is the voice's own
+state rather than how long ago it was released.** Among the released voices
+the allocator takes the quietest — the one whose filters hold the least — and
 only reaches a sounding note when there is no released one left.
 
-**A stolen voice is reset rather than glided**, and that decides between two
-audible faults in favour of the smaller one. Keeping the state gives the
-Context's first failure — a tail arriving at a pitch nobody played — and
-resetting gives a discontinuity. On the voices the allocator actually reaches
-first the discontinuity is inaudible, because the state being zeroed is
-already near zero; on a stolen sounding note it is a click where the
-alternative is a wrong note, and a click is the one a player can read as "I
-ran out of voices".
+Release time is not a usable proxy for that, which is the reason for measuring
+instead. A resonator falls 60 dB in one `T60`, so at the default of 0.25 s:
 
-It also **keeps `contracts.md` §2 exactly as written.** "Filters entering use
-start from rest" would be false of a voice stolen without a reset, and the
-reset is what lets that sentence stand unchanged rather than needing an
-exception for the allocator.
+```text
+ released for   25ms   50ms   100ms   250ms   500ms
+ down by         6dB   12dB    24dB    60dB   120dB
+```
+
+**A voice released 100 ms ago is 24 dB down, not silent.** Five voices played
+legato reach that case easily, and the voice released *longest* ago need not
+be the quietest — one released 300 ms ago into a loud passage can hold more
+than one released 50 ms ago into a quiet one. Reading the state gets the right
+one for two state values per resonator, at note-on, at control rate.
+
+**A stolen voice is reset rather than glided.** Keeping the state gives the
+Context's first failure — a tail arriving at a pitch nobody played — and
+resetting gives a step discontinuity the size of whatever that voice was
+holding. Neither is free, and the table above is the honest account of what
+the second one costs: **at the bottom of the table it is inaudible, and with
+every voice ringing it is a click.** A click is the fault a player can read as
+"I ran out of voices"; a wrong pitch is not, and it also outlives the moment
+it was made.
+
+Separately from how it sounds, the reset **keeps `contracts.md` §2 exactly as
+written**: "filters entering use start from rest" would be false of a voice
+stolen without one. That argument is structural and does not depend on the
+audibility above.
 
 **So the honest claim is narrower than the title.** A note owns its resonators
 until the polyphony is exceeded, and past that point this effect behaves like
@@ -215,6 +229,10 @@ from, four are five-note chords and one — `swan` — is four. Four voices cann
 play four of the five; five can play all of them and nothing in the set asks
 for a sixth. Four was chosen before those recordings existed.
 
+(That totals 24 where ADR 0018 counts 23 notes across the five pairs. One of
+the two is out by one, and neither reading changes this: the largest chord is
+five notes either way.)
+
 **This is the part of the decision most likely to be wrong**, and it is worth
 being plain about how thin the argument is: it rests on one set of five
 chords, chosen by whoever made those recordings, for a keyboard nobody has
@@ -250,6 +268,26 @@ which is worse to explain than either end of the trade.
   workaround, raising `--voices`, also divides the level, so a caller cannot
   ask for the polyphony without asking for the quieter single note. The two
   were separable before this ADR and are not after it.
+- **The clearing loop stops being one loop, and it is the only owner of an
+  invariant.** Blocks make idle slots appear *inside* the active range — a
+  voice with six points in a stride of seven leaves the seventh at rest — so
+  the suffix clear above `written` cannot maintain "every filter above the
+  chord is at rest" and becomes a clear per block. `retune`'s comment says
+  that invariant is "maintained here and nowhere else, deliberately" and that
+  deleting the loop "hands the next chord the previous one's tails". The one
+  place moves, and it moves to a harder shape.
+- **`active()` becomes the constant `voices · S`**, and two things that read
+  it stop meaning what they say. `RunDiagnostics::active_resonators` is
+  documented as "the number that decides whether this fits", which stays true
+  of the cost and stops being true of the chord; and `contracts.md` §2
+  promises that what a truncating caller loses "is a thing it can see in
+  `active()` and act on", which it no longer can. Both need revising, and the
+  chord's own size has to be reported some other way.
+- **`cpu.md`'s law keeps its coefficients and changes its variable.** 0.222%
+  is defined there as one filter "per *sounding* resonator"; under block
+  allocation every reserved slot is filtered whether it sounds or not, so the
+  variable becomes `voices · S`. The 13.6% quoted above is that reading and is
+  right; the sentence in `cpu.md` is not.
 - **`Grid` needs to report its maximum count**, since `S` is a property of the
   grid rather than of any note. It has `count(note_hz, nyquist)` and nothing
   that maximises over notes — and the maximum has to be taken over the detune

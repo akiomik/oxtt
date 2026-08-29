@@ -55,7 +55,12 @@ the defaults:
 ```
 
 **Every edge steps up by `6.02·p` dB except the last, which steps down by
-almost exactly the same amount.** The 3.48 dB reversal at 4160 Hz is not
+almost exactly the same amount.** The steps are the same to two decimals
+whether `q_max` comes from `BankParams::default` or from the command lines'
+`--breakpoint-hz` of 1100 Hz, because the edges are octaves and the sawtooth
+above the breakpoint resets exactly on them. **Where the breakpoint sits does
+not change this defect**, which is worth saying because it changes most other
+things about the shape. The 3.48 dB reversal at 4160 Hz is not
 something anyone chose; it is what a ladder of octaves does when it is asked
 to stop at a frequency that is not one of its rungs.
 
