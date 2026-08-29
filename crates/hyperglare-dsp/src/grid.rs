@@ -80,8 +80,8 @@ pub const MIN_OCTAVE_STEP: i32 = -9;
 
 /// Highest octave step generated, relative to the played note.
 ///
-/// The default band is `log2(1800/65) = 4.79` octaves, so nine steps either
-/// way covers it from any note inside it several times over; the rest is
+/// The default band is `log2(5000/65) = 6.27` octaves, so nine steps either
+/// way covers it from any note inside it with room to spare; the rest is
 /// clipped by the band. Deliberately generous, because the band is a runtime
 /// setting and a caller that widens it should not also have to know this.
 pub const MAX_OCTAVE_STEP: i32 = 9;
@@ -326,8 +326,8 @@ fn harmonic_ln(k: usize) -> f32 {
 /// Ceiling on partials per voice under [`Geometry::Harmonics`].
 ///
 /// **Reaching the top of the band from a 60 Hz fundamental takes one partial
-/// per 60 Hz of it**: thirty at the default ceiling of 1.8 kHz, and 150 at the
-/// 9 kHz the default used to be. The ceiling is a runtime setting, so this
+/// per 60 Hz of it**: eighty-three at the default ceiling of 5 kHz, and 150 at
+/// the 9 kHz the default used to be. The ceiling is a runtime setting, so this
 /// constant is sized for the wide case rather than for the default. Not the
 /// forty a stretched series would need. Forty is the figure for an exponent of
 /// 1.35, which in this type's unit is 420 cents per octave — four times the
