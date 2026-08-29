@@ -60,39 +60,16 @@ pub const DEFAULT_LOW_HZ: f32 = 65.0;
 
 /// Highest frequency a grid point is generated at, before Nyquist.
 ///
-/// # This has been 9 kHz and 1.8 kHz, and the trade is real in both directions
+/// Chosen by ear across six sources, over a trade with two sides: raising it
+/// puts a chord above 2 kHz, where at 1.8 kHz there was none, and thins that
+/// band toward the point where isolated tones read as bells.
+/// [ADR 0020](../../../docs/decisions/0020-the-grids-ceiling-is-five-kilohertz.md)
+/// has the sweep and the two ceilings this replaces.
 ///
-/// The design took 9 kHz from N-PRYSM's published range on the reasoning that
-/// extending resonance into the top of the spectrum is what makes an effect
-/// glare. Measured, the high band came out sparse and a listener called it a
-/// bell, so it went to 1.8 kHz — below which the top of the output belongs to
-/// the source rather than to the bank.
-///
-/// **Neither number was wrong about its own measurement, and both were about
-/// one source.** Swept across six — five paired recordings and a drum loop —
-/// the two halves of the trade are visible at once:
-///
-/// ```text
-///  ceiling                    1800    3000    5000    9000
-///  chord content, 2-9 kHz    0.011   0.099   0.164   0.225   higher is more
-///  spectral density, same    0.448   0.288   0.198   0.162   references .192-.298
-/// ```
-///
-/// Raising it puts a chord above 2 kHz, which at 1.8 kHz is simply absent —
-/// the top two bands measure what the source already had. Raising it also
-/// thins that band, and below about 0.19 the top reads as isolated tones,
-/// which is what a bell is.
-///
-/// **5 kHz is where a listener put it**, across all six sources. It is the
-/// point where the chord has arrived and the density has not yet fallen out of
-/// the range the references occupy.
-///
-/// Per-band excitation ([ADR 0016](../../../docs/decisions/0016-the-bank-is-excited-per-band.md))
-/// changed one half of this and not the other. A resonator now rings only on
-/// energy the source has near it, so the top follows the music instead of
-/// being invented by broadband noise — but it is still one narrow filter with
-/// nothing beside it, and the density above shows the sparsity surviving the
-/// change. **The bell risk was reduced, not removed.**
+/// **`crate::bands::EDGES` depends on this.** They are octaves because the
+/// gain law measures a resonator's share against its band, and they have to
+/// reach as far as the grid does or the top band spans more than an octave.
+/// Moving this means moving those.
 pub const DEFAULT_HIGH_HZ: f32 = 5_000.0;
 
 /// Lowest octave step generated, relative to the played note.
