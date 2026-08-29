@@ -80,9 +80,9 @@
 //! [`BankParams::default`]'s answer. That default's `q_max` of 500 puts it at
 //! 4.4 kHz, but no binary runs it: both command lines derive the cap with
 //! [`q_max_for_breakpoint`] from `--breakpoint-hz`, whose default is 1100 Hz.
-//! **So at the shipped default `f*` is 1100 Hz**, and everything above it —
-//! the top of band 3 and all of bands 4, 5 and 6 — is in the second case
-//! rather than the first.
+//! **So at the shipped default `f*` is 1100 Hz**, which falls inside band 4,
+//! and everything above it — the top of band 4 and all of bands 5 and 6 — is
+//! in the second case rather than the first.
 //!
 //! And `--decay` does not move it. Deriving the cap from a frequency is what
 //! makes `f*` independent of the decay, which is the point of doing it that

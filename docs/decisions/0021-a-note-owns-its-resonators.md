@@ -164,10 +164,38 @@ instead. A resonator falls 60 dB in one `T60`, so at the default of 0.25 s:
 ```
 
 **A voice released 100 ms ago is 24 dB down, not silent.** Five voices played
-legato reach that case easily, and the voice released *longest* ago need not
-be the quietest — one released 300 ms ago into a loud passage can hold more
-than one released 50 ms ago into a quiet one. Reading the state gets the right
-one for two state values per resonator, at note-on, at control rate.
+legato reach that case easily, and among voices released close together the
+one released *longest* ago need not be the quietest: 150 ms against 100 ms is
+36 dB against 24, so 12 dB of difference in what excited them reverses the
+order, and 12 dB between two notes is ordinary playing. Release time is a good
+proxy over long gaps and a poor one over short ones, and short ones are what a
+full table produces.
+
+**What "quietest" measures.** A voice holds
+
+```text
+ Σᵢ  gainᵢ² · (ic1eqᵢ² + ic2eqᵢ²)      over the resonators in its block
+```
+
+and the smallest wins. Three choices are in that line and each one is a way to
+get it wrong:
+
+- **`gainᵢ` is included**, because what a listener hears is the state through
+  the gain, and the gain is not a constant across a voice: the compensation
+  alone steps 1.51 dB per band, about 7.5 dB across the ladder, before the
+  tilt. Comparing bare state compares a voice low in the band against one high
+  in it on the wrong terms.
+- **The two integrator states are combined as `ic1² + ic2²`**, not as one of
+  them or as a sum of absolute values. They are in quadrature at resonance, so
+  their root-sum-square is a smooth envelope while either one alone crosses
+  zero every cycle — and a criterion that changes answer between two reads of
+  the same ringing voice is not a criterion.
+- **The block folds by summing**, because a voice's block is one note's whole
+  contribution and energies add. A note spread thinly over seven resonators is
+  not quieter than one concentrated in two, and a maximum would say it was.
+
+Squaring the envelope is what removes the square root, so the whole thing is
+`S` multiply-adds and no transcendental, once per note-on at control rate.
 
 **A stolen voice is reset rather than glided.** Keeping the state gives the
 Context's first failure — a tail arriving at a pitch nobody played — and
@@ -288,6 +316,11 @@ which is worse to explain than either end of the trade.
   allocation every reserved slot is filtered whether it sounds or not, so the
   variable becomes `voices · S`. The 13.6% quoted above is that reading and is
   right; the sentence in `cpu.md` is not.
+- **`effectkit::filter::Svf` has to report how much it holds.** `ic1eq` and
+  `ic2eq` are private and the type offers `is_finite` and nothing else that
+  reads them, so the allocator's criterion cannot be computed from outside the
+  crate today. It is one accessor, and it belongs to `effectkit` rather than
+  to this ADR — but nothing here works without it.
 - **`Grid` needs to report its maximum count**, since `S` is a property of the
   grid rather than of any note. It has `count(note_hz, nyquist)` and nothing
   that maximises over notes — and the maximum has to be taken over the detune
