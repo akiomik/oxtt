@@ -155,15 +155,13 @@ reserving the blocks buys.
   own contribution, with a bank of high-Q resonators ringing, has not been
   measured.
 - **What MIDI sounds like.** The control path is verified above; the audio is
-  not, and cannot be on this rig — connecting a capture interface to the board
-  raises a ground loop that puts broadband noise 60 dB above the board's own
-  output floor across the whole capture. A key lift is meant to leave the voice
-  ringing down at its own decay and a stolen voice is meant to start from rest,
-  and both are measured offline (`crates/hyperglare-dsp/src/processor.rs`)
-  rather than heard on the board.
+  not. No capture was taken, because the measuring chain currently carries a
+  ground loop — a property of the rig rather than of the effect, and the reason
+  the sections above could be measured and this one could not.
 
-  **What the earlier sections above measured is unaffected**: those captures
-  predate the rig this note describes.
+  A key lift is meant to leave the voice ringing down at its own decay and a
+  stolen voice is meant to start from rest. Both are measured offline
+  (`crates/hyperglare-dsp/src/processor.rs`) and neither has been heard.
 - **Anything with a control surface.** It does not exist.
 - **Long runs.** The longest here was 40 seconds.
 - **Chord changes while running.** `apply_params` retunes without a click by
