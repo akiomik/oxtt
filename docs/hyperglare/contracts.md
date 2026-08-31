@@ -27,10 +27,16 @@ produce finite output.
 
 ## 2. Bank lifecycle and retuning
 
-`ResonatorBank::retune` is the only way a chord or a setting reaches the
-filters. It is a control-rate operation: everything it computes reaches the
-per-sample path through a `tan` and a `powf`, and doing that per sample would
-cost two orders of magnitude more than the filtering itself.
+`ResonatorBank::retune`, `resettle`, `note_on` and `note_off` are the only
+ways a chord or a setting reaches the filters, and all four are control-rate:
+everything they compute reaches the per-sample path through a `tan` and a
+`powf`, and doing that per sample would cost two orders of magnitude more than
+the filtering itself.
+
+**Which of the four a caller uses is not a preference.** `retune` names the
+whole chord and `note_on`/`note_off` name one key, so a caller mixing them
+would release with one hand what it pressed with the other; `resettle` is the
+settings-only path for the keyed caller, which has no chord to name.
 
 - **A voice owns a block of slots and keeps it.** Voice `k` has the resonator
   slots `[k·stride, (k+1)·stride)`, where the stride is the most grid points

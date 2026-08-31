@@ -69,10 +69,11 @@ scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
 ```
 
 Read `active_resonators` next to `cpu_percentage` in what it prints on exit:
-the per-sample cost is 7.9% of one core fixed plus 0.15% per resonator that is
-*sounding*, so a CPU figure without the count says nothing. What that costs
-across the settings is in
-[`docs/hyperglare/bela/cpu.md`](hyperglare/bela/cpu.md).
+the per-sample cost is 7.9% of one core fixed plus 0.15% per resonator *slot
+the bank runs*, so a CPU figure without the count says nothing. A voice
+reserves its block whether or not a key is down, so `held_voices` beside it is
+what says how much of the chord is playing. What that costs across the
+settings is in [`docs/hyperglare/bela/cpu.md`](hyperglare/bela/cpu.md).
 
 A successful build produces
 `target/aarch64-unknown-linux-gnu/release/oxtt-bela`, an AArch64 ELF linked

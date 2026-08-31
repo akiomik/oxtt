@@ -701,7 +701,14 @@ impl<const N: usize> ResonatorBank<N> {
             .unwrap_or(0)
     }
 
-    /// How many resonators are currently sounding.
+    /// How many resonator slots the bank runs.
+    ///
+    /// **The cost, and not the chord.** Every voice's block is filtered
+    /// whether or not the voice has a note — an idle slot has a gain of zero
+    /// and contributes exactly nothing — so this follows the settings and does
+    /// not move when a key does. That is what keeps the load flat when a chord
+    /// arrives. [`held_voices`](Self::held_voices) is how much of the chord is
+    /// down.
     #[must_use]
     pub const fn active(&self) -> usize {
         self.active

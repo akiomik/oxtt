@@ -76,6 +76,37 @@ pub struct HyperglareRenderState {
     input: InputMeter,
 }
 
+/// Where the application's notes come from.
+///
+/// **Exclusive by construction, which is the point.** A chord fixed for the
+/// run and a keyboard are alternatives (ADR 0021), and holding them in two
+/// fields let a caller pass both — which put a default chord underneath the
+/// keys somebody was playing. One field cannot.
+///
+/// `lib.rs`'s `ChordSource` is the same choice one layer up, naming a port
+/// rather than holding one: the port is opened before the audio system, and
+/// this is what the opened one arrives in.
+#[derive(Debug)]
+pub enum Notes {
+    /// A chord held for the whole run, in hertz.
+    Fixed(Vec<f32>),
+    /// Keys from an opened MIDI port. The run starts with none down.
+    Keys(MidiInput),
+}
+
+impl Notes {
+    /// The chord to start with: the fixed one, or none at all.
+    ///
+    /// Borrows where `ChordSource::initial_notes` allocates, because this one
+    /// runs in `setup` and that one runs before any audio system exists.
+    fn initial(&self) -> &[f32] {
+        match self {
+            Self::Fixed(notes) => notes,
+            Self::Keys(_) => &[],
+        }
+    }
+}
+
 /// The hyperglare application: a processor prototype, the chord it is tuned
 /// to, and the counters the run reports at the end.
 ///
@@ -85,29 +116,22 @@ pub struct HyperglareRenderState {
 pub struct HyperglareApplication {
     processor: Processor,
     params: HyperglareParams,
-    /// The chord, in hertz.
+    /// Where the notes come from, and the only place either kind lives.
     ///
     /// Owned rather than borrowed because the application outlives whatever
     /// parsed it, and kept so that `setup` can retune once the board has said
     /// what sample rate it settled on.
-    notes_hz: Vec<f32>,
+    notes: Notes,
     /// The digital channel an LED is wired to, and the hold that makes a
     /// 21 µs event visible on it. `None` is a run with nothing wired.
     clip_led: Option<(usize, ClipIndicator)>,
     report_on_exit: bool,
     /// The most messages seen waiting at the top of a block.
     ///
-    /// Reported on exit. Anything approaching `bela`'s ring of 100 means the
-    /// run was reading more slowly than the device was sending, which the ring
-    /// would otherwise lose without saying so.
+    /// A high-water mark, reported on exit. A number near `bela`'s ring of 100
+    /// says the run was falling behind the device; **a small one proves
+    /// nothing**, because the ring's count wraps rather than saturating.
     midi_backlog: usize,
-    /// The MIDI port keys arrive on, if the run asked for one.
-    ///
-    /// **`None` and a chord in `notes_hz` are the two ways to have notes, and
-    /// they are alternatives** (ADR 0021). A run given a port starts with no
-    /// keys down, so it is silent at `--color 1.0` until one goes down — which
-    /// is correct and looks like a fault, so it is worth saying here.
-    midi: Option<MidiInput>,
 }
 
 impl HyperglareApplication {
@@ -116,19 +140,17 @@ impl HyperglareApplication {
     pub fn new(
         processor: Processor,
         params: HyperglareParams,
-        notes_hz: Vec<f32>,
+        notes: Notes,
         clip_led: Option<usize>,
         report_on_exit: bool,
-        midi: Option<MidiInput>,
     ) -> Self {
         Self {
             processor,
             params,
-            notes_hz,
+            notes,
             clip_led: clip_led.map(|channel| (channel, ClipIndicator::new(CLIP_HOLD_FRAMES))),
             report_on_exit,
             midi_backlog: 0,
-            midi,
         }
     }
 
@@ -154,19 +176,23 @@ impl HyperglareApplication {
     /// retunes a block. Draining the ring would make a block's work depend on
     /// how long the ring had been left, which is what the rule forbids.
     ///
-    /// **Nothing is dropped.** What is left over is left in the ring for the
-    /// next block, so a burst arrives late rather than partly. The ring holds
-    /// 100 messages and its writer never consults the reader, so a device that
-    /// sustained more than this rate would eventually overrun it inside
-    /// `bela` — `midi_backlog` in the exit report is how that becomes visible
-    /// rather than silent.
+    /// **Nothing is dropped here.** What is left over waits in the ring for
+    /// the next block, so a burst arrives late rather than partly.
+    ///
+    /// **The ring itself can drop, and nothing detects it.** It holds 100
+    /// messages and its writer never consults the reader, so a device that
+    /// sustained more than this rate would overwrite messages inside `bela`.
+    /// `midi_backlog` is a high-water mark and not an overrun flag: the count
+    /// it reads is a difference modulo the ring's size, so it does not
+    /// saturate — a run that wrapped can report a small number, and a lost
+    /// note off would leave a key down with nothing in the report to say why.
     ///
     /// **Every channel, and velocity ignored.** There is one source and one
     /// instrument here; filtering and touch are additive and neither reaches
     /// the voice table. A note on at velocity zero is a release, which is what
     /// most keyboards send instead of a note off.
     fn read_midi(&mut self, states: &mut [HyperglareRenderState]) {
-        let Some(midi) = self.midi.as_mut() else {
+        let Notes::Keys(midi) = &mut self.notes else {
             return;
         };
         self.midi_backlog = self.midi_backlog.max(midi.available());
@@ -260,7 +286,10 @@ impl BelaApplication for HyperglareApplication {
         // and the band split was derived for. `set_sample_rate` rebuilds all
         // of them and retunes the chord from the notes kept above.
         self.processor.set_sample_rate(context.audio_sample_rate());
-        self.processor.apply_params(&self.params, &self.notes_hz);
+        // Empty under `Notes::Keys`, so a played run does not start holding a
+        // chord as well. `Notes` is what makes that not a thing to remember.
+        self.processor
+            .apply_params(&self.params, self.notes.initial());
         true
     }
 
@@ -337,11 +366,13 @@ impl BelaApplication for HyperglareApplication {
 pub struct RunDiagnostics {
     /// What arrived at the input.
     pub input: InputMeter,
-    /// How many resonators the chord and the geometry produced.
+    /// How many resonator slots the bank ran.
     ///
-    /// **The number that decides whether this fits.** The per-sample cost is
-    /// two biquads per band plus one state-variable filter per *active*
-    /// resonator, so a CPU figure means nothing without it.
+    /// **The number that decides whether this fits, and not the size of the
+    /// chord.** The per-sample cost is two biquads per band plus one
+    /// state-variable filter per slot, and since ADR 0021 a voice reserves its
+    /// block whether or not a key is down — so this follows the settings and
+    /// does not move when a key does. `held_voices` is the chord.
     pub active_resonators: usize,
     /// How many voices are holding a note.
     ///
@@ -350,8 +381,10 @@ pub struct RunDiagnostics {
     pub held_voices: usize,
     /// The most MIDI messages seen waiting at the top of a block.
     ///
-    /// Zero for a run with no port. Approaching `bela`'s ring of 100 means the
-    /// run fell behind the device.
+    /// Zero for a run with no port. **A high-water mark rather than an overrun
+    /// flag**: a number near `bela`'s ring of 100 says the run fell behind,
+    /// and a small one does not say it did not — the ring's count is a
+    /// difference modulo its size, so it wraps rather than saturating.
     pub midi_backlog: usize,
     /// Blocks the audio system reported as late.
     ///

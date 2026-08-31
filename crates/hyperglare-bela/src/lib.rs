@@ -19,7 +19,9 @@ use core::num::NonZeroU32;
 
 use thiserror::Error;
 
-pub use app::{CAPACITY, HyperglareApplication, HyperglareRenderState, Processor, RunDiagnostics};
+pub use app::{
+    CAPACITY, HyperglareApplication, HyperglareRenderState, Notes, Processor, RunDiagnostics,
+};
 pub use cli::BelaCli;
 
 /// Audio sample rate hyperglare asks a Bela for.
@@ -163,7 +165,9 @@ pub const fn settings(options: &RunOptions) -> bela::Settings {
 mod device {
     use bela::{Bela, Channel};
 
-    use super::{ChordSource, HostError, HyperglareApplication, Processor, RunOptions, settings};
+    use super::{
+        ChordSource, HostError, HyperglareApplication, Notes, Processor, RunOptions, settings,
+    };
     use hyperglare_dsp::processor::HyperglareParams;
 
     /// Brings up the audio system, runs until stopped, and reports.
@@ -186,28 +190,29 @@ mod device {
             reason = "a sample rate is far below f32's exact-integer limit"
         )]
         let sample_rate = options.sample_rate.get() as f32;
-        // Empty under `ChordSource::Midi`, so a run that is played does not
-        // also hold a chord nobody asked for.
-        let notes_hz = chord.initial_notes();
-        let mut processor = Processor::new(params, sample_rate);
-        processor.apply_params(&params, &notes_hz);
-
-        // Before the audio system, so a port that will not open ends the
-        // program with its own message rather than failing an initialisation
-        // the process cannot then retry (bela-rs#112, the same reason
-        // `validate_settings` exists).
-        let midi = match chord {
-            ChordSource::Fixed(_) => None,
-            ChordSource::Midi(port) => Some(bela::MidiInput::open(port)?),
+        // Opened before the audio system, so a port that will not open ends
+        // the program with its own message rather than failing an
+        // initialisation the process cannot then retry (bela-rs#112, the same
+        // reason `validate_settings` exists).
+        //
+        // The two arms are what keep a played run from also holding a chord:
+        // `Notes` has room for one of them, not both.
+        let notes = match chord {
+            ChordSource::Fixed(chord) => Notes::Fixed(chord.clone()),
+            ChordSource::Midi(port) => Notes::Keys(bela::MidiInput::open(port)?),
         };
+
+        let mut processor = Processor::new(params, sample_rate);
+        // A pre-tune at the rate the board was asked for; `setup` does it
+        // again at the rate it settled on.
+        processor.apply_params(&params, &chord.initial_notes());
 
         let application = HyperglareApplication::new(
             processor,
             params,
-            notes_hz,
+            notes,
             options.clip_led,
             options.report_on_exit,
-            midi,
         );
 
         let mut bela = Bela::new(application, &settings(options))?;
@@ -256,6 +261,11 @@ mod tests {
     /// **The defect this type exists to make impossible**: the chord had a
     /// default, so a MIDI run used to start with five notes sounding and the
     /// keys layered over them.
+    ///
+    /// The enforcement is `app::Notes`, which the application holds in one
+    /// field so that a caller cannot pass both. That is a property of the
+    /// type rather than of a run, so there is nothing here to assert about it
+    /// — what this test covers is the layer above, where the choice is made.
     #[test]
     // A test, not a callback: `initial_notes` allocates by design and is
     // documented as belonging before the audio system
