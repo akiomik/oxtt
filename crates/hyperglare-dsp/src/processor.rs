@@ -275,8 +275,11 @@ impl<const N: usize> HyperglareProcessor<N> {
     /// rather than layers (ADR 0021). A host that plays keys starts from an
     /// empty chord.
     ///
+    /// **[`None`] for a frequency that is not one**, and no voice is spent on
+    /// it. See [`ResonatorBank::note_on`].
+    ///
     /// [`allocate`]: ResonatorBank
-    pub fn note_on(&mut self, note_hz: f32) -> usize {
+    pub fn note_on(&mut self, note_hz: f32) -> Option<usize> {
         let (bank, rate) = (self.params.bank, self.sample_rate);
         self.bank.note_on(note_hz, &bank, rate)
     }
@@ -491,11 +494,14 @@ mod tests {
     fn keys_that_repeat_or_never_went_down_are_handled() {
         let params = HyperglareParams::default();
         let mut processor = Processor::new(params, SR);
-        let first = processor.note_on(110.0);
-        assert_eq!(processor.note_on(110.0), first);
+        let first = processor.note_on(110.0).expect("a real note");
+        assert_eq!(processor.note_on(110.0), Some(first));
         assert_eq!(processor.held_voices(), 1);
 
-        assert!(processor.note_off(220.0).is_none(), "that key was never down");
+        assert!(
+            processor.note_off(220.0).is_none(),
+            "that key was never down"
+        );
         assert_eq!(processor.held_voices(), 1);
         assert_eq!(processor.note_off(110.0), Some(first));
         assert_eq!(processor.held_voices(), 0);
@@ -763,11 +769,7 @@ mod tests {
 
         // Back to the chord that was ringing, into an input that is not.
         processor.apply_params(&params, &big);
-        assert_eq!(
-            processor.held_voices(),
-            loud,
-            "the chord did not grow back"
-        );
+        assert_eq!(processor.held_voices(), loud, "the chord did not grow back");
 
         for i in 0..(SR as usize) {
             let (left, right) = processor.process_frame(0.0, 0.0);

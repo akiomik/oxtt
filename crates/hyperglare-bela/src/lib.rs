@@ -59,11 +59,40 @@ pub enum HostError {
     Bela(#[from] bela::Error),
 }
 
-/// How a run was configured, for the caller to choose and the host to apply.
+/// Where a run's notes come from.
 ///
-/// Not `Copy` since a MIDI port is named by a `String`; the type is built once
-/// per run and read, so nothing wanted a bitwise copy of it.
+/// **The two are alternatives and this is what makes that structural** rather
+/// than a rule a caller has to remember (ADR 0021). A fixed chord and a MIDI
+/// port cannot both be given, so a run cannot start with a default chord
+/// sounding underneath the keys somebody is playing.
 #[derive(Debug, Clone, PartialEq)]
+pub enum ChordSource {
+    /// The chord named on the command line, held for the whole run.
+    Fixed(Vec<f32>),
+    /// Keys from an ALSA port, named as `amidi -l` names it plus a subdevice —
+    /// `hw:0,0,0`.
+    ///
+    /// The run starts with nothing down, so it is silent at `--color 1.0`
+    /// until a key goes down. That is correct and it looks like a fault, which
+    /// is why it is said here as well as in the help.
+    Midi(String),
+}
+
+impl ChordSource {
+    /// The chord to start with: the fixed one, or none at all.
+    ///
+    /// Allocates, so it belongs before the audio system and not on a callback.
+    #[must_use]
+    pub fn initial_notes(&self) -> Vec<f32> {
+        match self {
+            Self::Fixed(notes) => notes.clone(),
+            Self::Midi(_) => Vec::new(),
+        }
+    }
+}
+
+/// How a run was configured, for the caller to choose and the host to apply.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunOptions {
     /// Audio frames per block.
     pub period_size: NonZeroU32,
@@ -84,13 +113,6 @@ pub struct RunOptions {
     /// line out level does not move it ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)).
     /// `None` leaves libbela's default of -6 dB.
     pub headphone_level_db: Option<f32>,
-    /// ALSA port keys arrive on, if the run is played rather than fixed.
-    ///
-    /// **A port and `--notes` are alternatives** (ADR 0021): given one, the
-    /// run starts with no keys down and is silent at `--color 1.0` until one
-    /// goes down. `bela::midi_ports` lists what the board has, and the names
-    /// carry the subdevice — `hw:0,0,0` where `amidi -l` prints `hw:0,0`.
-    pub midi_port: Option<String>,
     /// Digital channel an LED is wired to, lit while the input clips.
     pub clip_led: Option<usize>,
     /// Print [`RunDiagnostics`] after a normal exit.
@@ -106,7 +128,6 @@ impl Default for RunOptions {
             adc_gain_db: None,
             headphone_level_db: None,
             clip_led: None,
-            midi_port: None,
             report_on_exit: false,
         }
     }
@@ -142,7 +163,7 @@ pub const fn settings(options: &RunOptions) -> bela::Settings {
 mod device {
     use bela::{Bela, Channel};
 
-    use super::{HostError, HyperglareApplication, Processor, RunOptions, settings};
+    use super::{ChordSource, HostError, HyperglareApplication, Processor, RunOptions, settings};
     use hyperglare_dsp::processor::HyperglareParams;
 
     /// Brings up the audio system, runs until stopped, and reports.
@@ -157,7 +178,7 @@ mod device {
     /// refuses the settings, or reports callback faults.
     pub fn run(
         params: HyperglareParams,
-        notes_hz: Vec<f32>,
+        chord: &ChordSource,
         options: &RunOptions,
     ) -> Result<(), HostError> {
         #[expect(
@@ -165,6 +186,9 @@ mod device {
             reason = "a sample rate is far below f32's exact-integer limit"
         )]
         let sample_rate = options.sample_rate.get() as f32;
+        // Empty under `ChordSource::Midi`, so a run that is played does not
+        // also hold a chord nobody asked for.
+        let notes_hz = chord.initial_notes();
         let mut processor = Processor::new(params, sample_rate);
         processor.apply_params(&params, &notes_hz);
 
@@ -172,9 +196,9 @@ mod device {
         // program with its own message rather than failing an initialisation
         // the process cannot then retry (bela-rs#112, the same reason
         // `validate_settings` exists).
-        let midi = match options.midi_port.as_deref() {
-            Some(port) => Some(bela::MidiInput::open(port)?),
-            None => None,
+        let midi = match chord {
+            ChordSource::Fixed(_) => None,
+            ChordSource::Midi(port) => Some(bela::MidiInput::open(port)?),
         };
 
         let application = HyperglareApplication::new(
@@ -225,6 +249,53 @@ mod tests {
             .thread_count(NonZeroU32::MIN)
             .detect_underruns(true);
         assert_eq!(settings(&RunOptions::default()), expected);
+    }
+
+    /// A run that takes keys starts with nothing held.
+    ///
+    /// **The defect this type exists to make impossible**: the chord had a
+    /// default, so a MIDI run used to start with five notes sounding and the
+    /// keys layered over them.
+    #[test]
+    // A test, not a callback: `initial_notes` allocates by design and is
+    // documented as belonging before the audio system
+    // (`docs/effectkit/realtime.md`).
+    #[allow(
+        clippy::disallowed_macros,
+        reason = "outside the real-time path; the chord is built before any audio system"
+    )]
+    fn a_midi_run_starts_with_no_chord() {
+        assert!(
+            ChordSource::Midi("hw:0,0,0".to_owned())
+                .initial_notes()
+                .is_empty()
+        );
+        assert_eq!(
+            ChordSource::Fixed(vec![110.0, 164.8]).initial_notes(),
+            vec![110.0, 164.8]
+        );
+    }
+
+    /// And the command line cannot ask for both, so the choice above is a
+    /// choice rather than a precedence nobody would remember.
+    #[test]
+    fn a_chord_and_a_port_cannot_be_combined() {
+        use clap::Parser as _;
+
+        assert!(BelaCli::try_parse_from(["hyperglare-bela"]).is_ok());
+        assert!(BelaCli::try_parse_from(["hyperglare-bela", "--notes", "60"]).is_ok());
+        assert!(BelaCli::try_parse_from(["hyperglare-bela", "--midi-port", "hw:0,0,0"]).is_ok());
+        assert!(
+            BelaCli::try_parse_from([
+                "hyperglare-bela",
+                "--notes",
+                "60",
+                "--midi-port",
+                "hw:0,0,0",
+            ])
+            .is_err(),
+            "the two should be refused together"
+        );
     }
 
     /// The settings this host asks for are the ones `oxtt-bela` was measured

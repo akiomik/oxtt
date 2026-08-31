@@ -22,28 +22,34 @@ use clap::Parser;
 use hyperglare_args::chord_hz;
 #[cfg(bela_device)]
 use hyperglare_bela::run;
-use hyperglare_bela::{BelaCli, RunOptions};
+use hyperglare_bela::{BelaCli, ChordSource, RunOptions};
 use hyperglare_dsp::processor::HyperglareParams;
 
 /// Parses the command line into the three things a run needs.
 ///
 /// Split out so that both `main`s agree on what a command line means, and so
 /// that the error goes to the same place on either.
-fn configure() -> (HyperglareParams, Vec<f32>, RunOptions) {
+fn configure() -> (HyperglareParams, ChordSource, RunOptions) {
     let cli = BelaCli::parse();
     let options = RunOptions::from(&cli);
     let params = HyperglareParams::from(&cli.params);
-    (params, chord_hz(&cli.notes), options)
+    // Clap refuses the two together, so this is a choice rather than a
+    // precedence: a port means keys, and no port means the chord as given.
+    let chord = cli.midi_port.clone().map_or_else(
+        || ChordSource::Fixed(chord_hz(&cli.notes)),
+        ChordSource::Midi,
+    );
+    (params, chord, options)
 }
 
 #[cfg(bela_device)]
 fn main() -> ExitCode {
-    let (params, notes_hz, options) = configure();
+    let (params, chord, options) = configure();
 
     // The run's diagnostics are printed by the application's `cleanup`, not
     // here: `Bela::until_stopped` consumes the audio system without handing
     // the application back, so the counters do not outlive it.
-    match run(params, notes_hz, &options) {
+    match run(params, &chord, &options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("hyperglare: {e}");

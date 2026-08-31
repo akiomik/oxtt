@@ -18,7 +18,7 @@ use hyperglare_render::{RenderOptions, RenderReport, render};
     after_help = "Only stereo 32-bit IEEE-float WAV input is supported; output is the same.\n\n\
                   The chord is fixed for the whole render. That is enough to hear whether the \
                   effect sounds like anything, and not enough to hear what a chord change sounds \
-                  like — which needs the MIDI path.\n\n\
+                  like — for that, play keys into the Bela host's `--midi-port`.\n\n\
                   Renders are loudness-matched to the input by default. Read the reported \
                   normalisation gain: a setting that needed a large correction was mostly a level \
                   change.",

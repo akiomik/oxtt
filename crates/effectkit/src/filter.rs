@@ -470,7 +470,10 @@ mod svf_tests {
         // The energy only falls. A high-Q filter decays slowly, so the bound is
         // on rises rather than on the size of the fall.
         for pair in energies.windows(2) {
-            let [before, after] = [pair.first().copied().unwrap_or(0.0), pair.last().copied().unwrap_or(0.0)];
+            let [before, after] = [
+                pair.first().copied().unwrap_or(0.0),
+                pair.last().copied().unwrap_or(0.0),
+            ];
             assert!(
                 after <= before * 1.000_01,
                 "energy rose while ringing down: {before} to {after}"

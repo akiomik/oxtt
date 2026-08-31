@@ -9,9 +9,12 @@
 //! **There is no control surface here**, and that is the difference from
 //! `oxtt-bela` rather than an omission. `hyperglare` has more settings than
 //! the six pots that panel carries, and which of them a player should reach
-//! is undecided; the chord is a command-line argument until the MIDI path
-//! exists. What this host is for is the question that comes first: whether
-//! the DSP runs on the board at all.
+//! is undecided. What this host is for is the question that comes first:
+//! whether the DSP runs on the board at all.
+//!
+//! The chord comes either from the command line, fixed for the run, or from a
+//! MIDI port through [`HyperglareApplication::read_midi`]. They are
+//! alternatives, and `ChordSource` is what makes that structural (ADR 0021).
 
 use core::fmt;
 
@@ -34,6 +37,16 @@ const CLIP_HOLD_FRAMES: u64 = 20_000;
 /// Audio channels hyperglare processes. Stereo in, stereo out; a Gem Stereo
 /// has exactly this and nothing else.
 const AUDIO_CHANNELS: usize = 2;
+
+/// MIDI messages taken in one block.
+///
+/// A constant, which is what the callback contract asks for: it bounds the
+/// work by something that is not the length of a queue. At the period size
+/// this host asks for, a block is 333 µs, so this is 24,000 messages a second
+/// — three orders of magnitude past a keyboard and a quarter of `bela`'s
+/// 100-message ring, so a chord released and another pressed in the same block
+/// fits with room over.
+const MIDI_MESSAGES_PER_BLOCK: usize = 8;
 
 /// Resonators the board's bank has room for.
 ///
@@ -82,6 +95,12 @@ pub struct HyperglareApplication {
     /// 21 µs event visible on it. `None` is a run with nothing wired.
     clip_led: Option<(usize, ClipIndicator)>,
     report_on_exit: bool,
+    /// The most messages seen waiting at the top of a block.
+    ///
+    /// Reported on exit. Anything approaching `bela`'s ring of 100 means the
+    /// run was reading more slowly than the device was sending, which the ring
+    /// would otherwise lose without saying so.
+    midi_backlog: usize,
     /// The MIDI port keys arrive on, if the run asked for one.
     ///
     /// **`None` and a chord in `notes_hz` are the two ways to have notes, and
@@ -108,11 +127,13 @@ impl HyperglareApplication {
             notes_hz,
             clip_led: clip_led.map(|channel| (channel, ClipIndicator::new(CLIP_HOLD_FRAMES))),
             report_on_exit,
+            midi_backlog: 0,
             midi,
         }
     }
 
-    /// Drains the block's MIDI into the render states' processors.
+    /// Takes up to [`MIDI_MESSAGES_PER_BLOCK`] messages into the render
+    /// states' processors.
     ///
     /// **Into the states and not into the prototype.** Each render thread got
     /// a copy of the processor at setup, and the copies are what play; the
@@ -126,6 +147,20 @@ impl HyperglareApplication {
     /// place: the ring has one reader, and `render` holds the application as
     /// `&self` on every render thread at once.
     ///
+    /// **Bounded, because this is the callback's one path that could iterate
+    /// over events instead of frames** — the prohibition
+    /// `docs/effectkit/realtime.md` names as the one no lint catches, and a
+    /// note on is not cheap: it scans the table for the quietest voice and
+    /// retunes a block. Draining the ring would make a block's work depend on
+    /// how long the ring had been left, which is what the rule forbids.
+    ///
+    /// **Nothing is dropped.** What is left over is left in the ring for the
+    /// next block, so a burst arrives late rather than partly. The ring holds
+    /// 100 messages and its writer never consults the reader, so a device that
+    /// sustained more than this rate would eventually overrun it inside
+    /// `bela` — `midi_backlog` in the exit report is how that becomes visible
+    /// rather than silent.
+    ///
     /// **Every channel, and velocity ignored.** There is one source and one
     /// instrument here; filtering and touch are additive and neither reaches
     /// the voice table. A note on at velocity zero is a release, which is what
@@ -134,7 +169,11 @@ impl HyperglareApplication {
         let Some(midi) = self.midi.as_mut() else {
             return;
         };
-        while let Some(message) = midi.read() {
+        self.midi_backlog = self.midi_backlog.max(midi.available());
+        for _ in 0..MIDI_MESSAGES_PER_BLOCK {
+            let Some(message) = midi.read() else {
+                break;
+            };
             let (note, down) = match message {
                 MidiMessage::NoteOn { note, velocity, .. } => (note, velocity.get() > 0),
                 MidiMessage::NoteOff { note, .. } => (note, false),
@@ -163,7 +202,10 @@ impl HyperglareApplication {
             // From the states rather than from the prototype: the copies are
             // what played, and MIDI only ever reached them.
             active_resonators: states.first().map_or(0, |state| state.processor.active()),
-            held_voices: states.first().map_or(0, |state| state.processor.held_voices()),
+            held_voices: states
+                .first()
+                .map_or(0, |state| state.processor.held_voices()),
+            midi_backlog: self.midi_backlog,
             underruns: context.underrun_count(),
             audio_frames_elapsed: context.audio_frames_elapsed(),
             cpu_percentage: context.cpu_usage().map(|usage| usage.percentage()),
@@ -306,6 +348,11 @@ pub struct RunDiagnostics {
     /// The chord's own size, which `active_resonators` stopped being when the
     /// bank started reserving a block per voice (ADR 0021).
     pub held_voices: usize,
+    /// The most MIDI messages seen waiting at the top of a block.
+    ///
+    /// Zero for a run with no port. Approaching `bela`'s ring of 100 means the
+    /// run fell behind the device.
+    pub midi_backlog: usize,
     /// Blocks the audio system reported as late.
     ///
     /// **The number that says whether it fits.** A CPU figure under an
@@ -350,9 +397,13 @@ impl fmt::Display for RunDiagnostics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "hyperglare-bela: active_resonators={} held_voices={} underruns={} \
-             audio_frames_elapsed={}",
-            self.active_resonators, self.held_voices, self.underruns, self.audio_frames_elapsed
+            "hyperglare-bela: active_resonators={} held_voices={} midi_backlog={} \
+             underruns={} audio_frames_elapsed={}",
+            self.active_resonators,
+            self.held_voices,
+            self.midi_backlog,
+            self.underruns,
+            self.audio_frames_elapsed
         )?;
         if let Some(percentage) = self.cpu_percentage {
             write!(f, " cpu_percentage={percentage:.1}")?;

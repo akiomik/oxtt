@@ -3,9 +3,10 @@
 What a Bela Gem Stereo did with `hyperglare-bela`, measured on the board. This
 is the first milestone of the port: the resonator bank running under Bela's
 callbacks with the chord and every setting from the command line. There is no
-control surface and no MIDI, and neither is missing by accident — see
+control surface, and that is not an accident — see
 [ADR 0016](../../decisions/0016-the-bank-is-excited-per-band.md) for what the
 DSP is and `crates/hyperglare-bela/src/app.rs` for why the panel is deferred.
+**These runs predate the MIDI intake** and used a fixed chord throughout.
 
 The CPU sweep is separate, in [`cpu.md`](cpu.md). This document is about
 whether it sounds like itself.

@@ -368,16 +368,29 @@ Both are decided when there is a host with a switch on it.
 See [`docs/effectkit/realtime.md`](../effectkit/realtime.md).
 
 What lands where, in this crate: `ResonatorBank::process` and
-`Exciter::process` are the per-sample path, and `retune` and
-`Grid::frequencies` are on the callback too — under Bela a chord change arrives
-inside `render_pre`.
+`Exciter::process` are the per-sample path, and `retune`, `note_on`,
+`note_off` and `Grid::frequencies` are on the callback too — under Bela a
+chord change and every key arrive inside `render_pre`.
+
+**The MIDI drain is bounded per block, and that is the fifth prohibition
+rather than a nicety.** A key press is not cheap — it scans the table for the
+quietest voice and retunes a block — so draining a ring would make a block's
+work depend on how long the ring had been left, which is time proportional to
+events instead of frames. `hyperglare-bela` takes at most
+`MIDI_MESSAGES_PER_BLOCK` and leaves the rest for the next block, and reports
+the deepest backlog it saw so that falling behind is visible rather than
+silent. That prohibition is the one nothing in the toolchain checks, which is
+why it is named here.
 
 **There is a host, and it has run.** `hyperglare-bela` puts this crate under
 Bela's render callback on a Gem Stereo: the defaults cost about 13% of one core
 at 48 kHz with no underruns, and a bank filled to its capacity of 256
 resonators costs 45 to 48%. The per-sample cost is 7.9% fixed plus 0.15% per
-resonator that is *sounding*, which is why the host reports `active_resonators`
-beside the load — a figure without the count cannot be acted on.
+resonator *slot the bank runs* — which a voice reserves whether or not a key is
+down, so the load does not step when a chord arrives. The host reports
+`active_resonators` beside the load because a figure without the count cannot
+be acted on, and `held_voices` beside it because the slot count no longer says
+how much of the chord is down.
 The load does not depend on the input: measured with music at the input it is
 within a third of a point of the same run into silence.
 [`bela/cpu.md`](bela/cpu.md) has both sweeps.
@@ -390,8 +403,8 @@ document adds by ear is the limit this section's neighbours state by
 measurement: colour is unmistakable on sparse material and inaudible inside a
 full mix, because the source's reach is the effect's reach.
 
-**Six functions carry `#[no_panic]` proofs**, checked at link time by
-`cargo test --release`: the bank's `process` and `retune`, `Grid::frequencies`,
-the exciter, the wet matcher's `correction`, and the processor's own frame. The
-list lives in `crates/hyperglare-dsp/src/lib.rs`; this paragraph is a summary
-of it and the tests are what enforce it.
+**Seven functions carry `#[no_panic]` proofs**, checked at link time by
+`cargo test --release`: the bank's `process`, `retune`, `note_on` and
+`note_off`, `Grid::frequencies`, the exciter, and the processor's own frame.
+The list lives in `crates/hyperglare-dsp/src/lib.rs`; this paragraph is a
+summary of it and the tests are what enforce it.

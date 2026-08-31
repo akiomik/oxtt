@@ -129,6 +129,60 @@ mod proofs {
         }
     }
 
+    /// Keys arrive on the callback under Bela: `render_pre` drains the MIDI
+    /// ring and presses and lifts them there.
+    ///
+    /// A press is the heavier of the two — it scans the table for the quietest
+    /// voice and retunes a block — and both reach `assign`, so this covers the
+    /// path a `#[no_panic]` on `retune` alone would miss.
+    #[test]
+    fn pressing_and_lifting_keys_cannot_panic() {
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn press(bank: &mut ResonatorBank<32>, hz: f32, params: &BankParams) -> Option<usize> {
+            bank.note_on(hz, params, 48_000.0)
+        }
+
+        #[cfg_attr(all(test, not(debug_assertions)), no_panic::no_panic)]
+        fn lift(bank: &mut ResonatorBank<32>, hz: f32) -> Option<usize> {
+            bank.note_off(hz)
+        }
+
+        let params = BankParams::default();
+        for geometry in [
+            Geometry::Octaves,
+            Geometry::OctavePairs,
+            Geometry::Harmonics,
+        ] {
+            let params = BankParams {
+                grid: Grid {
+                    geometry,
+                    ..params.grid
+                },
+                ..params
+            };
+            let mut bank = ResonatorBank::<32>::new();
+            // Onto a table that has never been retuned, then past filling it,
+            // then over junk that must not be allowed to take a voice.
+            for hz in [
+                55.0,
+                65.4,
+                82.4,
+                110.0,
+                130.8,
+                164.8,
+                220.0,
+                0.0,
+                -1.0,
+                f32::NAN,
+                f32::INFINITY,
+            ] {
+                press(&mut bank, hz, &params);
+                lift(&mut bank, hz);
+                press(&mut bank, hz, &params);
+            }
+        }
+    }
+
     /// The exciter is the first thing every sample meets, so it is on the
     /// per-sample path with the bank.
     #[test]

@@ -26,10 +26,12 @@ use hyperglare_args::ParamsArgs;
     version,
     about = "A resonator-bank colour-bass effect for Bela Gem Stereo",
     long_about = None,
-    after_help = "The chord is fixed for the whole run: there is no MIDI path yet, and no \
-                  control surface. What this binary is for is whether the DSP runs on the \
-                  board and at what cost — read `active_resonators` alongside `cpu_load`, \
-                  because the per-sample cost is one filter per resonator that is sounding.",
+    after_help = "The chord is fixed for the run unless `--midi-port` names a port to take \
+                  keys from; the two are alternatives. There is no control surface. Read \
+                  `held_voices` for how much of the chord is down and `active_resonators` \
+                  alongside `cpu_load` for what it costs — the per-sample cost is one \
+                  filter per resonator slot the bank runs, which a voice reserves whether \
+                  or not a key is down.",
     allow_negative_numbers = true
 )]
 pub struct BelaCli {
@@ -92,10 +94,11 @@ pub struct BelaCli {
     /// ALSA MIDI port to take the chord from, as `amidi -l` names it plus a
     /// subdevice — `hw:0,0,0`.
     ///
-    /// **Alternative to `--notes`, not a layer over it.** Given a port the run
-    /// starts with nothing held, so it is silent at `--color 1.0` until a key
-    /// goes down. Without one the chord is fixed for the run.
-    #[arg(long, value_name = "PORT")]
+    /// **Refuses to be combined with `--notes`**, because the two are
+    /// alternatives: given a port the run starts with nothing held and is
+    /// silent at `--color 1.0` until a key goes down, and a default chord
+    /// underneath that would be a drone nobody asked for.
+    #[arg(long, value_name = "PORT", conflicts_with = "notes")]
     pub midi_port: Option<String>,
 }
 
@@ -108,7 +111,6 @@ impl From<&BelaCli> for RunOptions {
             adc_gain_db: cli.adc_gain_db,
             headphone_level_db: cli.headphone_level_db,
             clip_led: cli.clip_led,
-            midi_port: cli.midi_port.clone(),
             report_on_exit: cli.report_on_exit,
         }
     }

@@ -515,7 +515,9 @@ impl<const N: usize> ResonatorBank<N> {
     /// the question this answers is what the player is holding.
     #[must_use]
     pub fn held_voices(&self) -> usize {
-        (0..self.voices).filter(|voice| self.is_held(*voice)).count()
+        (0..self.voices)
+            .filter(|voice| self.is_held(*voice))
+            .count()
     }
 
     /// The note a voice is tuned to, or zero if it has none.
@@ -589,7 +591,21 @@ impl<const N: usize> ResonatorBank<N> {
     /// here from `note_hz`, which is a function of a `u8`, so the same note is
     /// the same bits. A caller synthesising frequencies some other way gets a
     /// new voice per distinct value, which is the safe direction.
-    pub fn note_on(&mut self, note_hz: f32, params: &BankParams, sample_rate: f32) -> usize {
+    ///
+    /// **[`None`] for a frequency that is not one** — non-positive, infinite
+    /// or `NaN`. Refused before a voice is chosen, because choosing first and
+    /// discovering the note is unusable afterwards would have taken a key that
+    /// was down and left it holding nothing: `contracts.md` §2 says such a
+    /// note is skipped, and a skipped note cannot cost a voice.
+    pub fn note_on(
+        &mut self,
+        note_hz: f32,
+        params: &BankParams,
+        sample_rate: f32,
+    ) -> Option<usize> {
+        if !note_hz.is_finite() || note_hz <= 0.0 {
+            return None;
+        }
         // The table is [`retune`](Self::retune)'s to build, because sizing it
         // means asking the grid about every note there is and that is not a
         // thing to do on a key press. A bank that has never been retuned has
@@ -609,7 +625,7 @@ impl<const N: usize> ResonatorBank<N> {
         let law = Law::new(params, sample_rate);
         let mut scratch = [0.0f32; N];
         self.assign(voice, note_hz, true, params, &law, &mut scratch);
-        voice
+        Some(voice)
     }
 
     /// Lifts a note's key, and returns the voice it was on.
@@ -642,8 +658,11 @@ impl<const N: usize> ResonatorBank<N> {
     /// note steal a neighbour's resonators.
     #[allow(clippy::float_cmp)]
     fn voice_at(&self, note_hz: f32) -> Option<usize> {
-        (0..self.voices)
-            .find(|voice| self.voice_hz.get(*voice).is_some_and(|held| *held == note_hz))
+        (0..self.voices).find(|voice| {
+            self.voice_hz
+                .get(*voice)
+                .is_some_and(|held| *held == note_hz)
+        })
     }
 
     /// Which voice the next note takes.
@@ -710,17 +729,26 @@ impl<const N: usize> ResonatorBank<N> {
         self.filters.iter().take(self.active).all(Svf::is_finite)
     }
 
-    /// Retunes the bank to a chord. Control rate, not sample rate.
+    /// Retunes the bank to a chord, one note per voice. Control rate, not
+    /// sample rate.
     ///
-    /// `notes_hz` is the fundamental of every voice that is sounding; a
-    /// non-positive entry is skipped, so a caller need not compact its own
-    /// voice table. Voices past the capacity are dropped rather than
-    /// wrapped.
+    /// `notes_hz[k]` is voice `k`'s fundamental and holds its key down; a
+    /// non-positive or non-finite entry leaves that voice empty, so a caller
+    /// need not compact its own table. Notes past the voice count are dropped
+    /// rather than wrapped.
     ///
-    /// The filters' *state* is untouched, which is what lets a chord change
-    /// under a ringing bank without a click. What that state means changes
-    /// with the coefficients, so a large retune glides rather than jumps —
-    /// deliberately, because a jump is a click and a glide is a portamento.
+    /// **A voice keeps its state if its note did not move, and starts from
+    /// rest if it did.** So a decay or a tilt changes under a ringing bank
+    /// without a click, and a voice handed a different note does not play the
+    /// old note's state at the new pitch — which is a glide from a note nobody
+    /// pressed, not a portamento anybody asked for. It used to glide; ADR 0021
+    /// is why it does not.
+    ///
+    /// **Not the path a keyboard takes.** Keys arrive through
+    /// [`note_on`](Self::note_on) and [`note_off`](Self::note_off), and a
+    /// caller mixing the two would release everything the keys had pressed.
+    /// [`resettle`](Self::resettle) is the settings-only half for a caller
+    /// whose chord comes from keys.
     pub fn retune(&mut self, notes_hz: &[f32], params: &BankParams, sample_rate: f32) {
         self.rebuild(params, sample_rate, Some(notes_hz));
     }
@@ -1203,9 +1231,17 @@ mod tests {
             // The chord is one note, so it occupies voice 0's block and the
             // gains line up with the frequencies from slot zero. The block is
             // the stride, not the count — everything past the note is idle.
-            assert!(n <= bank.stride(), "{n} points will not fit {}", bank.stride());
             assert!(
-                bank.gains.iter().skip(n).take(bank.stride() - n).all(|g| *g == 0.0),
+                n <= bank.stride(),
+                "{n} points will not fit {}",
+                bank.stride()
+            );
+            assert!(
+                bank.gains
+                    .iter()
+                    .skip(n)
+                    .take(bank.stride() - n)
+                    .all(|g| *g == 0.0),
                 "the tail of the block should be idle"
             );
 
@@ -1644,7 +1680,11 @@ mod tests {
         assert!(bank.is_held(0), "the real note should be held");
         for voice in 1..4 {
             assert!(!bank.is_held(voice), "voice {voice} has no note to hold");
-            assert_eq!(bank.voice_hz(voice), 0.0, "voice {voice} should read as empty");
+            assert_eq!(
+                bank.voice_hz(voice),
+                0.0,
+                "voice {voice} should read as empty"
+            );
         }
 
         // The table is the same size either way — that is the point of a fixed
@@ -1859,8 +1899,8 @@ mod tests {
             ..params(2.0, 500.0)
         };
         let mut bank = Bank::new();
-        let first = bank.note_on(110.0, &settings, SR);
-        let second = bank.note_on(164.8, &settings, SR);
+        let first = bank.note_on(110.0, &settings, SR).expect("a real note");
+        let second = bank.note_on(164.8, &settings, SR).expect("a real note");
         assert_ne!(first, second, "two notes should take two voices");
         for _ in 0..480 {
             bank.process(&every_band(1.0));
@@ -1881,7 +1921,7 @@ mod tests {
 
         assert_eq!(
             bank.note_on(220.0, &settings, SR),
-            first,
+            Some(first),
             "the quietest released voice should have been taken"
         );
     }
@@ -1895,7 +1935,7 @@ mod tests {
             ..params(2.0, 500.0)
         };
         let mut bank = Bank::new();
-        let first = bank.note_on(110.0, &settings, SR);
+        let first = bank.note_on(110.0, &settings, SR).expect("a real note");
         bank.note_on(164.8, &settings, SR);
         for _ in 0..480 {
             bank.process(&every_band(1.0));
@@ -1904,7 +1944,7 @@ mod tests {
 
         assert_eq!(
             bank.note_on(220.0, &settings, SR),
-            first,
+            Some(first),
             "the oldest key should have been taken"
         );
         assert_eq!(
@@ -1912,6 +1952,44 @@ mod tests {
             0.0,
             "a stolen voice starts from rest"
         );
+    }
+
+    /// A note that is not a frequency costs nothing, even with the table full.
+    ///
+    /// **The order matters and this is what pins it.** Refusing after the
+    /// allocator has chosen would take the oldest key, hand it a frequency of
+    /// zero and reset it — a key that is down, silenced by a message that
+    /// names no note. `contracts.md` §2 says such a note is skipped.
+    #[test]
+    fn a_note_that_is_not_a_frequency_takes_no_voice() {
+        let settings = BankParams {
+            voices: 2,
+            ..params(2.0, 500.0)
+        };
+        for junk in [f32::NAN, f32::INFINITY, -1.0, 0.0] {
+            let mut bank = Bank::new();
+            let first = bank.note_on(110.0, &settings, SR).expect("a real note");
+            let second = bank.note_on(164.8, &settings, SR).expect("a real note");
+            for _ in 0..480 {
+                bank.process(&every_band(1.0));
+            }
+            let ringing = [bank.voice_energy(first), bank.voice_energy(second)];
+            assert!(ringing[0] > 0.0 && ringing[1] > 0.0);
+
+            assert_eq!(
+                bank.note_on(junk, &settings, SR),
+                None,
+                "{junk} took a voice"
+            );
+            assert_eq!(bank.held_voices(), 2, "{junk} lifted a key");
+            assert_eq!(bank.voice_hz(first), 110.0);
+            assert_eq!(bank.voice_hz(second), 164.8);
+            assert_eq!(
+                [bank.voice_energy(first), bank.voice_energy(second)],
+                ringing,
+                "{junk} silenced a voice"
+            );
+        }
     }
 
     /// A note pressed again goes back to its own resonators rather than
@@ -1923,10 +2001,10 @@ mod tests {
             ..params(0.6, 500.0)
         };
         let mut bank = Bank::new();
-        let voice = bank.note_on(110.0, &settings, SR);
+        let voice = bank.note_on(110.0, &settings, SR).expect("a real note");
         bank.note_on(164.8, &settings, SR);
         bank.note_off(110.0);
-        assert_eq!(bank.note_on(110.0, &settings, SR), voice);
+        assert_eq!(bank.note_on(110.0, &settings, SR), Some(voice));
         assert!(bank.is_held(voice));
     }
 
@@ -1945,7 +2023,7 @@ mod tests {
             ..params(0.6, 500.0)
         };
         let mut bank = Bank::new();
-        let voice = bank.note_on(110.0, &settings, SR);
+        let voice = bank.note_on(110.0, &settings, SR).expect("a real note");
         assert_eq!(bank.voice_energy(voice), 0.0, "a fresh voice holds nothing");
 
         for _ in 0..480 {
