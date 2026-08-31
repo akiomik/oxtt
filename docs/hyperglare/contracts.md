@@ -353,11 +353,11 @@ What lands where, in this crate: `ResonatorBank::process` and
 inside `render_pre`.
 
 **There is a host, and it has run.** `hyperglare-bela` puts this crate under
-Bela's render callback on a Gem Stereo: the defaults cost 13.5% of one core at
-48 kHz with no underruns, and a bank filled to its capacity of 256 resonators
-costs 51%. The per-sample cost is 5.8% fixed plus 0.222% per resonator that is
-*sounding*, which is why the host reports `active_resonators` beside the load —
-a figure without the count cannot be acted on.
+Bela's render callback on a Gem Stereo: the defaults cost about 13% of one core
+at 48 kHz with no underruns, and a bank filled to its capacity of 256
+resonators costs 45 to 48%. The per-sample cost is 7.9% fixed plus 0.15% per
+resonator that is *sounding*, which is why the host reports `active_resonators`
+beside the load — a figure without the count cannot be acted on.
 The load does not depend on the input: measured with music at the input it is
 within a third of a point of the same run into silence.
 [`bela/cpu.md`](bela/cpu.md) has both sweeps.

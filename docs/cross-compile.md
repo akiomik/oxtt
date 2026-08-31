@@ -69,7 +69,7 @@ scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
 ```
 
 Read `active_resonators` next to `cpu_percentage` in what it prints on exit:
-the per-sample cost is 5.8% of one core fixed plus 0.222% per resonator that is
+the per-sample cost is 7.9% of one core fixed plus 0.15% per resonator that is
 *sounding*, so a CPU figure without the count says nothing. What that costs
 across the settings is in
 [`docs/hyperglare/bela/cpu.md`](hyperglare/bela/cpu.md).

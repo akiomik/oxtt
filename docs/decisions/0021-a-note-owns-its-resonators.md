@@ -252,8 +252,8 @@ removing one does not swell them.
 `voices · S` resonators are processed whether or not they are sounding, since
 an idle one has zero gain and contributes exactly zero. At five voices on the
 default grid that is 35, which the board's measured law from
-[`cpu.md`](../hyperglare/bela/cpu.md) — `CPU% = 5.8 + 0.222 · resonators` —
-puts at **13.6%**.
+[`cpu.md`](../hyperglare/bela/cpu.md) — `CPU% = 7.9 + 0.15 · resonators` —
+puts at **13.2%**.
 
 Constant is better than proportional here. A chord arriving must not cause a
 step in CPU load, because the step lands exactly when the audio matters most.
@@ -300,7 +300,7 @@ which is worse to explain than either end of the trade.
   `S` to 14 and so halves the polyphony that fits. `Geometry::Harmonics` puts
   `S` at 158, which is 790 slots at five voices against the board's
   `CAPACITY` of 256 — **one voice fits** — and which the CPU law would price
-  at `5.8 + 0.222 · 790`, about **181%**. It was already the geometry that
+  at `7.9 + 0.15 · 790`, about **126%**. It was already the geometry that
   truncates; under a fixed stride it stops being playable on a board at all,
   and that is a real narrowing rather than a detail.
 - **`--notes` starts truncating silently.** `hyperglare-render` accepts up to
@@ -324,10 +324,10 @@ which is worse to explain than either end of the trade.
   promises that what a truncating caller loses "is a thing it can see in
   `active()` and act on", which it no longer can. Both need revising, and the
   chord's own size has to be reported some other way.
-- **`cpu.md`'s law keeps its coefficients and changes its variable.** 0.222%
+- **`cpu.md`'s law keeps its coefficients and changes its variable.** 0.15%
   is defined there as one filter "per *sounding* resonator"; under block
   allocation every reserved slot is filtered whether it sounds or not, so the
-  variable becomes `voices · S`. The 13.6% quoted above is that reading and is
+  variable becomes `voices · S`. The 13.2% quoted above is that reading and is
   right; the sentence in `cpu.md` is not.
 - **`effectkit::filter::Svf` has to report how much it holds.** `ic1eq` and
   `ic2eq` are private and the type offers `is_finite` and nothing else that

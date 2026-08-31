@@ -39,8 +39,10 @@ Removes one element from `crates/hyperglare-dsp/src/bands.rs`'s `EDGES`, so
 - [`cpu.md`](../hyperglare/bela/cpu.md) — "the band split's twelve biquads,
   the exciter's seven gates" become ten and six, and "**Seven bands are twelve
   biquads**" with them. Those biquads are itemised inside the 5.8% fixed term
-  of `CPU% = 5.8 + 0.222 × resonators`, so **the constant moves** and is worth
-  re-measuring rather than adjusting on paper.
+  of `CPU% = 5.8 + 0.222 × resonators`, so **the constant moves**. Re-measured
+  after this landed: the line is `7.9 + 0.15 × resonators` over 32 to 256
+  resonators, and the band count's own contribution is smaller than the rig's
+  run-to-run spread, so it cannot be read out of it.
 - [`contracts.md`](../hyperglare/contracts.md) §5.0, for the reason in the
   decision below.
 

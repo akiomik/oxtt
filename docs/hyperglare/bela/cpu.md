@@ -2,9 +2,13 @@
 
 Measured on a PocketBeagle 2 (AM6254, Cortex-A53), Bela Debian Bookworm image
 2026-03-25, at 48 kHz with a period of 16 and one render thread — the settings
-`hyperglare-bela` asks for. Runs of 11 to 19 seconds, `--report-cpu 4`, first with
-nothing connected to the input and then with music into it at `--adc-gain-db
-12`, which peaked at −14 dBFS without clipping.
+`hyperglare-bela` asks for. `bela_daemon` stopped, output disconnected, music
+at the input at `--adc-gain-db 0`, runs of 14 seconds with `--report-cpu 4`.
+
+**Re-measured after [ADR 0022](../../decisions/0022-the-band-ladder-stops-at-two-kilohertz.md)
+took the band count from seven to six**, and reaching further up: the first
+sweep spanned 32 to 72 resonators and extrapolated badly past them, which this
+one shows and corrects.
 
 **This is the measurement ADR 0016 and ADR 0020 were accepted without.** Both
 delegated a number to "the CPU decides", and neither could be checked because
@@ -12,59 +16,78 @@ delegated a number to "the CPU decides", and neither could be checked because
 
 ## It runs
 
+Repeats of the same configuration, so the spread is visible rather than
+implied:
+
 ```text
- settings                                        resonators  CPU %  underruns
- defaults (5 notes, octaves, 5 kHz)                      32   13.5          0
- the same at a 9 kHz ceiling                             36   14.1          0
- seven notes at 9 kHz                                    50   15.9          0
- harmonics, three notes                                  62   18.6          0
- octave pairs, five notes at 9 kHz                       72   23.0          0
- harmonics at capacity                                  256   51.1          0
+ settings                              resonators   runs   min  median   max
+ defaults (5 notes, octaves, 5 kHz)            32     11  12.5    13.3  15.4
+ the same at a 9 kHz ceiling                   36      1  13.1    13.1  13.1
+ seven notes at 9 kHz                          50      4  14.8    16.3  19.6
+ harmonics, three notes                        60      1  17.0    17.0  17.0
+ octave pairs, five notes at 9 kHz             72      7  18.5    18.5  19.7
+ harmonics, three low notes                   194      4  37.0    37.0  39.5
+ harmonics at capacity                        256      4  44.9    47.8  47.8
 ```
 
-Six more runs with signal at the input measured the same, and are below.
-
 **No configuration underran, including the one that fills the bank.** The
-defaults sit at 13.5%, below `oxtt`'s measured 19% on the same board.
+defaults sit around 13%, below `oxtt`'s measured 19% on the same board.
+
+**The spread is up to 4.8 points**, and it is not proportional to the load —
+72 resonators repeated to within 1.2 points while 50 varied by 4.8. Whatever
+produces it is the board's, not the chord's. A single run of this rig is worth
+about ±2 points, which is the resolution every number here has.
 
 ## What a resonator costs
 
-Least squares over the five rows below capacity:
+Least squares over all seven configurations, 32 to 256 resonators:
 
 ```text
- CPU% = 5.8 + 0.222 × resonators        residual under 1.2 points
+ CPU% = 7.9 + 0.15 × resonators         residual under 0.7 points
 ```
 
-- **5.8% is the fixed half**: the band split's biquads, the exciter's gates,
+Fitted to the medians; fitting the minima instead moves the slope to 0.147 and
+leaves the intercept where it is, so the line does not depend on which end of
+the spread is taken.
+
+- **7.9% is the fixed half**: the band split's biquads, the exciter's gates,
   the host, and everything else that does not scale with the chord.
-- **0.222% each** is one normalised state-variable filter per sounding
+- **0.15% each** is one normalised state-variable filter per sounding
   resonator, at 48 kHz.
 
-Extrapolated, one core runs out at about 424 resonators — which the bank's
-capacity of 256 already sits under. At capacity the line predicts 62.7% and the
-board measured 51.1%, so the estimate is conservative in the direction that
-matters.
+Extrapolated, one core runs out at about 600 resonators, well past the bank's
+capacity of 256.
+
+**The first sweep's line was `5.8 + 0.222` and it was wrong past its own
+data.** It was fitted over 32 to 72 resonators and predicted 62.7% at capacity
+against 44.9 to 47.8 measured. Over a 40-resonator span the intercept and the
+slope trade off almost freely, so neither was determined; extending the sweep
+to 256 is what fixes it. The difference between the two lines is a difference
+in the fit, not in the board.
 
 ## What this settles, and what it does not
 
-**Settled: the band count is affordable.** The sweep ran with seven bands,
-which is twelve biquads, and they were inside the 5.8% fixed cost against
-0.222% for each of the resonators they feed. ADR 0016 left the count open
-partly on CPU grounds; on this board that is not the binding constraint.
+**Settled: the band count is affordable.** Six bands are ten biquads and six
+gates, and they are inside the fixed term against 0.15% for each of the
+resonators they feed. ADR 0016 left the count open partly on CPU grounds; on
+this board that is not the binding constraint.
 
-**The band count has since gone to six** — ten biquads and six gates —
-[ADR 0022](../../decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
-Two biquads out of a fixed term that also carries the host is a small part of
-it, and it can only have gone down, so the 5.8% above is an upper bound for
-the current build rather than a measurement of it.
+**Not settled, and not settleable here: what one band costs.** This sweep was
+run to see what ADR 0022's seventh band was worth, and it cannot say. Two
+biquads out of a term that also carries the host is smaller than the 4.8
+points the same configuration varies by between runs. Matched configurations
+measured 0 to 3.3 points lower than the seven-band sweep, in the direction
+removing work should go, and that range straddles the noise. **Any number
+attributed to a band from these figures would be read out of the variation.**
 
 **Settled: the ceiling is affordable.** Raising it from 5 kHz to 9 kHz adds
 four resonators and 0.6 points. ADR 0020's choice was made on sound, and
 nothing here argues with it.
 
-**Settled: the load does not depend on the input.** The first sweep ran on a
-board with nothing plugged in, so the gate that multiplies the noise path never
-opened. Repeated with music at the input, peaking at −14 dBFS:
+**Settled: the load does not depend on the input.** From the seven-band sweep,
+which ran first on a board with nothing plugged in, so the gate that multiplies
+the noise path never opened, and then with music at the input peaking at
+−14 dBFS:
 
 ```text
  settings                          resonators   silent    signal
@@ -89,6 +112,20 @@ export BELA_SYSROOT=/path/to/bela-sysroot
 export BELA_PACKAGE=hyperglare-bela
 scripts/bela-build.sh
 scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
+```
+
+**Repeat every configuration.** One run is worth about ±2 points here, so a
+difference smaller than that is not a difference. The configurations above,
+in the order of the table:
+
+```text
+ --notes 56,59,61,63,66
+ --notes 56,59,61,63,66 --high-hz 9000
+ --notes 50,52,54,56,59,61,63 --high-hz 9000
+ --notes 56,59,63 --geometry harmonics
+ --notes 56,59,61,63,66 --geometry octave-pairs --high-hz 9000
+ --notes 33,40,45 --geometry harmonics
+ --notes 28,33,40 --geometry harmonics
 ```
 
 `--adc-gain-db` is not optional with a source connected: the board's default of
