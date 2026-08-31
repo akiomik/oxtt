@@ -383,10 +383,17 @@ rather than a nicety.** A key press is not cheap — it scans the table for the
 quietest voice and retunes a block — so draining a ring would make a block's
 work depend on how long the ring had been left, which is time proportional to
 events instead of frames. `hyperglare-bela` takes at most
-`MIDI_MESSAGES_PER_BLOCK` and leaves the rest for the next block, and reports
-the deepest backlog it saw so that falling behind is visible rather than
-silent. That prohibition is the one nothing in the toolchain checks, which is
-why it is named here.
+`MIDI_MESSAGES_PER_BLOCK` and leaves the rest for the next block, so a burst
+arrives late rather than partly. That prohibition is the one nothing in the
+toolchain checks, which is why it is named here.
+
+**What the bound does not buy is a proof that nothing was lost.** `bela`'s
+ring overwrites when it wraps and its count is a difference modulo the ring's
+size, so it does not saturate. `midi_backlog` is a high-water mark: a large
+number says the run fell behind the device, and **a small one is not evidence
+that it did not** — a run that wrapped can report one, and a lost note off
+would leave a key down with nothing in the report to say why. Detecting the
+drop itself would need a sequence number the parser does not carry.
 
 **There is a host, and it has run.** `hyperglare-bela` puts this crate under
 Bela's render callback on a Gem Stereo: the defaults cost about 13% of one core
