@@ -72,8 +72,14 @@ pub struct ParamsArgs {
     #[arg(long, value_name = "CENTS", default_value_t = 7.0)]
     pub pair_spread: f32,
 
-    /// Voice count the level is normalised for. Not the number of notes.
-    #[arg(long, default_value_t = 4)]
+    /// Voices the table has room for, and what the level is normalised for.
+    ///
+    /// **This is the polyphony.** A note arriving with every voice taken
+    /// steals one, and the divisor is this rather than the number of keys
+    /// down, so a chord is louder than one note and a key lifting does not
+    /// duck the rest. The default is the smallest table that can play the
+    /// material this effect is judged against. See ADR 0021.
+    #[arg(long, default_value_t = 5)]
     pub voices: usize,
 
     /// Waveshaping into the bank: what makes the root's own partials ring.

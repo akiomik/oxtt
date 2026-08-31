@@ -151,14 +151,6 @@ pub struct HyperglareProcessor<const N: usize> {
     sear: Shaper,
     anti_alias: [Biquad; 2],
     params: HyperglareParams,
-    /// The chord [`apply_params`](Self::apply_params) was last given.
-    ///
-    /// Kept so that a sample-rate change can retune from it. Sized to the
-    /// bank's capacity because that is already the point past which
-    /// [`ResonatorBank::retune`] stops reading, so this remembers everything
-    /// a retune could have used and nothing more.
-    notes_hz: [f32; N],
-    note_count: usize,
     sample_rate: f32,
 }
 
@@ -173,8 +165,6 @@ impl<const N: usize> HyperglareProcessor<N> {
             sear: Shaper::new(params.sear),
             anti_alias: [Biquad::default(); 2],
             params,
-            notes_hz: [0.0; N],
-            note_count: 0,
             sample_rate,
         };
         processor.set_sample_rate(sample_rate);
@@ -186,12 +176,10 @@ impl<const N: usize> HyperglareProcessor<N> {
     /// **The bank included.** Its coefficients came from a `tan` of the old
     /// rate, so leaving them detunes the whole chord by the ratio of the two
     /// rates; its filter state is a tail counted in the old rate's samples, so
-    /// leaving that rings the old tuning through the change. Both are why the
-    /// chord is kept in [`notes_hz`](Self#structfield.notes_hz) — there is
-    /// nothing else here to retune from.
-    ///
-    /// A processor that has never been given a chord retunes to no notes,
-    /// which is what it already had.
+    /// leaving that rings the old tuning through the change. The bank keeps
+    /// the notes its voices hold, so there is nothing to pass it: it is
+    /// [`resettle`](ResonatorBank::resettle) that rebuilds them, and a
+    /// processor that has never been given a chord rebuilds an empty table.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         self.exciter_coeffs = ExciterCoeffs::new(sample_rate, &self.params.exciter);
@@ -202,11 +190,10 @@ impl<const N: usize> HyperglareProcessor<N> {
         }
         self.exciter.reset();
         // The tails belong to the old rate; the tuning is rebuilt for the new
-        // one. Copied out first because both live behind the same `&mut self`.
+        // one.
         self.bank.reset_state();
-        let (notes, count, bank) = (self.notes_hz, self.note_count, self.params.bank);
-        self.bank
-            .retune(notes.get(..count).unwrap_or(&notes), &bank, sample_rate);
+        let bank = self.params.bank;
+        self.bank.resettle(&bank, sample_rate);
     }
 
     /// Applies a new setting. Control rate, not sample rate.
@@ -225,11 +212,39 @@ impl<const N: usize> HyperglareProcessor<N> {
     /// one retunes on every call. That is the safe direction to be wrong in,
     /// and it costs nothing a caller passing `NaN` was going to get anyway.
     pub fn apply_params(&mut self, params: &HyperglareParams, notes_hz: &[f32]) {
-        let count = notes_hz.len().min(N);
-        let known = self.notes_hz.get(..count).unwrap_or(&[]);
-        let incoming = notes_hz.get(..count).unwrap_or(&[]);
-        let retune =
-            params.bank != self.params.bank || count != self.note_count || known != incoming;
+        // The chord is the bank's, one voice per slot, so this is a comparison
+        // against what the voices hold rather than against a second copy.
+        #[allow(clippy::float_cmp)]
+        let chord_moved = (0..self.bank.voices().max(notes_hz.len()))
+            .any(|voice| self.bank.voice_hz(voice) != notes_hz.get(voice).copied().unwrap_or(0.0));
+        let bank_moved = self.take_params(params);
+        if chord_moved {
+            // The chord carries the settings with it: `retune` applies both.
+            self.bank.retune(notes_hz, &params.bank, self.sample_rate);
+        } else if bank_moved {
+            self.bank.resettle(&params.bank, self.sample_rate);
+        }
+    }
+
+    /// Applies a new setting without naming a chord. Control rate.
+    ///
+    /// **What a host playing keys turns knobs with.** `apply_params` takes the
+    /// chord as an argument, so calling it from a host whose chord comes from
+    /// [`note_on`](Self::note_on) would release every key on the next block.
+    /// The two are alternatives, and this is the half for the keyed one.
+    ///
+    /// Costs the same as `apply_params` on a chord that has not moved: a
+    /// retune of the voices in place when a bank setting changed, and nothing
+    /// at all when one did not.
+    pub fn set_params(&mut self, params: &HyperglareParams) {
+        if self.take_params(params) {
+            self.bank.resettle(&params.bank, self.sample_rate);
+        }
+    }
+
+    /// Stores the settings and rebuilds the derived values, answering whether
+    /// the bank's own settings moved.
+    fn take_params(&mut self, params: &HyperglareParams) -> bool {
         // The derived values the per-sample path sees, kept level with the
         // settings they came from. Both cost a `powf`, which is why they are
         // here and not in `process_frame`.
@@ -244,21 +259,34 @@ impl<const N: usize> HyperglareProcessor<N> {
         if sear_moved {
             self.sear = Shaper::new(params.sear);
         }
+        let bank_moved = params.bank != self.params.bank;
         self.params = *params;
-        if retune {
-            for (slot, hz) in self.notes_hz.iter_mut().zip(notes_hz) {
-                *slot = *hz;
-            }
-            // Past the chord, for the reason `ResonatorBank::retune` clears
-            // its own unused slots: `note_count` stops anything from reading
-            // here, so a leftover note cannot be heard, and leaving it would
-            // make two processors that behave identically compare unequal.
-            for slot in self.notes_hz.iter_mut().skip(count) {
-                *slot = 0.0;
-            }
-            self.note_count = count;
-            self.bank.retune(notes_hz, &params.bank, self.sample_rate);
-        }
+        bank_moved
+    }
+
+    /// Presses a key.
+    ///
+    /// Returns the voice it went to, which is [`allocate`]'s answer rather
+    /// than a slot the caller chose. A note already sounding takes its own
+    /// voice back rather than a second one.
+    ///
+    /// **Not for the chord a command line names** — that arrives through
+    /// [`apply_params`](Self::apply_params), and the two are alternatives
+    /// rather than layers (ADR 0021). A host that plays keys starts from an
+    /// empty chord.
+    ///
+    /// [`allocate`]: ResonatorBank
+    pub fn note_on(&mut self, note_hz: f32) -> usize {
+        let (bank, rate) = (self.params.bank, self.sample_rate);
+        self.bank.note_on(note_hz, &bank, rate)
+    }
+
+    /// Lifts a key, and returns the voice it was on.
+    ///
+    /// The voice stops being excited and goes on ringing down at its own
+    /// decay. A note that is not held does nothing.
+    pub fn note_off(&mut self, note_hz: f32) -> Option<usize> {
+        self.bank.note_off(note_hz)
     }
 
     /// How many resonator slots the bank runs.
@@ -401,6 +429,76 @@ mod tests {
 
     fn tone(i: usize, hz: f32) -> f32 {
         (2.0 * PI * hz * i as f32 / SR).sin()
+    }
+
+    /// A key lifting leaves the processor ringing, end to end.
+    ///
+    /// The bank's own test says the excitation stops; this one says the sound
+    /// reaches the output, through the exciter, the mix and the limiter.
+    #[test]
+    fn a_key_lift_leaves_the_processor_ringing() {
+        let params = HyperglareParams {
+            color: 1.0,
+            ..HyperglareParams::default()
+        };
+        let mut processor = Processor::new(params, SR);
+        processor.note_on(110.0);
+        for i in 0..4_800 {
+            let x = tone(i, 110.0) * 0.5;
+            processor.process_frame(x, x);
+        }
+        assert_eq!(processor.held_voices(), 1);
+
+        processor.note_off(110.0);
+        assert_eq!(processor.held_voices(), 0, "the key should be up");
+
+        let mut peak = 0.0f32;
+        for _ in 0..2_400 {
+            let (left, right) = processor.process_frame(0.0, 0.0);
+            peak = peak.max(left.abs()).max(right.abs());
+        }
+        assert!(peak > 1e-5, "the tail did not survive the key lift: {peak}");
+    }
+
+    /// `set_params` is the knob path for a host whose chord comes from keys,
+    /// and it must not put the keys back up.
+    ///
+    /// `apply_params` names the chord, so calling it from such a host would
+    /// release everything on the next block. That is the trap this exists to
+    /// remove, and the test is what says it was removed.
+    #[test]
+    fn set_params_does_not_release_the_keys() {
+        let params = HyperglareParams::default();
+        let mut processor = Processor::new(params, SR);
+        processor.note_on(110.0);
+        processor.note_on(164.8);
+        assert_eq!(processor.held_voices(), 2);
+
+        let mut moved = params;
+        moved.bank.decay_t60_s = 0.5;
+        processor.set_params(&moved);
+        assert_eq!(processor.held_voices(), 2, "a knob released the keys");
+
+        // And the other path really does do what it says, which is why the two
+        // are separate rather than one function with a flag.
+        processor.apply_params(&moved, &[]);
+        assert_eq!(processor.held_voices(), 0, "an empty chord should empty it");
+    }
+
+    /// A note pressed twice does not take two voices, and a note off for a key
+    /// that is not down is not an error.
+    #[test]
+    fn keys_that_repeat_or_never_went_down_are_handled() {
+        let params = HyperglareParams::default();
+        let mut processor = Processor::new(params, SR);
+        let first = processor.note_on(110.0);
+        assert_eq!(processor.note_on(110.0), first);
+        assert_eq!(processor.held_voices(), 1);
+
+        assert!(processor.note_off(220.0).is_none(), "that key was never down");
+        assert_eq!(processor.held_voices(), 1);
+        assert_eq!(processor.note_off(110.0), Some(first));
+        assert_eq!(processor.held_voices(), 0);
     }
 
     /// Runs a bass note through and returns the stereo RMS pair.

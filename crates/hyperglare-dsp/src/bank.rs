@@ -242,14 +242,26 @@ pub struct BankParams {
     /// alternative, numbering only the sounding voices, moves every other
     /// voice's tuning whenever one note is added or released.
     pub drift_cents: f32,
-    /// How many voices the bank is *configured* for.
+    /// How many voices the bank is *configured* for, which since ADR 0021 is
+    /// also how many it has.
+    ///
+    /// **The size of the voice table, and so the polyphony.** Each voice owns
+    /// a block of resonator slots whether or not it has a note, so a note
+    /// arriving with every voice taken steals one rather than growing the
+    /// bank. That is what keeps the load flat when a chord arrives.
     ///
     /// The output is divided by its square root, so changing the setting does
     /// not change the loudest the bank can get. **Dividing by the number of
     /// notes currently held would do something else entirely**: adding a note
     /// to a sustaining chord would duck the notes already ringing, which on an
     /// effect with a second of tail is very audible and is not what any
-    /// instrument does. A chord is louder than one note.
+    /// instrument does. A chord is louder than one note, and a key lifting
+    /// does not reach the divisor at all — a released voice keeps its block.
+    ///
+    /// **So the two jobs are one setting on purpose.** A table sized for eight
+    /// would let a player hold eight notes at the price of a single note
+    /// arriving about 2 dB quieter, and two settings that mean almost the same
+    /// thing are worse to explain than either end of that trade.
     ///
     /// The geometry's density is divided out alongside it, at
     /// [`REFERENCE_NOTE_HZ`].
@@ -281,7 +293,11 @@ impl Default for BankParams {
             compensation_exponent: 0.25,
             tilt: 0.5,
             drift_cents: 0.0,
-            voices: 4,
+            // The smallest table that plays the material ADR 0018 adjudicates
+            // from: four of the five paired recordings are five-note chords
+            // and the fifth is four notes. Four voices cannot play four of the
+            // five. See ADR 0021.
+            voices: 5,
         }
     }
 }
@@ -706,20 +722,69 @@ impl<const N: usize> ResonatorBank<N> {
     /// with the coefficients, so a large retune glides rather than jumps —
     /// deliberately, because a jump is a click and a glide is a portamento.
     pub fn retune(&mut self, notes_hz: &[f32], params: &BankParams, sample_rate: f32) {
+        self.rebuild(params, sample_rate, Some(notes_hz));
+    }
+
+    /// Rebuilds the table for new settings, keeping the notes it holds.
+    ///
+    /// **The settings-only half of [`retune`](Self::retune)**, for a decay or
+    /// a tilt or a sample rate moving under a chord that has not. Under a
+    /// voice table the chord no longer arrives as a list — it arrives one key
+    /// at a time — so a caller that has only new settings has nothing to pass.
+    ///
+    /// Keeps the tails when it can. A change that moves the stride or the
+    /// voice count moves every block, and state at the old positions would be
+    /// heard at the new ones, so that case resets; anything smaller does not.
+    pub fn resettle(&mut self, params: &BankParams, sample_rate: f32) {
+        self.rebuild(params, sample_rate, None);
+    }
+
+    /// One implementation for both, because they differ only in where the
+    /// notes come from.
+    fn rebuild(&mut self, params: &BankParams, sample_rate: f32, chord: Option<&[f32]>) {
         let law = Law::new(params, sample_rate);
 
         // The block size, and how many blocks fit. `max_count` is the most
         // points any one note can produce, so no note overruns its own block;
         // the capacity decides the rest, and a geometry too dense for even one
         // block gets one anyway and truncates inside it.
-        self.stride = params.grid.max_count(law.nyquist).max(1);
-        self.voices = N.checked_div(self.stride).unwrap_or(1).clamp(1, params.voices.max(1));
+        let stride = params.grid.max_count(law.nyquist).max(1);
+        let voices = N
+            .checked_div(stride)
+            .unwrap_or(1)
+            .clamp(1, params.voices.max(1));
+        // Every block moves when either of these does, so state written for
+        // the old layout would be heard at the new one.
+        if stride != self.stride || voices != self.voices {
+            for filter in &mut self.filters {
+                filter.reset_state();
+            }
+        }
+        self.stride = stride;
+        self.voices = voices;
         self.active = self.voices.saturating_mul(self.stride).min(N);
 
         let mut scratch = [0.0f32; N];
         for voice in 0..self.voices {
-            let hz = notes_hz.get(voice).copied().unwrap_or(0.0);
-            self.assign(voice, hz, hz > 0.0, params, &law, &mut scratch);
+            let (hz, held) = chord.map_or_else(
+                || (self.voice_hz(voice), self.is_held(voice)),
+                |notes| {
+                    let hz = notes.get(voice).copied().unwrap_or(0.0);
+                    (hz, hz > 0.0)
+                },
+            );
+            self.assign(voice, hz, held, params, &law, &mut scratch);
+        }
+
+        // A table that shrank leaves notes above it that nothing plays. Cleared
+        // so that a table growing back does not find a chord nobody is holding.
+        for voice in self.voices..N {
+            if let Some(slot) = self.voice_hz.get_mut(voice) {
+                *slot = 0.0;
+            }
+            if let Some(slot) = self.voice_held.get_mut(voice) {
+                *slot = false;
+            }
         }
 
         // **Every filter above the table is at rest, always.** A bank starts
