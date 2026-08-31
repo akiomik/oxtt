@@ -144,6 +144,36 @@ which is inside what the same configuration varies by between runs
 ([`cpu.md`](cpu.md)). **A chord arriving costs nothing**, which is what
 reserving the blocks buys.
 
+### Played by hand — PASS, and one thing it could not settle
+
+A keyboard on the board's own USB port, the board started at boot with no
+computer attached to it (`scripts/bela-autostart.sh`, `--midi-port hw:1,0,0`,
+`--color 0.63`). Judged by ear, not from a recording.
+
+**Nothing was wrong with it in use.** Keys sound, releases behave, and no
+click, stuck note or dropout was heard.
+
+**What a key lift leaves behind could not be separated by ear**, and the
+default decay is why rather than the effect being wrong: `decay_t60_s` is
+0.25 s, so a released voice is 60 dB down a quarter of a second later, and
+under a dry signal at `--color 0.63` that reads as stopping. The mechanism is
+pinned offline instead — a released voice goes on sounding and does not answer
+its excitation, sample for sample
+(`crates/hyperglare-dsp/src/bank.rs`). **To hear it rather than measure it,
+`--decay 0.6` is where the same tail takes 600 ms.**
+
+### It runs for minutes — PASS
+
+5 minutes 37 seconds with the MIDI port open and a keyboard attached: no
+underruns, and no restarts. The longest run before this was 40 seconds and
+none of them had a MIDI port open, so this is the first evidence that the
+input thread `bela`'s `Midi` starts costs nothing over minutes.
+
+**Four dropped blocks were seen once and are not this configuration's.** They
+fell inside a window when a second host was restart-looping every five seconds
+against the same audio device, and did not recur in the run above. Not
+reproduced, so not attributed.
+
 ## Not verified
 
 - **Latency.** Not measured. `oxtt` measured roughly 1 ms round trip on this
@@ -154,20 +184,19 @@ reserving the blocks buys.
   property of the board's converters, so it applies here — but this effect's
   own contribution, with a bank of high-Q resonators ringing, has not been
   measured.
-- **What MIDI sounds like.** The control path is verified above; the audio is
-  not, and on this rig **the keys and the recording exclude each other**.
-  Sending keys puts the board on the same machine as the capture interface, and
-  the audio cable then closes a loop between three devices that are already
-  bonded to each other. Neither device raises it alone — the sections above
-  were captured through this same interface — and it is a property of the
-  arrangement rather than of the mains, so the machine's power supply does not
-  come into it.
-
-  A key lift is meant to leave the voice ringing down at its own decay and a
-  stolen voice is meant to start from rest. Both are measured offline
-  (`crates/hyperglare-dsp/src/processor.rs`) and neither has been heard.
+- **MIDI, measured rather than judged.** The section above is by ear; no
+  capture of it exists. Sending keys from a computer puts the board on the same
+  machine as the capture interface, and the audio cable then closes a loop
+  between three devices already bonded to each other — so on that rig the keys
+  and the recording exclude each other. Playing from a keyboard on the board's
+  own port opens the loop and removes the recording machine with it.
+- **What a stolen voice sounds like.** It is meant to start from rest rather
+  than glide, and the table has to be full for it to happen at all. Measured
+  offline (`crates/hyperglare-dsp/src/bank.rs`) and not heard.
 - **Anything with a control surface.** It does not exist.
-- **Long runs.** The longest here was 40 seconds.
+- **Runs longer than six minutes.** 5 minutes 37 seconds is the longest
+  measured. A longer watch was started and did not finish — the board left the
+  network partway through — so nothing is claimed past that.
 - **Chord changes while running.** `apply_params` retunes without a click by
   design, and on the board the chord is fixed for the run, so the path has
   never been exercised on hardware.
