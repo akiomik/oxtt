@@ -100,6 +100,15 @@ pub struct BelaCli {
     /// underneath that would be a drone nobody asked for.
     #[arg(long, value_name = "PORT", conflicts_with = "notes")]
     pub midi_port: Option<String>,
+
+    /// List the MIDI ports this board has, in the form `--midi-port` wants,
+    /// and exit.
+    ///
+    /// **`amidi -l` is not enough**: it prints `hw:0,0` where the port is
+    /// opened as `hw:0,0,0`, and the missing subdevice opens nothing. This
+    /// prints what will work.
+    #[arg(long)]
+    pub list_midi_ports: bool,
 }
 
 impl From<&BelaCli> for RunOptions {

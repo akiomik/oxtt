@@ -3,6 +3,14 @@
 ## Build scripts
 
 `pi-build.sh`, `bela-build.sh` and `bela-deploy.sh` build and deploy `oxtt`.
+
+**`bela-autostart.sh` is about a USB socket rather than about convenience.**
+Reaching the board over the network costs the socket a class-compliant MIDI
+keyboard would otherwise use, and a host that starts on its own needs no
+shell — so installing the unit and unplugging the network adapter is what
+makes the keyboard fit. `hyperglare-bela --list-midi-ports` names the port the
+keyboard then appears on, in the form `--midi-port` wants: `amidi -l` prints
+`hw:0,0` where the port is opened as `hw:0,0,0`.
 They exist because the two boards compile for the same target triple
 (`aarch64-unknown-linux-gnu`) and want opposite settings from it — a Raspberry
 Pi 5 is a Cortex-A76 built natively, a Bela Gem Stereo is a Cortex-A53
@@ -14,7 +22,8 @@ its own settings instead. All three take `--help`.
 | --- | --- |
 | `pi-build.sh [--controls]` | Native release build on the Pi, tuned for Cortex-A76. Refuses to run off an aarch64 Linux host. |
 | `bela-build.sh` | Cross-compiles `oxtt-bela` for a Bela Gem Stereo. Needs `BELA_SYSROOT`; `BELA_LINKER` selects the cross compiler driver. |
-| `bela-deploy.sh [--host H] [--no-run] [-- args...]` | Copies the built binary to the board, stops `bela_daemon`, and runs it over `ssh -t`. Does not build. |
+| `bela-deploy.sh [--host H] [--no-run] [-- args...]` | Copies the built binary to the board, stops `bela_daemon`, and runs it over `ssh -t`. Does not build. Stops and restarts a `bela-autostart.sh` unit around the copy, since a binary a service is running cannot be written over. |
+| `bela-autostart.sh install\|remove\|status [--host H] [-- args...]` | Installs a systemd unit that runs the host at boot, so the board plays without a shell. Does not build or copy. |
 
 See [`docs/cross-compile.md`](../docs/cross-compile.md) for the Bela
 toolchain and sysroot setup, and

@@ -25,6 +25,10 @@ and, unless --no-run is given, runs it there.
   --no-run      Copy only.
   --            Everything after this is passed to the binary on the board.
 
+If a `$BELA_PACKAGE.service` unit is running — see scripts/bela-autostart.sh —
+it is stopped for the copy and started again afterwards, because a binary a
+service is running cannot be written over.
+
   BELA_PACKAGE  Which host to deploy: oxtt-bela (default) or
                 hyperglare-bela. The same variable scripts/bela-build.sh
                 reads.
@@ -75,8 +79,30 @@ if [[ ! -f "$BINARY" ]]; then
   exit 1
 fi
 
+# A binary a service is running cannot be written over, and `scp` says so as
+# "failed to upload" rather than as anything about the service. Stopped here
+# and put back afterwards, so a deploy leaves the board as it found it.
+#
+# The unit name expands here rather than on the board: the board is being told
+# which service, not asked to work it out.
+UNIT="${PACKAGE}.service"
+WAS_RUNNING=0
+# shellcheck disable=SC2029
+if ssh "$HOST" "systemctl is-active --quiet ${UNIT}" 2>/dev/null; then
+  echo "bela-deploy: ${UNIT} is running; stopping it to write over its binary"
+  # shellcheck disable=SC2029
+  ssh "$HOST" "systemctl stop ${UNIT}"
+  WAS_RUNNING=1
+fi
+
 echo "bela-deploy: copying $BINARY to $HOST"
 scp "$BINARY" "$HOST:"
+
+if [[ "$WAS_RUNNING" -eq 1 ]]; then
+  echo "bela-deploy: starting ${UNIT} again"
+  # shellcheck disable=SC2029
+  ssh "$HOST" "systemctl start ${UNIT}"
+fi
 
 if [[ "$RUN" -eq 0 ]]; then
   echo "bela-deploy: copied; not running (--no-run)"

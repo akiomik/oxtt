@@ -25,12 +25,23 @@ use hyperglare_bela::run;
 use hyperglare_bela::{BelaCli, ChordSource, RunOptions};
 use hyperglare_dsp::processor::HyperglareParams;
 
-/// Parses the command line into the three things a run needs.
+/// Parses the command line into the three things a run needs, or [`None`] for
+/// a command line that asked a question instead of a run.
 ///
 /// Split out so that both `main`s agree on what a command line means, and so
 /// that the error goes to the same place on either.
-fn configure() -> (HyperglareParams, ChordSource, RunOptions) {
+fn configure() -> Option<(HyperglareParams, ChordSource, RunOptions)> {
     let cli = BelaCli::parse();
+
+    // Answered here rather than by a `process::exit` inside a helper, so that
+    // "there is nothing to run" travels the same way an error does.
+    if cli.list_midi_ports {
+        for port in bela::midi_ports() {
+            println!("{port}");
+        }
+        return None;
+    }
+
     let options = RunOptions::from(&cli);
     let params = HyperglareParams::from(&cli.params);
     // Clap refuses the two together, so this is a choice rather than a
@@ -39,12 +50,14 @@ fn configure() -> (HyperglareParams, ChordSource, RunOptions) {
         || ChordSource::Fixed(chord_hz(&cli.notes)),
         ChordSource::Midi,
     );
-    (params, chord, options)
+    Some((params, chord, options))
 }
 
 #[cfg(bela_device)]
 fn main() -> ExitCode {
-    let (params, chord, options) = configure();
+    let Some((params, chord, options)) = configure() else {
+        return ExitCode::SUCCESS;
+    };
 
     // The run's diagnostics are printed by the application's `cleanup`, not
     // here: `Bela::until_stopped` consumes the audio system without handing
@@ -66,7 +79,9 @@ fn main() -> ExitCode {
 /// a bad argument behave the same way they will on the board.
 #[cfg(not(bela_device))]
 fn main() -> ExitCode {
-    let _ = configure();
+    if configure().is_none() {
+        return ExitCode::SUCCESS;
+    }
     eprintln!(
         "hyperglare: this binary must be cross-compiled for Bela Gem (aarch64-unknown-linux-gnu); \
          see docs/cross-compile.md"

@@ -68,6 +68,26 @@ scripts/bela-build.sh
 scripts/bela-deploy.sh -- --report-cpu 4 --report-on-exit --adc-gain-db 0
 ```
 
+## Running without a shell
+
+**A host that starts at boot is what frees a USB socket.** Reaching the board
+over the network costs the socket a class-compliant MIDI keyboard would
+otherwise use, and a host that starts on its own needs no shell to reach:
+
+```sh
+scripts/bela-deploy.sh --no-run
+scripts/bela-autostart.sh install -- --midi-port hw:0,0,0 --adc-gain-db 0
+```
+
+`hyperglare-bela --list-midi-ports` names the port in the form the argument
+wants. `amidi -l` is not enough for this: it prints `hw:0,0` where the port is
+opened as `hw:0,0,0`, and the missing subdevice opens nothing.
+
+The unit conflicts with `bela_daemon`, so installing it disables the daemon
+until `scripts/bela-autostart.sh remove` gives the board back. `status` shows
+what systemd thinks and the last of the journal — which is the only place a
+run without a shell says anything.
+
 Read `active_resonators` next to `cpu_percentage` in what it prints on exit:
 the per-sample cost is 7.9% of one core fixed plus 0.15% per resonator *slot
 the bank runs*, so a CPU figure without the count says nothing. A voice
