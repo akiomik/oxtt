@@ -239,9 +239,17 @@ beside it, and the density row above is that sparsity surviving the change. The
 bell risk was reduced, not removed.
 
 **The band edges are tied to this.** `crate::bands::EDGES` are octaves because
-the gain law's share is `BW/W_b`, and they have to reach as far as the grid
-does or the top band spans more than an octave and the resonators in it are
-lifted against their neighbours. Moving the ceiling means checking them.
+the gain law's share is `BW/W_b`, so a band wider than an octave lifts the
+resonators in it against their neighbours. **The ladder cannot reach the
+ceiling**, though, because its rungs are octaves of 130 Hz and the ceiling is a
+setting: at 5 kHz the next rung would be 8320. So the top band is never an
+octave, and what has to be checked when the ceiling moves is **the spread of
+the compensation from the last edge to the ceiling**, not the octave count.
+
+At the default that spread is 1.90 dB across one band. Stopping the ladder a
+rung later, at 4160, makes it 3.87 dB across two bands and a reversed edge —
+which is how the octave count came to be the wrong thing to check. See
+[ADR 0022](../decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
 
 ## 5.1 Stereo
 

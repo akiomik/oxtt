@@ -93,18 +93,22 @@
 //! in the same ratio:
 //!
 //! ```text
-//!  band     0       1       2       3        4         5          6
-//!  spans  0-130 130-260 260-520 520-1040 1040-2080 2080-4160 4160-ceiling
-//!  width   130     130     260     520      1040      2080    ceiling-4160
+//!  band     0       1       2       3        4          5
+//!  spans  0-130 130-260 260-520 520-1040 1040-2080 2080-ceiling
+//!  width   130     130     260     520      1040    ceiling-2080
 //! ```
 //!
 //! The bottom band is open downward, so it is as wide as the one above it and
 //! the first step is flat. From there each width doubles — **except the top
 //! one, which is closed at the grid's ceiling rather than at an edge.** At the
-//! default ceiling of 5 kHz that leaves it 840 Hz wide against the 2080 below
-//! it, so the step at 4160 Hz is **-1.97 dB where every other edge is +1.51**.
-//! That is a defect rather than a design: see
-//! [`bands::EDGES`](crate::bands::EDGES).
+//! default ceiling of 5 kHz that leaves it 2920 Hz wide against the 1040 below
+//! it, so the last step is +2.24 dB where the others are +1.51.
+//!
+//! **A ladder of fixed octaves cannot land on a ceiling that is a setting**,
+//! so one band is always the odd one and the choice is which error to carry.
+//! ADR 0022 has the arithmetic: this arrangement is 0.74 dB above the trend,
+//! and the one before it — with an edge at 4160 — was 3.47 dB below it, in
+//! the opposite direction to the rest of the ladder.
 //!
 //! The old law had a slope above the breakpoint and nothing below; this one
 //! has a staircase below and a sawtooth above. Neither gained a second
@@ -812,19 +816,27 @@ mod tests {
         );
     }
 
-    /// The staircase, and where it stops.
+    /// The compensation is the share, on both sides of the breakpoint.
     ///
-    /// Below the breakpoint a resonator keeps its width while each band is
-    /// twice the one below, so its share halves at every edge and the
-    /// compensation lifts by `6.02·p` dB. Above the breakpoint the resonator
-    /// widens with frequency exactly as fast as the bands do, so the share
-    /// stops moving and the compensation stops with it.
+    /// `gain ∝ (BW/W_b)^-p`, so between any two resonators the step is
+    /// `20·p·log10((W1/W0)·(BW0/BW1))` and nothing else. Below the breakpoint
+    /// `BW` is the same for both and the step is the width ratio alone — a
+    /// staircase of `6.02·p` dB wherever a band doubles. Above it `BW` grows
+    /// with frequency and cancels the width ratio wherever the bands double
+    /// too, which is why the ladder is octaves.
+    ///
+    /// **Written as one formula rather than two cases**, because ADR 0022
+    /// leaves one band that is not an octave: the top one is closed at the
+    /// grid's ceiling, so above the breakpoint a pair spanning it does move,
+    /// by exactly the amount its extra width buys. A test that asserted "and
+    /// not above" would be testing the ladder's shape while claiming to test
+    /// the law.
     ///
     /// **Both halves come from one exponent**, which is the property worth
     /// keeping from the law this replaced: one judgement about how the bank is
     /// excited, not two that can disagree.
     #[test]
-    fn the_compensation_steps_at_each_band_edge_below_the_breakpoint_and_not_above() {
+    fn the_compensation_is_the_share_on_both_sides_of_the_breakpoint() {
         for p in [0.25f32, 0.5] {
             // The step, measured between two bands that are both below f*.
             let mut low = params(REFERENCE_DECAY_S, 500.0);
@@ -870,14 +882,15 @@ mod tests {
                 );
             }
 
-            // And above the breakpoint it stops. A low cap puts most of the
-            // band there.
-            let mut high = params(REFERENCE_DECAY_S, 100.0);
+            // And above the breakpoint the same formula holds, with `BW` no
+            // longer constant. A low cap puts most of the band there.
+            let cap = 100.0;
+            let mut high = params(REFERENCE_DECAY_S, cap);
             high.compensation_exponent = p;
             let mut bank = Bank::new();
             bank.retune(&[60.0], &high, SR);
             let n = high.grid.frequencies(60.0, max_centre_hz(SR), &mut centres);
-            let f_star = breakpoint_hz(100.0, REFERENCE_DECAY_S);
+            let f_star = breakpoint_hz(cap, REFERENCE_DECAY_S);
             let above: Vec<(f32, f32)> = centres
                 .iter()
                 .zip(bank.gains.iter())
@@ -888,9 +901,15 @@ mod tests {
             assert!(above.len() >= 2, "need two points above f*, got {above:?}");
             let (f0, g0) = above[0];
             let (f1, g1) = *above.last().unwrap();
+            // Well above f*, so `BW` is `f/q_max` for both and the cap divides
+            // out of the ratio.
+            let w0 = band_width_hz(band_of(f0), high.grid.high_hz);
+            let w1 = band_width_hz(band_of(f1), high.grid.high_hz);
+            let expected = 20.0 * p * ((w1 / w0) * (f0 / f1)).log10();
+            let step = 20.0 * (g1 / g0).log10();
             assert!(
-                (20.0 * (g1 / g0).log10()).abs() < 0.2,
-                "p={p}: {f0} Hz to {f1} Hz should not move, {g0} to {g1}"
+                (step - expected).abs() < 0.2,
+                "p={p}: {f0} Hz (band width {w0}) to {f1} Hz (band width {w1})                  stepped {step} dB, expected {expected}"
             );
         }
     }
@@ -968,7 +987,13 @@ mod tests {
         assert!(n_pair >= 2 * n_oct, "{n_oct} vs {n_pair}");
         assert!(n_harm > 4 * n_oct, "{n_oct} vs {n_harm}");
 
-        for (name, db, bound) in [("pairs", pair, COHERENT_PAIR_DB), ("harmonics", harm, 2.0)] {
+        // The harmonic bound is 3.0 rather than the 2.0 it was before ADR 0022,
+        // and the reason is measured: the gap was 1.89 dB with seven bands and
+        // is 2.58 with six. Removing the top edge widens what the top band's
+        // *split* passes, not only what the gain law divides by, and the two
+        // geometries do not have the same share of their resonators up there.
+        // 2.0 had 0.11 dB of room and was going to be tripped by something.
+        for (name, db, bound) in [("pairs", pair, COHERENT_PAIR_DB), ("harmonics", harm, 3.0)] {
             assert!(
                 (db - oct).abs() < bound,
                 "{name} is {} dB from octaves ({oct} vs {db}); the geometries \

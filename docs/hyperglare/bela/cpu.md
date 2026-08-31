@@ -35,9 +35,8 @@ Least squares over the five rows below capacity:
  CPU% = 5.8 + 0.222 × resonators        residual under 1.2 points
 ```
 
-- **5.8% is the fixed half**: the band split's twelve biquads, the exciter's
-  seven gates, the host, and everything else that does not scale with the
-  chord.
+- **5.8% is the fixed half**: the band split's biquads, the exciter's gates,
+  the host, and everything else that does not scale with the chord.
 - **0.222% each** is one normalised state-variable filter per sounding
   resonator, at 48 kHz.
 
@@ -48,10 +47,16 @@ matters.
 
 ## What this settles, and what it does not
 
-**Settled: the band count is affordable.** Seven bands are twelve biquads and
-they are inside the 5.8% fixed cost, against 0.222% for each of the resonators
-they feed. ADR 0016 left the count open partly on CPU grounds; on this board
-that is not the binding constraint.
+**Settled: the band count is affordable.** The sweep ran with seven bands,
+which is twelve biquads, and they were inside the 5.8% fixed cost against
+0.222% for each of the resonators they feed. ADR 0016 left the count open
+partly on CPU grounds; on this board that is not the binding constraint.
+
+**The band count has since gone to six** — ten biquads and six gates —
+[ADR 0022](../../decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
+Two biquads out of a fixed term that also carries the host is a small part of
+it, and it can only have gone down, so the 5.8% above is an upper bound for
+the current build rather than a measurement of it.
 
 **Settled: the ceiling is affordable.** Raising it from 5 kHz to 9 kHz adds
 four resonators and 0.6 points. ADR 0020's choice was made on sound, and

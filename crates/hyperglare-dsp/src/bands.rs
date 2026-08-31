@@ -62,29 +62,36 @@ use effectkit::filter::{Biquad, biquad_coeffs};
 /// bottom and top bands are open-ended, so a caller who widens the grid gets a
 /// wider band rather than a broken one.
 ///
-/// # The top edge is one too many
+/// # The ladder stops below the ceiling, on purpose
 ///
-/// **Known defect, measured and not yet fixed.** `4160.0` sits close enough to
-/// the default ceiling of 5 kHz that the band above it is 840 Hz wide against
-/// the 2080 below, and the gain law reads a narrower band as a smaller share:
+/// The rungs are octaves of 130 Hz and the grid's ceiling is a setting, so the
+/// two do not meet: at the default of 5 kHz the ladder's next rung would be
+/// 8320. Whichever rung it stops on, the top band is not an octave and the
+/// gain law reads its width as a share.
+///
+/// It used to stop at 4160, which left an 840 Hz band under a 5 kHz ceiling
+/// and a step of **-1.97 dB where every other edge is +1.51** — a reversal
+/// where the rest of the ladder rises. Stopping at 2080 leaves 2920 Hz and a
+/// step of +2.24 dB: still off the trend by 0.74 dB, and in the same direction
+/// as the rest of it.
 ///
 /// ```text
-///  edge      130     260     520    1040    2080    4160
-///  step   +0.00   +1.51   +1.51   +1.51   +1.51   -1.97   dB
+///  edge      130     260     520    1040    2080
+///  step   +0.00   +1.51   +1.51   +1.51   +2.24   dB
 /// ```
 ///
-/// Every edge steps up by `6.02·p` dB except the last, which steps down. With
-/// `4160.0` dropped the top band spans 2080 Hz to the ceiling and the last
-/// step is `+2.24` dB — still off the pattern, and in the direction the rest
-/// of the ladder goes.
+/// **The top band's split does not stop where the gain law says it does.** The
+/// law closes it at the grid's ceiling, because running it to Nyquist would
+/// make the gain depend on the sample rate; the split has no low-pass up there
+/// and passes everything above 2080 Hz. So the top band's resonators are
+/// excited by more than the width they are compensated for — by about seven
+/// times at 48 kHz, where the arrangement before this one was out by
+/// twenty-four. It is the same trade in the same direction, and smaller.
 ///
-/// Left in place because it changes how the effect sounds and
-/// [ADR 0020](../../../docs/decisions/0020-the-grids-ceiling-is-five-kilohertz.md)
-/// names both edges; see
-/// [ADR 0022](../../../docs/decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
+/// See [ADR 0022](../../../docs/decisions/0022-the-band-ladder-stops-at-two-kilohertz.md).
 ///
 /// [`BankParams`]: crate::bank::BankParams
-pub const EDGES: [f32; 6] = [130.0, 260.0, 520.0, 1040.0, 2080.0, 4160.0];
+pub const EDGES: [f32; 5] = [130.0, 260.0, 520.0, 1040.0, 2080.0];
 
 /// How many bands [`EDGES`] cuts the spectrum into.
 pub const BANDS: usize = EDGES.len() + 1;

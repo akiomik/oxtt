@@ -2,13 +2,22 @@
 
 ## Status
 
-Proposed.
+Accepted, on the arithmetic rather than on a preference.
 
-A defect fix rather than a preference, and it still changes how the effect
-sounds — the top band gains about 2.7 dB — so
-[ADR 0018](0018-hyperglare-is-judged-against-paired-recordings.md) applies and
-this wants a listen before it is accepted. The measurement below is arithmetic
-on the gain law, not a rendering.
+Judged by ear on all six sources — the five paired recordings
+[ADR 0018](0018-hyperglare-is-judged-against-paired-recordings.md) adjudicates
+from and `oxtt`'s drum loop — at `--color 1.0` and at the demo's 0.63, both
+loudness-matched. **The listener called it source-dependent and narrow**: the
+low chord loses a little and the top opens up, some sources are preferable the
+old way, and at the mix setting the chord sense is hard to tell apart at all.
+
+**So it is accepted for the reason it was proposed and not for a better one.**
+A ladder whose last step reverses is wrong wherever the material happens to
+land; a ladder that steps the same way throughout is the more general answer,
+and the listen says the price of the change is small either way.
+
+**One mechanism in it was found after the listen and is not what this ADR
+first described.** See "It is not only the gain law" below.
 
 ## Scope
 
@@ -169,12 +178,66 @@ sweep a listener judged, calling 5 kHz the best-natured of the set, and a
 band ladder is not a reason to reopen it. **The ladder serves the ceiling, not the
 other way round.**
 
+### It is not only the gain law
+
+This ADR was written about `band_width_hz`, which is what the gain law divides
+by. `EDGES` also builds the **split**, and the top band's split has no
+low-pass: it passes everything above its lower edge. So removing the 4160 edge
+does two things, and the second is the larger.
+
+**The resonators between 2080 and 4160 Hz used to be excited by a 2080 Hz
+slice and are now excited by everything above 2080 Hz** — about 22 kHz of it
+at 48 kHz. That is why the rendered difference is bigger than the
+compensation arithmetic predicts. Measured over the six sources at
+`--color 1.0`, per octave band, against a gain law that only asks for +0.74
+and +2.71 dB:
+
+```text
+                 63    125    250    500     1k     2k     4k     8k    16k
+ ice           +0.01  +0.01  +0.01  +0.01  +0.01  +0.05  +2.58  +3.76  +8.45
+ laser         -0.26  -0.26  -0.26  -0.26  -0.25  -0.24  +2.08  +3.78  +6.36
+ spoon         +0.01  +0.01  +0.01  +0.01  +0.02  -0.00  +1.73  +4.25  +1.52
+ swan          -0.74  -0.74  -0.74  -0.74  -0.74  -0.68  +0.99  +4.46  +4.07
+ duck          -1.13  -1.13  -1.13  -1.13  -1.13  -1.10  +0.78  +2.98  +3.31
+ oxtt          -0.97  -0.97  -0.97  -0.98  -0.98  -0.92  +1.19  +3.68  +6.22
+```
+
+Nothing below 2 kHz moves; the uniform negatives there are the loudness match
+taking back what the top gained. At `--color 0.63` the same columns are +0.3
+to +1.4 and +1.6 to +3.0.
+
+**This sits against [ADR 0016](0016-the-bank-is-excited-per-band.md)**, whose
+whole point is that a resonator draws on its own neighbourhood. A resonator at
+2500 Hz now hears up to Nyquist, which is a looser neighbourhood than it had.
+
+Two things make it acceptable rather than a reason to stop:
+
+- **The mismatch shrinks.** The gain law closes the top band at the grid's
+  ceiling — deliberately, so a render at 96 kHz matches one at 48 — while the
+  split runs it to Nyquist, so the two have never agreed. At 48 kHz the old
+  top band was excited by 24 times the width it was compensated for; the new
+  one by about seven. Same trade, same direction, three times smaller.
+- **It is what was listened to.** The renders judged above were made with the
+  change applied, so the listener's verdict covers this mechanism whether or
+  not the ADR had named it.
+
+**What it does not do is settle the split's own ceiling.** A low-pass on the
+top band would make excitation and compensation agree, at the cost of putting
+the sample rate or the grid's ceiling into `SplitCoeffs::new`, which is the
+dependency `bands.rs` documents itself as avoiding. Not decided here.
+
 ## Consequences
 
-- **Every render changes**, and by more than the step arithmetic suggests:
-  resonators between 2080 Hz and the ceiling move from a band 2080 or 840 Hz
-  wide to one 2920 Hz wide, which is `+0.74` dB for those that were in band 5
-  and `+2.71` dB for those that were in band 6.
+- **Every render changes.** The gain law's part is `+0.74` dB for resonators
+  that were in band 5 and `+2.71` dB for those in band 6, both from a band
+  2080 or 840 Hz wide becoming one of 2920. The rendered difference is larger
+  than that, for the reason in "It is not only the gain law" above.
+- **The geometries drift apart by 0.69 dB.** `Geometry::Harmonics` measured
+  1.89 dB from `Geometry::Octaves` with seven bands and 2.58 with six, because
+  the two do not have the same share of their resonators above 2080 Hz. The
+  level-matching contract still holds — choosing a geometry is still not
+  choosing a loudness — but its test bound moves from 2.0 dB to 3.0, and 2.0
+  had only 0.11 dB of room left.
 - **`BANDS` goes from seven to six**, so `Exciter::process` returns one fewer
   entry and the split runs one fewer pair of sections. Slightly cheaper, and
   not why this is being done.
