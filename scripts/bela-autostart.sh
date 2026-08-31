@@ -111,6 +111,12 @@ Description=${PACKAGE} (installed by scripts/bela-autostart.sh)
 # The daemon holds the audio hardware. One of the two runs, never both.
 Conflicts=bela_daemon.service
 After=network.target
+# Give up rather than restart forever. systemd's default window is 10s, which
+# a RestartSec of 5 never fills, so a command line that can never work — a
+# flag this host does not have, a MIDI port that is not there — would retry
+# until somebody noticed. Five tries at five seconds is 25s, inside 60.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -127,7 +133,37 @@ WantedBy=multi-user.target
 UNITFILE
   systemctl daemon-reload
   systemctl disable --now bela_daemon 2>/dev/null || true
-  systemctl enable --now ${UNIT}
-  sleep 2
-  systemctl is-active ${UNIT}
+  systemctl enable ${UNIT}
+  # Restart rather than \`enable --now\`: a unit that is already running does
+  # not pick up a command line that has just been rewritten, so installing
+  # over an install would leave the old arguments playing.
+  systemctl restart ${UNIT}
+  systemctl reset-failed ${UNIT} 2>/dev/null || true
 "
+
+# **Whether it stayed up, not whether it started.** A unit whose command line
+# cannot work starts, exits, and starts again, so an answer taken immediately
+# says `activating` for a service that will never run. This waits for it to
+# settle and reports a restart count, which is the difference.
+echo "bela-autostart: waiting for ${UNIT} to settle"
+for _ in $(seq 30); do
+  # shellcheck disable=SC2029
+  STATE=$(ssh "$HOST" "systemctl is-active ${UNIT} || true" 2>/dev/null | tr -d '\r')
+  # shellcheck disable=SC2029
+  RESTARTS=$(ssh "$HOST" "systemctl show ${UNIT} -p NRestarts --value" 2>/dev/null | tr -d '\r')
+  if [[ "$STATE" == active && "$RESTARTS" == 0 ]]; then
+    echo "bela-autostart: ${UNIT} is running"
+    exit 0
+  fi
+  if [[ "$STATE" == failed ]]; then
+    break
+  fi
+  sleep 1
+done
+
+echo "bela-autostart: ${UNIT} did not come up (state ${STATE:-unknown}, ${RESTARTS:-?} restarts)" >&2
+# shellcheck disable=SC2029
+ssh "$HOST" "journalctl -u ${UNIT} --no-pager --lines=15 -o cat" >&2 || true
+echo "bela-autostart: leaving it installed so the journal above stays readable; \
+scripts/bela-autostart.sh remove undoes it" >&2
+exit 1
