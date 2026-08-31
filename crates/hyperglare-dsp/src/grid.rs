@@ -10,13 +10,13 @@
 //! reach the band the effect is *for*. Colour bass is a bass effect, so the
 //! fundamental is around 60 Hz, and the glare lives up around 8.5 kHz. That is
 //! a ratio of about 142, and an unstretched harmonic series reaches it at
-//! partial 142. Four voices of that is around 570 filters, not the 160 a
+//! partial 142. Five voices of that is around 710 filters, not the 160 a
 //! stretched series would need — see [`MAX_HARMONICS`] for why the stretch
 //! that would buy the smaller number is out of range here.
 //!
 //! Replicating each note by octaves instead reaches the same band in seven
-//! steps, because the steps are geometric rather than arithmetic. Four voices
-//! is 28 filters, and the resulting set — every note of the chord, in every
+//! steps, because the steps are geometric rather than arithmetic. Five voices
+//! is 35 filters, and the resulting set — every note of the chord, in every
 //! octave — is closer to what the effect is actually named for than one bell's
 //! overtones would be.
 //!
@@ -504,7 +504,7 @@ mod tests {
 
     /// The arithmetic that disqualified a harmonic series as the default: it
     /// needs about forty partials to reach the same ceiling, which is where
-    /// "four voices, 160 filters" comes from.
+    /// "a voice, 160 filters" comes from.
     #[test]
     fn a_harmonic_grid_needs_dozens_of_partials_for_the_same_band() {
         let grid = Grid {

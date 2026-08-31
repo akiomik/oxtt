@@ -16,11 +16,12 @@
 use core::fmt;
 
 use bela::{
-    BelaApplication, BlockContext, CleanupContext, PinMode, RenderContext, ResolvedSettings,
-    SetupContext, ThreadInfo,
+    BelaApplication, BlockContext, CleanupContext, MidiInput, MidiMessage, PinMode, RenderContext,
+    ResolvedSettings, SetupContext, ThreadInfo,
 };
 
 use effectkit::metering::{ClipIndicator, InputMeter};
+use hyperglare_dsp::note::note_hz;
 use hyperglare_dsp::processor::{HyperglareParams, HyperglareProcessor};
 
 /// How long the clip indicator stays lit after the last clipped frame.
@@ -64,7 +65,10 @@ pub struct HyperglareRenderState {
 
 /// The hyperglare application: a processor prototype, the chord it is tuned
 /// to, and the counters the run reports at the end.
-#[derive(Debug, Clone)]
+///
+/// Not `Clone` since it may own a MIDI port, which is one device and one
+/// reader — copying it would be two readers of one ring.
+#[derive(Debug)]
 pub struct HyperglareApplication {
     processor: Processor,
     params: HyperglareParams,
@@ -78,6 +82,13 @@ pub struct HyperglareApplication {
     /// 21 µs event visible on it. `None` is a run with nothing wired.
     clip_led: Option<(usize, ClipIndicator)>,
     report_on_exit: bool,
+    /// The MIDI port keys arrive on, if the run asked for one.
+    ///
+    /// **`None` and a chord in `notes_hz` are the two ways to have notes, and
+    /// they are alternatives** (ADR 0021). A run given a port starts with no
+    /// keys down, so it is silent at `--color 1.0` until one goes down — which
+    /// is correct and looks like a fault, so it is worth saying here.
+    midi: Option<MidiInput>,
 }
 
 impl HyperglareApplication {
@@ -89,6 +100,7 @@ impl HyperglareApplication {
         notes_hz: Vec<f32>,
         clip_led: Option<usize>,
         report_on_exit: bool,
+        midi: Option<MidiInput>,
     ) -> Self {
         Self {
             processor,
@@ -96,6 +108,46 @@ impl HyperglareApplication {
             notes_hz,
             clip_led: clip_led.map(|channel| (channel, ClipIndicator::new(CLIP_HOLD_FRAMES))),
             report_on_exit,
+            midi,
+        }
+    }
+
+    /// Drains the block's MIDI into the render states' processors.
+    ///
+    /// **Into the states and not into the prototype.** Each render thread got
+    /// a copy of the processor at setup, and the copies are what play; the
+    /// prototype has never seen a sample. Pressing a key on it as well would
+    /// not be redundant, it would be wrong — the allocator chooses by how much
+    /// a voice is holding, and a processor that has processed nothing holds
+    /// nothing, so it would answer with a different voice and the two would
+    /// drift apart.
+    ///
+    /// Called from `render_pre`, which `bela`'s `MidiInput` documents as the
+    /// place: the ring has one reader, and `render` holds the application as
+    /// `&self` on every render thread at once.
+    ///
+    /// **Every channel, and velocity ignored.** There is one source and one
+    /// instrument here; filtering and touch are additive and neither reaches
+    /// the voice table. A note on at velocity zero is a release, which is what
+    /// most keyboards send instead of a note off.
+    fn read_midi(&mut self, states: &mut [HyperglareRenderState]) {
+        let Some(midi) = self.midi.as_mut() else {
+            return;
+        };
+        while let Some(message) = midi.read() {
+            let (note, down) = match message {
+                MidiMessage::NoteOn { note, velocity, .. } => (note, velocity.get() > 0),
+                MidiMessage::NoteOff { note, .. } => (note, false),
+                _ => continue,
+            };
+            let hz = note_hz(note.get());
+            for state in states.iter_mut() {
+                if down {
+                    state.processor.note_on(hz);
+                } else {
+                    state.processor.note_off(hz);
+                }
+            }
         }
     }
 
@@ -108,8 +160,10 @@ impl HyperglareApplication {
     ) -> RunDiagnostics {
         RunDiagnostics {
             input: input_meter(states),
-            active_resonators: self.processor.active(),
-            held_voices: self.processor.held_voices(),
+            // From the states rather than from the prototype: the copies are
+            // what played, and MIDI only ever reached them.
+            active_resonators: states.first().map_or(0, |state| state.processor.active()),
+            held_voices: states.first().map_or(0, |state| state.processor.held_voices()),
             underruns: context.underrun_count(),
             audio_frames_elapsed: context.audio_frames_elapsed(),
             cpu_percentage: context.cpu_usage().map(|usage| usage.percentage()),
@@ -187,6 +241,8 @@ impl BelaApplication for HyperglareApplication {
     /// Drives the clip indicator, which is the only thing that happens per
     /// block rather than per frame.
     fn render_pre(&mut self, states: &mut [HyperglareRenderState], context: &mut BlockContext) {
+        self.read_midi(states);
+
         if let Some((channel, indicator)) = self.clip_led.as_mut() {
             let clipped = input_meter(states).clipped_frames();
             let frames = u64::try_from(context.audio_frames()).unwrap_or(u64::MAX);

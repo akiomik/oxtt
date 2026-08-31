@@ -32,32 +32,46 @@ filters. It is a control-rate operation: everything it computes reaches the
 per-sample path through a `tan` and a `powf`, and doing that per sample would
 cost two orders of magnitude more than the filtering itself.
 
-- **Retuning preserves filter state.** A chord may change under a ringing bank
-  without a click. What that state *means* changes with the coefficients, so a
-  large retune glides rather than jumps — deliberately: a jump is a click and a
-  glide is a portamento, and only one of those can be tuned into something
-  musical afterwards.
+- **A voice owns a block of slots and keeps it.** Voice `k` has the resonator
+  slots `[k·stride, (k+1)·stride)`, where the stride is the most grid points
+  any one note can produce. **No note can be moved by another note arriving or
+  leaving**, which is what makes a keyboard playable: before this the slots
+  were packed in the order the caller listed its notes, so releasing the middle
+  note of a chord gave the released note's ringing state to the note above it
+  and cut that note's own tail.
+- **Retuning preserves the filter state of a voice whose note did not move.**
+  A decay or a tilt may change under a ringing bank without a click.
+- **A voice given a different note starts from rest.** One rule for a chord
+  changing and for a note stealing a voice: both write new coefficients over
+  state that meant another frequency, and playing that state at the new pitch
+  is a note nobody pressed.
 - **Filters entering use start from rest.** A resonator that was not sounding
-  before a retune begins at zero rather than at whatever a previous chord left
-  in it.
+  before begins at zero rather than at whatever a previous note left in it.
+  A stolen voice is reset, which is what keeps this true of an allocator.
 - **`reset_state` clears the tails and keeps the tuning.** It is the only way
   to silence a ringing bank. A caller that wants the tails to survive a change
   simply does not call it.
-- **A non-positive or non-finite note is skipped.** A caller need not compact
-  its own voice table.
-- **Capacity is a bound, not a hint.** A chord that does not fit loses its
-  *last* voices, in the order the caller listed them; it does not thin all of
-  them evenly and does not wrap. An allocator that cares which notes survive
-  orders the table itself.
+- **A non-positive or non-finite note is skipped**, and reads back as zero.
+- **Releasing a note stops its excitation and nothing else.** The voice keeps
+  its coefficients and its state and decays at its own `T60`. The decay is the
+  release; nothing in the wet path gains a time constant (section 5, ADR 0017).
+- **Capacity is a bound, in whole voices.** The table is `min(voices,
+  capacity / stride)` blocks, so a chord that does not fit loses its *last*
+  voices in the order the caller listed them. A geometry too dense for even one
+  block gets one block and truncates inside it. An allocator that cares which
+  notes survive orders the table itself.
 
   **Truncation is not charged twice.** The divisor in section 5 is capped at
   the capacity, so a bank too small for its settings does not also divide by
   resonators it does not have. What it still costs is whatever the gain law's
   own spread across the band says: the resonators that survive are the lowest,
   and since the share is measured against the band the lowest are the
-  quietest. What a caller loses is the top of its chord, which is a thing it
-  can see in `active()` and act on; a level drop it could only hear would tell
-  it nothing about what to change.
+  quietest.
+
+  **`active()` is the cost and `held_voices()` is the chord.** The bank runs
+  its blocks whether or not the voices have notes — that is what keeps the load
+  flat when a chord arrives — so what a caller reads to see truncation is the
+  voice count, not the resonator count.
 
 ## 2.0 Excitation is per band
 
@@ -159,6 +173,12 @@ are made not to:
   does not change how loud the bank can get. It is the *configured* count, not
   the number of notes held: dividing by the live count would duck a sustaining
   chord the moment another note joined it. A chord is louder than one note.
+
+  **The voice count is also the polyphony**, since each voice owns a block of
+  slots whether or not it has a note (section 2). So a key lifting does not
+  reach the divisor at all — a released voice keeps its block — and neither
+  does a key pressing. **Nothing a player does to a keyboard can duck this
+  bank.**
 - **The geometry's density divides out the same way**, measured at a fixed
   reference note. Uncompensated, a harmonic series runs about twenty times the
   resonators an octave grid does and is some 13 dB louder — and a comparison

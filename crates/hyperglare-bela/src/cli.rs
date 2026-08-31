@@ -88,6 +88,15 @@ pub struct BelaCli {
     /// it is only visible after the run, in `--report-on-exit`.
     #[arg(long, value_name = "CHANNEL")]
     pub clip_led: Option<usize>,
+
+    /// ALSA MIDI port to take the chord from, as `amidi -l` names it plus a
+    /// subdevice — `hw:0,0,0`.
+    ///
+    /// **Alternative to `--notes`, not a layer over it.** Given a port the run
+    /// starts with nothing held, so it is silent at `--color 1.0` until a key
+    /// goes down. Without one the chord is fixed for the run.
+    #[arg(long, value_name = "PORT")]
+    pub midi_port: Option<String>,
 }
 
 impl From<&BelaCli> for RunOptions {
@@ -99,6 +108,7 @@ impl From<&BelaCli> for RunOptions {
             adc_gain_db: cli.adc_gain_db,
             headphone_level_db: cli.headphone_level_db,
             clip_led: cli.clip_led,
+            midi_port: cli.midi_port.clone(),
             report_on_exit: cli.report_on_exit,
         }
     }

@@ -60,7 +60,10 @@ pub enum HostError {
 }
 
 /// How a run was configured, for the caller to choose and the host to apply.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Not `Copy` since a MIDI port is named by a `String`; the type is built once
+/// per run and read, so nothing wanted a bitwise copy of it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunOptions {
     /// Audio frames per block.
     pub period_size: NonZeroU32,
@@ -81,6 +84,13 @@ pub struct RunOptions {
     /// line out level does not move it ([bela-rs#123](https://github.com/akiomik/bela-rs/issues/123)).
     /// `None` leaves libbela's default of -6 dB.
     pub headphone_level_db: Option<f32>,
+    /// ALSA port keys arrive on, if the run is played rather than fixed.
+    ///
+    /// **A port and `--notes` are alternatives** (ADR 0021): given one, the
+    /// run starts with no keys down and is silent at `--color 1.0` until one
+    /// goes down. `bela::midi_ports` lists what the board has, and the names
+    /// carry the subdevice — `hw:0,0,0` where `amidi -l` prints `hw:0,0`.
+    pub midi_port: Option<String>,
     /// Digital channel an LED is wired to, lit while the input clips.
     pub clip_led: Option<usize>,
     /// Print [`RunDiagnostics`] after a normal exit.
@@ -96,6 +106,7 @@ impl Default for RunOptions {
             adc_gain_db: None,
             headphone_level_db: None,
             clip_led: None,
+            midi_port: None,
             report_on_exit: false,
         }
     }
@@ -157,12 +168,22 @@ mod device {
         let mut processor = Processor::new(params, sample_rate);
         processor.apply_params(&params, &notes_hz);
 
+        // Before the audio system, so a port that will not open ends the
+        // program with its own message rather than failing an initialisation
+        // the process cannot then retry (bela-rs#112, the same reason
+        // `validate_settings` exists).
+        let midi = match options.midi_port.as_deref() {
+            Some(port) => Some(bela::MidiInput::open(port)?),
+            None => None,
+        };
+
         let application = HyperglareApplication::new(
             processor,
             params,
             notes_hz,
             options.clip_led,
             options.report_on_exit,
+            midi,
         );
 
         let mut bela = Bela::new(application, &settings(options))?;

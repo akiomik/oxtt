@@ -120,7 +120,10 @@ source's reach is the effect's reach — is audible on the board.
   property of the board's converters, so it applies here — but this effect's
   own contribution, with a bank of high-Q resonators ringing, has not been
   measured.
-- **Anything with a control surface or MIDI.** Neither exists.
+- **MIDI.** The intake exists (`--midi-port`, ADR 0021) and has not been run
+  on the board. Nothing about a key lift, a stolen voice or a chord changing
+  under a ringing bank has been heard.
+- **Anything with a control surface.** It does not exist.
 - **Long runs.** The longest here was 40 seconds.
 - **Chord changes while running.** `apply_params` retunes without a click by
   design, and on the board the chord is fixed for the run, so the path has

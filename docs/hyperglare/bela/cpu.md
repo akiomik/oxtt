@@ -52,8 +52,10 @@ the spread is taken.
 
 - **7.9% is the fixed half**: the band split's biquads, the exciter's gates,
   the host, and everything else that does not scale with the chord.
-- **0.15% each** is one normalised state-variable filter per sounding
-  resonator, at 48 kHz.
+- **0.15% each** is one normalised state-variable filter per resonator slot
+  the bank runs, at 48 kHz. **Slots, not sounding notes**: since ADR 0021 a
+  voice reserves its block whether or not a key is down, so the figure follows
+  `voices · stride` and the load does not step when a chord arrives.
 
 Extrapolated, one core runs out at about 600 resonators, well past the bank's
 capacity of 256.
