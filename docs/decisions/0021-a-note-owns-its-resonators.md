@@ -2,15 +2,23 @@
 
 ## Status
 
-Proposed.
+Accepted, **on the structure rather than on a listen**.
 
-Nothing here has been heard. The behaviour it changes — a chord changing
-under a bank that is already ringing — is the one thing
-[`docs/hyperglare/bela/audio-verification.md`](../hyperglare/bela/audio-verification.md)
-lists as never having run on hardware, and it is not reachable from the
-command line either, because the command line's chord is fixed for the run.
-So this ADR is argued from the code and from one measurement, and it wants a
-listen before it is accepted.
+Implemented in `ResonatorBank`, `HyperglareProcessor` and `hyperglare-bela`.
+Played by hand on a Bela Gem Stereo from a keyboard on the board's own USB
+port, with nothing wrong with it in use, and its control path measured there:
+a played run starts with no chord, the polyphony is the voice table, releases
+clear it, and forty-eight on-off pairs sent with no gap between them left every
+key up and nothing stuck. `docs/hyperglare/bela/audio-verification.md` has the
+figures.
+
+**What has not been heard is what a key lift and a stolen voice sound like**,
+and it is accepted without them for a reason rather than by omission. Both are
+measured offline sample for sample; the tail is unhearable at the default
+decay, where a released voice is 60 dB down 250 ms later; and a stolen voice
+needs a full table to happen at all. [ADR 0018](0018-hyperglare-is-judged-against-paired-recordings.md)
+asks a **sound** change for paired evidence, and the only sound change here is
+the voice count's default, which the decision argues from that same material.
 
 **The title overstates by one case, and the decision says which.** A note owns
 its resonators until the voice table is full; past that it is stolen, and
