@@ -155,9 +155,13 @@ reserving the blocks buys.
   own contribution, with a bank of high-Q resonators ringing, has not been
   measured.
 - **What MIDI sounds like.** The control path is verified above; the audio is
-  not. No capture was taken, because the measuring chain currently carries a
-  ground loop — a property of the rig rather than of the effect, and the reason
-  the sections above could be measured and this one could not.
+  not, and on this rig **the keys and the recording exclude each other**.
+  Sending keys puts the board on the same machine as the capture interface, and
+  the audio cable then closes a loop between three devices that are already
+  bonded to each other. Neither device raises it alone — the sections above
+  were captured through this same interface — and it is a property of the
+  arrangement rather than of the mains, so the machine's power supply does not
+  come into it.
 
   A key lift is meant to leave the voice ringing down at its own decay and a
   stolen voice is meant to start from rest. Both are measured offline
