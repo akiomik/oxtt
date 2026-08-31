@@ -261,10 +261,22 @@ impl<const N: usize> HyperglareProcessor<N> {
         }
     }
 
-    /// How many resonators are sounding.
+    /// How many resonator slots the bank runs.
+    ///
+    /// **The cost, not the chord.** Since ADR 0021 the bank reserves a block
+    /// of slots per voice whether or not the voice has a note, so this is a
+    /// property of the settings and does not move when a key does — which is
+    /// what keeps the load flat. [`held_voices`](Self::held_voices) is how
+    /// much of the chord is down.
     #[must_use]
     pub const fn active(&self) -> usize {
         self.bank.active()
+    }
+
+    /// How many voices are holding a note.
+    #[must_use]
+    pub fn held_voices(&self) -> usize {
+        self.bank.held_voices()
     }
 
     /// Silences the tails and the gate, keeping the tuning.
@@ -628,7 +640,7 @@ mod tests {
             let x = tone(i, 55.0) * 0.5;
             processor.process_frame(x, x);
         }
-        let loud = processor.active();
+        let loud = processor.held_voices();
 
         processor.apply_params(&params, &small);
         // Silence has to actually arrive before the rest of this means
@@ -653,7 +665,11 @@ mod tests {
 
         // Back to the chord that was ringing, into an input that is not.
         processor.apply_params(&params, &big);
-        assert_eq!(processor.active(), loud, "the chord did not grow back");
+        assert_eq!(
+            processor.held_voices(),
+            loud,
+            "the chord did not grow back"
+        );
 
         for i in 0..(SR as usize) {
             let (left, right) = processor.process_frame(0.0, 0.0);

@@ -326,16 +326,122 @@ pub struct ResonatorBank<const N: usize> {
     filters: [Svf; N],
     coeffs: [SvfCoeffs; N],
     gains: [f32; N],
-    /// Which band each resonator draws its excitation from.
+    /// Which band each resonator draws its excitation from, or [`NO_BAND`] if
+    /// it draws on nothing.
     ///
-    /// A `u8` rather than a `usize` because there are five of them and this
+    /// A `u8` rather than a `usize` because there are six of them and this
     /// array is `N` long — the bank's largest use is a harmonic series with
     /// hundreds of resonators, and the index is a label rather than an
     /// address.
+    ///
+    /// **[`NO_BAND`] is how a released voice goes on ringing.** The per-sample
+    /// gather already reads this array and already answers zero for an index
+    /// no band has, so silencing a voice's excitation costs nothing it was not
+    /// already doing — and the resonator keeps its coefficients and its state,
+    /// so it decays at its own `T60` rather than stopping. ADR 0021.
     bands: [u8; N],
+    /// The fundamental each voice is tuned to, or zero for a voice with no
+    /// note. Only the first [`voices`](Self::voices) entries are read.
+    voice_hz: [f32; N],
+    /// Whether each voice's key is down. A voice that is not held keeps
+    /// everything but its excitation.
+    voice_held: [bool; N],
+    /// When each voice was last given a note, for choosing which held voice to
+    /// take when every one of them is. Monotone, so only the order matters.
+    voice_age: [u32; N],
+    /// Stamped into `voice_age` and then advanced.
+    age: u32,
+    /// Resonator slots each voice owns. Voice `k` has `[k·stride, (k+1)·stride)`.
+    stride: usize,
+    voices: usize,
     active: usize,
     voice_norm: f32,
 }
+
+/// The gain law's terms, derived once per retune rather than per resonator.
+///
+/// Every field is a function of the settings and the sample rate, so this is
+/// the part of a retune that does not depend on which note is being tuned —
+/// and under a voice table one note is retuned at a time, so it has to be
+/// separable or it is paid again for every key press.
+struct Law {
+    sample_rate: f32,
+    /// Not `sample_rate / 2.0`. The filter clamps its own centre frequency
+    /// below Nyquist, and a grid point in the gap would be silently folded
+    /// onto the clamp — several resonators piled on one frequency, which is
+    /// exactly what the grid skips points to avoid. Asking the filter where
+    /// its ceiling is keeps the grid's promise instead of half-keeping it.
+    nyquist: f32,
+    t60: f32,
+    q_max: f32,
+    bw_floor: f32,
+    share_ref: f32,
+    makeup: f32,
+    pivot_hz: f32,
+}
+
+impl Law {
+    fn new(params: &BankParams, sample_rate: f32) -> Self {
+        let t60 = params.decay_t60_s.max(MIN_DECAY_S);
+        let q_max = params.q_max.max(MIN_Q_MAX);
+        let bw_ref = LN_1000 / (PI * REFERENCE_DECAY_S);
+        Self {
+            sample_rate,
+            nyquist: max_centre_hz(sample_rate),
+            t60,
+            q_max,
+            bw_floor: LN_1000 / (PI * t60),
+            share_ref: bw_ref / REFERENCE_BAND_HZ,
+            makeup: share_makeup(),
+            pivot_hz: (params.grid.low_hz * params.grid.high_hz).sqrt(),
+        }
+    }
+
+    /// The Q a resonator at `hz` is built for, capped.
+    fn q_at(&self, hz: f32) -> f32 {
+        (self.t60 * PI * hz / LN_1000).min(self.q_max)
+    }
+
+    /// The gain a resonator at `hz` in band `index` is given.
+    fn gain_at(&self, hz: f32, index: usize, params: &BankParams) -> f32 {
+        // `BW` is continuous across the breakpoint because it is a max of the
+        // two branches, so this needs no case split.
+        let bw = self.bw_floor.max(hz / self.q_max);
+        // Measured against the band it draws on rather than in hertz. See the
+        // module documentation: since ADR 0016 the excitation a resonator sees
+        // is broadband only *within a band*, so the share it collects is
+        // `BW / W_b` rather than `BW`.
+        let share = bw / band_width_hz(index, params.grid.high_hz);
+        let compensation = (share / self.share_ref).powf(-params.compensation_exponent);
+        self.makeup * tilt_gain(hz, self.pivot_hz, params.tilt) * compensation
+    }
+}
+
+/// What the summed bank is divided by, from the settings alone.
+///
+/// Resonators are mutually incoherent, so the sum grows as the square root of
+/// their number: divide by the square root of how many the settings ask for,
+/// and neither the voice count nor the geometry is also a volume control.
+///
+/// Capped at the capacity, because a bank that truncates does not have the
+/// resonators the settings asked for — it has `capacity` of them — and
+/// dividing by a number that is not there would make a bank quiet for no
+/// reason a listener could act on. **Every term is a property of the settings,
+/// so this stays free of the live chord and cannot duck**: a key lifting does
+/// not reach it, and neither does a key pressing.
+fn voice_norm(params: &BankParams, nyquist: f32, capacity: usize) -> f32 {
+    let configured = params.voices.max(1);
+    let density = params.grid.count(REFERENCE_NOTE_HZ, nyquist).max(1);
+    let asked_for = configured.saturating_mul(density).min(capacity).max(1);
+    let asked_for = f32::from(u16::try_from(asked_for).unwrap_or(u16::MAX));
+    1.0 / asked_for.sqrt()
+}
+
+/// A band index no band has, for a resonator that is not being excited.
+///
+/// The gather in [`ResonatorBank::process`] reads the band array with `get`
+/// and answers zero when it misses, so this is a value rather than a branch.
+const NO_BAND: u8 = u8::MAX;
 
 impl<const N: usize> Default for ResonatorBank<N> {
     fn default() -> Self {
@@ -351,10 +457,213 @@ impl<const N: usize> ResonatorBank<N> {
             filters: [Svf::new(); N],
             coeffs: [idle_coeffs(); N],
             gains: [0.0; N],
-            bands: [0; N],
+            bands: [NO_BAND; N],
+            voice_hz: [0.0; N],
+            voice_held: [false; N],
+            voice_age: [0; N],
+            age: 0,
+            stride: 1,
+            voices: 0,
             active: 0,
             voice_norm: 1.0,
         }
+    }
+
+    /// Resonator slots each voice owns.
+    ///
+    /// [`Grid::max_count`] for the settings in force: the most points any one
+    /// note can produce, so no note overruns its own block.
+    #[must_use]
+    pub const fn stride(&self) -> usize {
+        self.stride
+    }
+
+    /// Voices the table has room for.
+    ///
+    /// `BankParams::voices` unless the capacity cannot hold that many blocks,
+    /// in which case it is what fits. **This is the polyphony**: a note
+    /// arriving when every voice is taken steals one.
+    #[must_use]
+    pub const fn voices(&self) -> usize {
+        self.voices
+    }
+
+    /// How many voices are holding a note.
+    ///
+    /// **Not [`active`](Self::active), and the difference is the point of a
+    /// voice table**: `active` is what the bank costs and does not move when a
+    /// key does, while this is how much of the chord is down. A caller that
+    /// used to read `active` for the size of the chord wants this one.
+    ///
+    /// A released voice is not counted even while it is still ringing, because
+    /// the question this answers is what the player is holding.
+    #[must_use]
+    pub fn held_voices(&self) -> usize {
+        (0..self.voices).filter(|voice| self.is_held(*voice)).count()
+    }
+
+    /// The note a voice is tuned to, or zero if it has none.
+    #[must_use]
+    pub fn voice_hz(&self, voice: usize) -> f32 {
+        self.voice_hz.get(voice).copied().unwrap_or(0.0)
+    }
+
+    /// Whether a voice's key is down.
+    ///
+    /// A voice that is not held may still be sounding: releasing it stops its
+    /// excitation and leaves it to decay. [`voice_energy`](Self::voice_energy)
+    /// is what says whether it has finished.
+    #[must_use]
+    pub fn is_held(&self, voice: usize) -> bool {
+        self.voice_held.get(voice).copied().unwrap_or(false)
+    }
+
+    /// How much a voice is holding, as the energy a listener would hear.
+    ///
+    /// ```text
+    ///  Σᵢ  (gainᵢ · kᵢ)² · (ic1eqᵢ² + ic2eqᵢ²)      over the voice's block
+    /// ```
+    ///
+    /// **The weight is the whole path from state to output.** The bank sounds
+    /// `gain · process_bandpass`, and `process_bandpass` is `k` times the raw
+    /// branch the integrators hold, so a comparison that leaves `k` out is
+    /// comparing two different quantities. `k` is `1/q`, and `q` is capped, so
+    /// across the seven octaves one voice spans it runs about 25 dB — several
+    /// times what the gain itself moves. ADR 0021 has the measurement.
+    ///
+    /// **The two integrator states combine as a sum of squares** because they
+    /// are in quadrature at the centre frequency: either one alone crosses
+    /// zero every cycle, and a criterion that answered differently between two
+    /// reads of the same ringing voice would not be one. See
+    /// [`Svf::energy`](effectkit::filter::Svf::energy).
+    ///
+    /// **The block folds by summing** because it is one note's whole
+    /// contribution and energies add. A note spread thinly over seven
+    /// resonators is not quieter than one concentrated in two, and a maximum
+    /// would say it was.
+    ///
+    /// Squaring the envelope is what removes the square root, so this is three
+    /// multiplies and two adds per resonator and no transcendental.
+    #[must_use]
+    pub fn voice_energy(&self, voice: usize) -> f32 {
+        let start = voice.saturating_mul(self.stride);
+        let end = start.saturating_add(self.stride).min(N);
+        let mut total = 0.0f32;
+        for slot in start..end {
+            let (Some(filter), Some(coeffs), Some(gain)) = (
+                self.filters.get(slot),
+                self.coeffs.get(slot),
+                self.gains.get(slot),
+            ) else {
+                continue;
+            };
+            let weight = gain / coeffs.q();
+            total = (weight * weight).mul_add(filter.energy(), total);
+        }
+        total
+    }
+
+    /// Gives a note to a voice and returns which one it went to.
+    ///
+    /// A voice already tuned to this frequency takes it back, held or not, so
+    /// a repeated note rings its own resonators rather than spreading across
+    /// two. Otherwise [`allocate`](Self::allocate) chooses.
+    ///
+    /// The comparison is exact and that is not a hazard: a frequency reaches
+    /// here from `note_hz`, which is a function of a `u8`, so the same note is
+    /// the same bits. A caller synthesising frequencies some other way gets a
+    /// new voice per distinct value, which is the safe direction.
+    pub fn note_on(&mut self, note_hz: f32, params: &BankParams, sample_rate: f32) -> usize {
+        // The table is [`retune`](Self::retune)'s to build, because sizing it
+        // means asking the grid about every note there is and that is not a
+        // thing to do on a key press. A bank that has never been retuned has
+        // no table, so it gets an empty one here rather than silently dropping
+        // the note into voice zero of a table of one.
+        if self.voices == 0 {
+            self.retune(&[], params, sample_rate);
+        }
+        let voice = self.voice_at(note_hz).unwrap_or_else(|| self.allocate());
+        // Saturating rather than wrapping: an order that wrapped would answer
+        // backwards once, where one that saturates stops distinguishing voices
+        // pressed after the 4-billionth and keeps every earlier answer right.
+        self.age = self.age.saturating_add(1);
+        if let Some(slot) = self.voice_age.get_mut(voice) {
+            *slot = self.age;
+        }
+        let law = Law::new(params, sample_rate);
+        let mut scratch = [0.0f32; N];
+        self.assign(voice, note_hz, true, params, &law, &mut scratch);
+        voice
+    }
+
+    /// Lifts a note's key, and returns the voice it was on.
+    ///
+    /// **Stops the voice's excitation and changes nothing else.** Its
+    /// coefficients and its state stay, so it goes on ringing and decays at
+    /// the `T60` it was tuned to — the decay the effect already has *is* the
+    /// release, and nothing here adds a time constant of its own (ADR 0017).
+    ///
+    /// A note that is not held is not an error and does nothing.
+    pub fn note_off(&mut self, note_hz: f32) -> Option<usize> {
+        let voice = self.voice_at(note_hz).filter(|v| self.is_held(*v))?;
+        if let Some(slot) = self.voice_held.get_mut(voice) {
+            *slot = false;
+        }
+        let start = voice.saturating_mul(self.stride);
+        let end = start.saturating_add(self.stride).min(N);
+        if start < end {
+            for band in self.bands.get_mut(start..end).unwrap_or_default() {
+                *band = NO_BAND;
+            }
+        }
+        Some(voice)
+    }
+
+    /// The voice tuned to a frequency, if one is.
+    ///
+    /// Exact, and deliberately so: the question is whether this is the same
+    /// note, not whether two measurements agree. A tolerance here would let a
+    /// note steal a neighbour's resonators.
+    #[allow(clippy::float_cmp)]
+    fn voice_at(&self, note_hz: f32) -> Option<usize> {
+        (0..self.voices)
+            .find(|voice| self.voice_hz.get(*voice).is_some_and(|held| *held == note_hz))
+    }
+
+    /// Which voice the next note takes.
+    ///
+    /// **A released voice before a held one, and the quietest released voice
+    /// before a louder one.** Whatever is chosen has new coefficients written
+    /// over whatever it is still holding, so the job is to make that as small
+    /// as it can be made — and a voice released long enough ago is holding
+    /// almost nothing. Release *time* is not a usable stand-in for that: at
+    /// the default `T60` of 0.25 s a voice is 24 dB down after 100 ms and 36
+    /// after 150, so 12 dB of difference in what excited two voices reverses
+    /// their order, which is ordinary playing.
+    ///
+    /// With every voice held there is nothing quiet to take, so the oldest
+    /// goes — the one whose key went down first, which is what an instrument
+    /// out of voices does.
+    fn allocate(&self) -> usize {
+        let mut quietest: Option<(usize, f32)> = None;
+        let mut oldest: Option<(usize, u32)> = None;
+        for voice in 0..self.voices {
+            if self.is_held(voice) {
+                let age = self.voice_age.get(voice).copied().unwrap_or(0);
+                if oldest.is_none_or(|(_, seen)| age < seen) {
+                    oldest = Some((voice, age));
+                }
+            } else {
+                let energy = self.voice_energy(voice);
+                if quietest.is_none_or(|(_, seen)| energy < seen) {
+                    quietest = Some((voice, energy));
+                }
+            }
+        }
+        quietest
+            .map(|(voice, _)| voice)
+            .or_else(|| oldest.map(|(voice, _)| voice))
+            .unwrap_or(0)
     }
 
     /// How many resonators are currently sounding.
@@ -397,83 +706,35 @@ impl<const N: usize> ResonatorBank<N> {
     /// with the coefficients, so a large retune glides rather than jumps —
     /// deliberately, because a jump is a click and a glide is a portamento.
     pub fn retune(&mut self, notes_hz: &[f32], params: &BankParams, sample_rate: f32) {
-        // Not `sample_rate / 2.0`. The filter clamps its own centre frequency
-        // below Nyquist, and a grid point in the gap would be silently folded
-        // onto the clamp — several resonators piled on one frequency, which is
-        // exactly what the grid skips points to avoid. Asking the filter where
-        // its ceiling is keeps the grid's promise instead of half-keeping it.
-        let nyquist = max_centre_hz(sample_rate);
-        let t60 = params.decay_t60_s.max(MIN_DECAY_S);
-        let q_max = params.q_max.max(MIN_Q_MAX);
-        let bw_floor = LN_1000 / (PI * t60);
-        let bw_ref = LN_1000 / (PI * REFERENCE_DECAY_S);
-        let share_ref = bw_ref / REFERENCE_BAND_HZ;
-        let makeup = share_makeup();
-        let pivot_hz = (params.grid.low_hz * params.grid.high_hz).sqrt();
+        let law = Law::new(params, sample_rate);
 
-        let mut written = 0usize;
+        // The block size, and how many blocks fit. `max_count` is the most
+        // points any one note can produce, so no note overruns its own block;
+        // the capacity decides the rest, and a geometry too dense for even one
+        // block gets one anyway and truncates inside it.
+        self.stride = params.grid.max_count(law.nyquist).max(1);
+        self.voices = N.checked_div(self.stride).unwrap_or(1).clamp(1, params.voices.max(1));
+        self.active = self.voices.saturating_mul(self.stride).min(N);
+
         let mut scratch = [0.0f32; N];
-
-        for (index, note_hz) in notes_hz.iter().enumerate() {
-            let Some(room) = scratch.get_mut(written..) else {
-                break;
-            };
-            if room.is_empty() {
-                break;
-            }
-            let detuned = *note_hz * voice_drift_ratio(index, notes_hz.len(), params.drift_cents);
-            written = written.saturating_add(params.grid.frequencies(detuned, nyquist, room));
+        for voice in 0..self.voices {
+            let hz = notes_hz.get(voice).copied().unwrap_or(0.0);
+            self.assign(voice, hz, hz > 0.0, params, &law, &mut scratch);
         }
 
-        for (((hz, coeffs), gain), band) in scratch
-            .iter()
-            .zip(self.coeffs.iter_mut())
-            .zip(self.gains.iter_mut())
-            .zip(self.bands.iter_mut())
-            .take(written)
-        {
-            // The excitation this resonator draws on, decided here rather than
-            // per sample: a resonator's band is a property of its frequency,
-            // and its frequency is settled at retune.
-            let index = band_of(*hz);
-            *band = u8::try_from(index).unwrap_or(0);
-            let q = (t60 * PI * *hz / LN_1000).min(q_max);
-            *coeffs = SvfCoeffs::new(*hz, sample_rate, q);
-            // `BW` is continuous across the breakpoint because it is a max of
-            // the two branches, so this needs no case split.
-            let bw = bw_floor.max(*hz / q_max);
-            // Measured against the band it draws on rather than in hertz. See
-            // the module documentation: since ADR 0016 the excitation a
-            // resonator sees is broadband only *within a band*, so the share
-            // it collects is `BW / W_b` rather than `BW`.
-            let width = band_width_hz(index, params.grid.high_hz);
-            let share = bw / width;
-            let compensation = (share / share_ref).powf(-params.compensation_exponent);
-            *gain = makeup * tilt_gain(*hz, pivot_hz, params.tilt) * compensation;
-        }
-
-        // **Every filter above the chord is at rest, always.** A bank starts
+        // **Every filter above the table is at rest, always.** A bank starts
         // that way, `reset_state` restores it, and this loop is the only thing
-        // that preserves it through a retune — so a resonator coming into use
-        // on some later chord starts from silence rather than from a chord
-        // that stopped playing. The filters *below* `written` keep their
-        // state, which is what makes a chord change a portamento rather than a
-        // click.
-        //
-        // Maintained here and nowhere else, deliberately. A chord that grows
-        // only ever reaches slots this loop has already cleared, so it needs
-        // no reset of its own; the cost of the invariant living in one place
-        // is that deleting this loop hands the next chord the previous one's
-        // tails, with nothing else to catch it.
+        // that preserves it when the table shrinks — so a slot coming into use
+        // under a wider stride starts from silence rather than from a voice
+        // that stopped playing. Inside the table the same job belongs to
+        // `assign`, which clears the tail of each block it writes.
         //
         // The coefficients and the gains go with the state, which buys
-        // something smaller and still worth having. Nothing above the chord is
+        // something smaller and still worth having. Nothing above the table is
         // read — `process` and `process_split` both stop at `active` — so what
         // is left there cannot be heard; but this type derives `PartialEq`,
         // and would otherwise report two banks that sound identical as
-        // different because one of them used to be bigger. A shrinking retune
-        // is not hypothetical: a chord that loses a note does it, and so does
-        // dropping the sample rate far enough to shorten the grid.
+        // different because one of them used to be bigger.
         let idle = idle_coeffs();
         for (((coeffs, gain), filter), band) in self
             .coeffs
@@ -481,29 +742,131 @@ impl<const N: usize> ResonatorBank<N> {
             .zip(self.gains.iter_mut())
             .zip(self.filters.iter_mut())
             .zip(self.bands.iter_mut())
-            .skip(written)
+            .skip(self.active)
         {
             *coeffs = idle;
             *gain = 0.0;
-            *band = 0;
+            *band = NO_BAND;
             filter.reset_state();
         }
-        self.active = written;
-        // Resonators are mutually incoherent, so the sum grows as the square
-        // root of their number: divide by the square root of how many the
-        // settings ask for, and neither the voice count nor the geometry is
-        // also a volume control.
-        //
-        // Capped at the capacity, because a bank that truncates does not have
-        // the resonators the settings asked for — it has `N` of them — and
-        // dividing by a number that is not there would make a bank quiet for
-        // no reason a listener could act on. Every term is a property of the
-        // settings, so this stays free of the live chord and cannot duck.
-        let configured = params.voices.max(1);
-        let density = params.grid.count(REFERENCE_NOTE_HZ, nyquist).max(1);
-        let asked_for = configured.saturating_mul(density).min(N).max(1);
-        let asked_for = f32::from(u16::try_from(asked_for).unwrap_or(u16::MAX));
-        self.voice_norm = 1.0 / asked_for.sqrt();
+
+        self.voice_norm = voice_norm(params, law.nyquist, N);
+    }
+
+    /// Writes one voice's block: its tuning, its gains and its excitation.
+    ///
+    /// **A voice given a frequency it does not already hold starts from
+    /// rest.** That is one rule for two things that used to be two: a chord
+    /// changing under `retune`, and a note stealing a voice from another note.
+    /// Both write new coefficients over whatever state is there, and state
+    /// that meant one frequency means nothing at another — it would be heard
+    /// as a glide from a note nobody played. `contracts.md` §2 asks for the
+    /// same thing in the same words.
+    ///
+    /// A voice re-given the frequency it already has keeps its state, which is
+    /// what lets a decay or a tilt change without cutting the tails.
+    fn assign(
+        &mut self,
+        voice: usize,
+        note_hz: f32,
+        held: bool,
+        params: &BankParams,
+        law: &Law,
+        scratch: &mut [f32],
+    ) {
+        let start = voice.saturating_mul(self.stride);
+        let end = start.saturating_add(self.stride).min(N);
+        if start >= end {
+            return;
+        }
+
+        // Normalised here so that "no note" is one value rather than four. A
+        // `NaN` left as itself would compare unequal to itself and reset the
+        // voice on every retune, which is harmless and would still be wrong.
+        let note_hz = if note_hz.is_finite() && note_hz > 0.0 {
+            note_hz
+        } else {
+            0.0
+        };
+        let held = held && note_hz > 0.0;
+
+        // Exact: the question is whether this voice is being given a different
+        // note, and a tolerance would let a small retune keep state that means
+        // the old frequency.
+        #[allow(clippy::float_cmp)]
+        let changed = self.voice_hz.get(voice).copied().unwrap_or(0.0) != note_hz;
+        if let Some(slot) = self.voice_hz.get_mut(voice) {
+            *slot = note_hz;
+        }
+        if let Some(slot) = self.voice_held.get_mut(voice) {
+            *slot = held;
+        }
+        if changed {
+            for filter in self.filters.get_mut(start..end).unwrap_or_default() {
+                filter.reset_state();
+            }
+        }
+
+        // The spread is over the table's slots rather than over the notes
+        // sounding, which is what `BankParams::drift_cents` documents: adding
+        // or releasing a note must not retune the voices around it.
+        let written = if note_hz > 0.0 {
+            let detuned = note_hz * voice_drift_ratio(voice, self.voices, params.drift_cents);
+            // Clamped to the buffer as well as to the stride: a geometry
+            // denser than the whole bank leaves a block that is shorter than
+            // its own stride, and asking for the stride would get nothing at
+            // all rather than what fits.
+            let room = scratch
+                .get_mut(..self.stride.min(scratch.len()))
+                .unwrap_or_default();
+            params.grid.frequencies(detuned, law.nyquist, room)
+        } else {
+            0
+        };
+
+        let idle = idle_coeffs();
+        for offset in 0..self.stride {
+            let slot = start.saturating_add(offset);
+            if slot >= end {
+                break;
+            }
+            let hz = if offset < written {
+                scratch.get(offset).copied().unwrap_or(0.0)
+            } else {
+                0.0
+            };
+            if hz > 0.0 {
+                let index = band_of(hz);
+                if let Some(band) = self.bands.get_mut(slot) {
+                    *band = if held {
+                        u8::try_from(index).unwrap_or(0)
+                    } else {
+                        NO_BAND
+                    };
+                }
+                if let Some(coeffs) = self.coeffs.get_mut(slot) {
+                    *coeffs = SvfCoeffs::new(hz, law.sample_rate, law.q_at(hz));
+                }
+                if let Some(gain) = self.gains.get_mut(slot) {
+                    *gain = law.gain_at(hz, index, params);
+                }
+            } else {
+                // Past what this note produced. Not in use, and cleared so
+                // that a denser note arriving later finds it at rest.
+                if let Some(coeffs) = self.coeffs.get_mut(slot) {
+                    *coeffs = idle;
+                }
+                if let Some(gain) = self.gains.get_mut(slot) {
+                    *gain = 0.0;
+                }
+                if let Some(band) = self.bands.get_mut(slot) {
+                    *band = NO_BAND;
+                }
+                if let Some(filter) = self.filters.get_mut(slot) {
+                    filter.reset_state();
+                }
+            }
+        }
     }
 
     /// One sample through every sounding resonator, split across a stereo
@@ -621,6 +984,10 @@ fn db_to_amp(db: f32) -> f32 {
 // Test-only arithmetic over sample indices and decibels: the counts are small,
 // the values positive by construction, and a signal generator reads better
 // written out than folded into `mul_add`.
+//
+// `float_cmp` because the bank stores what it is given: a voice's frequency
+// comes back as the bits that went in, and a gain the law set to zero is zero.
+// Asserting "close to" there would pass on a bank that had rounded.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
@@ -628,6 +995,7 @@ fn db_to_amp(db: f32) -> f32 {
     clippy::arithmetic_side_effects,
     clippy::suboptimal_flops,
     clippy::indexing_slicing,
+    clippy::float_cmp,
     clippy::unwrap_used
 )]
 mod tests {
@@ -767,7 +1135,14 @@ mod tests {
             let n = settings
                 .grid
                 .frequencies(60.0, max_centre_hz(SR), &mut centres);
-            assert_eq!(n, bank.active());
+            // The chord is one note, so it occupies voice 0's block and the
+            // gains line up with the frequencies from slot zero. The block is
+            // the stride, not the count — everything past the note is idle.
+            assert!(n <= bank.stride(), "{n} points will not fit {}", bank.stride());
+            assert!(
+                bank.gains.iter().skip(n).take(bank.stride() - n).all(|g| *g == 0.0),
+                "the tail of the block should be idle"
+            );
 
             let f_star = breakpoint_hz(500.0, REFERENCE_DECAY_S);
             let mut checked = 0;
@@ -1187,33 +1562,78 @@ mod tests {
         assert!(db.abs() < 0.5, "widening moved the total power by {db} dB");
     }
 
-    /// A silent voice contributes nothing and does not consume capacity.
+    /// A voice given no note takes no slots' worth of sound, and does not
+    /// disturb the voices that do have one.
+    ///
+    /// Four voices are configured, so the three junk entries reach real slots
+    /// rather than falling off the end of a one-voice table.
     #[test]
     fn non_positive_notes_are_skipped() {
+        let settings = BankParams {
+            voices: 4,
+            ..params(0.6, 500.0)
+        };
         let mut bank = Bank::new();
-        let settings = params(0.6, 500.0);
-        bank.retune(&[110.0], &settings, SR);
-        let one = bank.active();
         bank.retune(&[110.0, 0.0, -5.0, f32::NAN], &settings, SR);
-        assert_eq!(bank.active(), one);
+
+        assert!(bank.is_held(0), "the real note should be held");
+        for voice in 1..4 {
+            assert!(!bank.is_held(voice), "voice {voice} has no note to hold");
+            assert_eq!(bank.voice_hz(voice), 0.0, "voice {voice} should read as empty");
+        }
+
+        // The table is the same size either way — that is the point of a fixed
+        // stride — so what says the junk was skipped is the sound, not the
+        // count.
+        let mut one = Bank::new();
+        one.retune(&[110.0], &settings, SR);
+        assert_eq!(bank.active(), one.active());
+        let db = 20.0 * (noise_rms(&mut bank, 1.0) / noise_rms(&mut one, 1.0)).log10();
+        assert!(db.abs() < 0.01, "the junk entries were audible: {db} dB");
     }
 
-    /// Retuning keeps the tails: this is what a chord change under a ringing
-    /// bank depends on.
+    /// Retuning keeps the tails of the voices it does not move, and starts the
+    /// ones it does from rest.
+    ///
+    /// **One rule for two things that used to be two** (ADR 0021): a knob
+    /// turning under a ringing bank must not cut it, and a voice given a
+    /// different note must not play the old note's state at the new pitch.
     #[test]
-    fn retuning_does_not_silence_a_ringing_bank() {
+    fn retuning_keeps_a_tail_the_notes_did_not_move() {
+        let ring = |bank: &mut Bank| {
+            for i in 0..4_800 {
+                bank.process(&every_band(if i < 48 { 1.0 } else { 0.0 }));
+            }
+        };
+        let tail = |bank: &mut Bank| {
+            let mut peak = 0.0f32;
+            for _ in 0..4_800 {
+                peak = peak.max(bank.process(&every_band(0.0)).abs());
+            }
+            peak
+        };
+
+        // Same note, a different decay: the tail survives, which is what a
+        // knob turning under a ringing bank depends on.
+        let mut bank = Bank::new();
+        bank.retune(&[110.0], &params(2.0, 500.0), SR);
+        ring(&mut bank);
+        bank.retune(&[110.0], &params(1.5, 500.0), SR);
+        let kept = tail(&mut bank);
+        assert!(kept > 1e-4, "a knob should not cut the tail: {kept}");
+
+        // A different note: the voice is being reused, so it starts from rest
+        // rather than gliding the old note's state to the new frequency.
         let mut bank = Bank::new();
         let settings = params(2.0, 500.0);
         bank.retune(&[110.0], &settings, SR);
-        for i in 0..4_800 {
-            bank.process(&every_band(if i < 48 { 1.0 } else { 0.0 }));
-        }
+        ring(&mut bank);
         bank.retune(&[164.8], &settings, SR);
-        let mut peak = 0.0f32;
-        for _ in 0..4_800 {
-            peak = peak.max(bank.process(&every_band(0.0)).abs());
-        }
-        assert!(peak > 1e-4, "the tail was silenced by the retune: {peak}");
+        let reused = tail(&mut bank);
+        assert!(
+            reused < 1e-6,
+            "a voice given a different note should start from rest: {reused}"
+        );
     }
 
     /// Capacity is a bound. A geometry that wants more filters than the bank
@@ -1236,45 +1656,251 @@ mod tests {
         assert_eq!(small.capacity(), 8);
     }
 
-    /// Capacity is spent voice by voice in the order the caller lists them, so
-    /// a chord that does not fit loses its *last* voices rather than thinning
-    /// all of them. An allocator that cares which notes survive has to order
-    /// the table itself; the bank does not choose for it.
+    /// Capacity bounds the table in whole voices, and the voices it keeps are
+    /// the first ones listed.
+    ///
+    /// **Blocks changed the granularity and not the promise** (ADR 0021). A
+    /// chord that does not fit used to lose its last voices part-way through
+    /// one of them; now a voice either has a whole block or does not exist,
+    /// which is the same guarantee with a coarser step. An allocator that
+    /// cares which notes survive still has to order the table itself.
     #[test]
-    fn capacity_is_spent_in_order_so_the_last_voices_are_the_ones_dropped() {
-        let settings = params(0.6, 500.0);
-        let per_voice = settings.grid.count(110.0, max_centre_hz(SR));
-        assert!(per_voice >= 4, "expected a useful count, got {per_voice}");
+    fn capacity_is_spent_in_whole_voices_and_the_last_ones_are_dropped() {
+        // Three voices asked for, so the capacity is what decides how many
+        // there are rather than the setting.
+        let settings = BankParams {
+            voices: 3,
+            ..params(0.6, 500.0)
+        };
+        let stride = settings.grid.max_count(max_centre_hz(SR));
+        assert_eq!(stride, 7, "the default grid should give a seven-slot block");
 
-        // Room for one voice and a little more. Sized against the count so
-        // that the band's width does not decide whether this tests anything.
-        let mut bank = ResonatorBank::<7>::new();
-        bank.retune(&[110.0, 220.0, 440.0], &settings, SR);
-        assert_eq!(bank.active(), 7);
+        // Room for two blocks, asked for three notes.
+        let mut two = ResonatorBank::<14>::new();
+        two.retune(&[110.0, 220.0, 440.0], &settings, SR);
+        assert_eq!(two.stride(), stride);
+        assert_eq!(two.voices(), 2, "two blocks fit in fourteen slots");
+        assert_eq!(two.active(), 14);
+        assert_eq!(two.voice_hz(0), 110.0, "the first note should survive");
+        assert_eq!(two.voice_hz(1), 220.0, "the second note should survive");
+        assert!(two.voice_hz(2) == 0.0, "the third note has no block");
 
-        // The first voice is whole, the second gets what is left, and the
-        // third never starts.
-        let mut first = ResonatorBank::<7>::new();
-        first.retune(&[110.0], &settings, SR);
-        let whole = first.active();
-        assert!(
-            whole < 7,
-            "the first voice should fit with room to spare, took {whole} of 7"
-        );
-        assert!(
-            bank.active() > whole,
-            "the second voice should get the remainder: {whole} of 7"
-        );
+        // Room for one. The chord loses everything but its first note.
+        let mut one = ResonatorBank::<7>::new();
+        one.retune(&[110.0, 220.0, 440.0], &settings, SR);
+        assert_eq!(one.voices(), 1);
+        assert_eq!(one.voice_hz(0), 110.0);
 
-        // Adding the third voice changes nothing, because there is nothing
-        // left for it. That is what "the last voices are the ones dropped"
-        // means, as against thinning every voice evenly.
-        let mut two = ResonatorBank::<7>::new();
-        two.retune(&[110.0, 220.0], &settings, SR);
+        // A block that does not fit whole is still a block: the bank keeps one
+        // voice and truncates inside it rather than keeping none.
+        let mut part = ResonatorBank::<4>::new();
+        part.retune(&[110.0], &settings, SR);
+        assert_eq!(part.voices(), 1);
+        assert_eq!(part.active(), 4, "the one block is cut to the capacity");
+    }
+
+    /// Releasing a note stops what feeds it and nothing else.
+    ///
+    /// **The defect ADR 0021 exists for.** A resonator bank whose tails vanish
+    /// when a key lifts is not a resonator bank; one that goes on being
+    /// excited after the key lifts is not a keyboard.
+    #[test]
+    fn releasing_a_note_stops_the_excitation_and_leaves_the_ringing() {
+        let settings = BankParams {
+            voices: 2,
+            ..params(2.0, 500.0)
+        };
+        let excited = |bank: &mut Bank, level: f32, frames: usize| {
+            let mut peak = 0.0f32;
+            for _ in 0..frames {
+                peak = peak.max(bank.process(&every_band(level)).abs());
+            }
+            peak
+        };
+
+        let mut bank = Bank::new();
+        bank.note_on(110.0, &settings, SR);
+        excited(&mut bank, 1.0, 480);
+        bank.note_off(110.0);
+
+        // It is still sounding.
+        let mut ringing = bank;
+        let tail = excited(&mut ringing, 0.0, 4_800);
+        assert!(tail > 1e-4, "the tail was cut by the key lift: {tail}");
+
+        // And it is deaf: driving it hard changes nothing, sample for sample.
+        let mut driven = bank;
+        let forced = excited(&mut driven, 1.0, 4_800);
         assert_eq!(
-            two.active(),
-            bank.active(),
-            "the third voice took capacity it should not have had"
+            forced, tail,
+            "a released voice should not answer its excitation"
+        );
+    }
+
+    /// A key lifting cannot change the level of the notes still held.
+    ///
+    /// `contracts.md` §5: the divisor is the configured count. Under a voice
+    /// table that gets easier to keep rather than harder — a released voice
+    /// still owns its block — and this is the test that says so.
+    #[test]
+    fn a_key_lifting_does_not_duck_the_notes_still_held() {
+        let settings = BankParams {
+            voices: 4,
+            ..params(0.6, 500.0)
+        };
+        let mut bank = Bank::new();
+        let before = bank.voice_norm;
+        bank.note_on(110.0, &settings, SR);
+        bank.note_on(164.8, &settings, SR);
+        let holding = bank.voice_norm;
+        let slots = bank.active();
+        bank.note_off(110.0);
+
+        assert_eq!(bank.voice_norm, holding, "a key lift moved the divisor");
+        assert_eq!(bank.active(), slots, "a key lift moved the table");
+        assert!(
+            before != holding || bank.voices() == 0,
+            "the divisor should come from the settings, not from nothing"
+        );
+    }
+
+    /// The table is the same size whatever is held, which is what makes the
+    /// load flat: a chord arriving must not cause a step in CPU.
+    #[test]
+    fn the_table_does_not_grow_when_a_note_arrives() {
+        let settings = BankParams {
+            voices: 4,
+            ..params(0.6, 500.0)
+        };
+        let mut bank = Bank::new();
+        bank.retune(&[], &settings, SR);
+        let empty = bank.active();
+        assert_eq!(empty, 4 * bank.stride());
+
+        bank.note_on(110.0, &settings, SR);
+        assert_eq!(bank.active(), empty);
+        bank.note_on(164.8, &settings, SR);
+        assert_eq!(bank.active(), empty);
+        bank.note_off(110.0);
+        assert_eq!(bank.active(), empty);
+    }
+
+    /// The allocator spends released voices before held ones, and the
+    /// quietest released voice before a louder one.
+    #[test]
+    fn the_allocator_takes_the_quietest_released_voice() {
+        let settings = BankParams {
+            voices: 2,
+            ..params(2.0, 500.0)
+        };
+        let mut bank = Bank::new();
+        let first = bank.note_on(110.0, &settings, SR);
+        let second = bank.note_on(164.8, &settings, SR);
+        assert_ne!(first, second, "two notes should take two voices");
+        for _ in 0..480 {
+            bank.process(&every_band(1.0));
+        }
+
+        // Release the first and let it decay further than the second.
+        bank.note_off(110.0);
+        for _ in 0..2_400 {
+            bank.process(&every_band(0.0));
+        }
+        bank.note_off(164.8);
+        assert!(
+            bank.voice_energy(first) < bank.voice_energy(second),
+            "the first voice should have decayed further: {} against {}",
+            bank.voice_energy(first),
+            bank.voice_energy(second)
+        );
+
+        assert_eq!(
+            bank.note_on(220.0, &settings, SR),
+            first,
+            "the quietest released voice should have been taken"
+        );
+    }
+
+    /// With every voice held there is nothing quiet to take, so the oldest
+    /// key goes — and it is reset rather than glided.
+    #[test]
+    fn a_full_table_steals_the_oldest_key_and_resets_it() {
+        let settings = BankParams {
+            voices: 2,
+            ..params(2.0, 500.0)
+        };
+        let mut bank = Bank::new();
+        let first = bank.note_on(110.0, &settings, SR);
+        bank.note_on(164.8, &settings, SR);
+        for _ in 0..480 {
+            bank.process(&every_band(1.0));
+        }
+        assert!(bank.voice_energy(first) > 0.0, "it should be ringing");
+
+        assert_eq!(
+            bank.note_on(220.0, &settings, SR),
+            first,
+            "the oldest key should have been taken"
+        );
+        assert_eq!(
+            bank.voice_energy(first),
+            0.0,
+            "a stolen voice starts from rest"
+        );
+    }
+
+    /// A note pressed again goes back to its own resonators rather than
+    /// spreading across two voices.
+    #[test]
+    fn a_repeated_note_returns_to_its_own_voice() {
+        let settings = BankParams {
+            voices: 4,
+            ..params(0.6, 500.0)
+        };
+        let mut bank = Bank::new();
+        let voice = bank.note_on(110.0, &settings, SR);
+        bank.note_on(164.8, &settings, SR);
+        bank.note_off(110.0);
+        assert_eq!(bank.note_on(110.0, &settings, SR), voice);
+        assert!(bank.is_held(voice));
+    }
+
+    /// The criterion weighs the whole path from state to output, so it is not
+    /// the bare state.
+    ///
+    /// `gainᵢ · kᵢ` is what stands between an integrator and the output, and
+    /// `k` alone runs about 25 dB across one voice's block. A criterion that
+    /// left it out would rank a voice with its energy high in the band louder
+    /// than it is, every time. What says the weight is there is that the
+    /// answer differs from the unweighted sum.
+    #[test]
+    fn voice_energy_is_weighted_rather_than_the_bare_state() {
+        let settings = BankParams {
+            voices: 2,
+            ..params(0.6, 500.0)
+        };
+        let mut bank = Bank::new();
+        let voice = bank.note_on(110.0, &settings, SR);
+        assert_eq!(bank.voice_energy(voice), 0.0, "a fresh voice holds nothing");
+
+        for _ in 0..480 {
+            bank.process(&every_band(1.0));
+        }
+        let weighted = bank.voice_energy(voice);
+        assert!(weighted > 0.0, "an excited voice should hold something");
+
+        let start = voice * bank.stride();
+        let bare: f32 = bank
+            .filters
+            .iter()
+            .skip(start)
+            .take(bank.stride())
+            .map(Svf::energy)
+            .sum();
+        assert!(bare > 0.0);
+        assert!(
+            (weighted / bare - 1.0).abs() > 0.01,
+            "the weight is missing: {weighted} against a bare {bare}"
         );
     }
 

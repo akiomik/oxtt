@@ -82,8 +82,8 @@ fn main() -> ExitCode {
 /// One `name=value` line each, the way the Bela host reports.
 fn print_report(report: &RenderReport) {
     println!(
-        "hyperglare-render: active_resonators={}",
-        report.active_resonators
+        "hyperglare-render: active_resonators={} held_voices={}",
+        report.active_resonators, report.held_voices
     );
     println!(
         "hyperglare-render: input_lufs={:.2} input_true_peak_dbtp={:.2}",

@@ -137,8 +137,15 @@ pub struct RenderReport {
     /// comparison against it is no longer a fair one — which is a thing to
     /// know before listening rather than after.
     pub loudness_shortfall_db: f64,
-    /// How many resonators the chord and the geometry produced.
+    /// How many resonator slots the bank ran.
+    ///
+    /// **The cost, not the chord.** Since ADR 0021 the bank reserves a block
+    /// per voice whether or not the voice has a note, so this follows the
+    /// settings rather than the chord. `held_voices` is how much of the chord
+    /// was down.
     pub active_resonators: usize,
+    /// How many voices held a note.
+    pub held_voices: usize,
 }
 
 /// Everything that can go wrong reading, rendering, measuring or writing.
@@ -234,6 +241,7 @@ pub fn render(options: &RenderOptions) -> Result<RenderReport, RenderError> {
         loudness_shortfall_db: shortfall_db,
         normalization_gain_db: gain_db,
         active_resonators: processor.active(),
+        held_voices: processor.held_voices(),
     })
 }
 
@@ -733,7 +741,10 @@ mod tests {
         opts.notes.clear();
         opts.params.color = 0.0;
         let report = render(&opts).unwrap();
-        assert_eq!(report.active_resonators, 0);
+        assert_eq!(report.held_voices, 0, "an empty chord holds no voices");
+        // The bank still reserves its blocks — that is what keeps the load
+        // flat — so what says the chord is empty is the voice count.
+        assert!(report.active_resonators > 0);
     }
 
     /// The chord is checked rather than trusted, because it comes from a

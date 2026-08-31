@@ -109,6 +109,7 @@ impl HyperglareApplication {
         RunDiagnostics {
             input: input_meter(states),
             active_resonators: self.processor.active(),
+            held_voices: self.processor.held_voices(),
             underruns: context.underrun_count(),
             audio_frames_elapsed: context.audio_frames_elapsed(),
             cpu_percentage: context.cpu_usage().map(|usage| usage.percentage()),
@@ -244,6 +245,11 @@ pub struct RunDiagnostics {
     /// two biquads per band plus one state-variable filter per *active*
     /// resonator, so a CPU figure means nothing without it.
     pub active_resonators: usize,
+    /// How many voices are holding a note.
+    ///
+    /// The chord's own size, which `active_resonators` stopped being when the
+    /// bank started reserving a block per voice (ADR 0021).
+    pub held_voices: usize,
     /// Blocks the audio system reported as late.
     ///
     /// **The number that says whether it fits.** A CPU figure under an
@@ -288,8 +294,9 @@ impl fmt::Display for RunDiagnostics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "hyperglare-bela: active_resonators={} underruns={} audio_frames_elapsed={}",
-            self.active_resonators, self.underruns, self.audio_frames_elapsed
+            "hyperglare-bela: active_resonators={} held_voices={} underruns={} \
+             audio_frames_elapsed={}",
+            self.active_resonators, self.held_voices, self.underruns, self.audio_frames_elapsed
         )?;
         if let Some(percentage) = self.cpu_percentage {
             write!(f, " cpu_percentage={percentage:.1}")?;
