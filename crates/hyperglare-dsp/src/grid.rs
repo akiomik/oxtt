@@ -50,6 +50,8 @@
 use std::f32::consts::LOG2_E;
 use std::slice::IterMut;
 
+use crate::note::note_hz;
+
 /// Lowest frequency a grid point is generated at.
 ///
 /// About C2, and about where a resonance stops adding a pitch to a bass line
@@ -223,6 +225,42 @@ impl Grid {
         n
     }
 
+    /// The most points any one note can produce, over the whole MIDI range.
+    ///
+    /// **The stride a voice's block of resonator slots is cut to** (ADR 0021),
+    /// which is why it is a maximum rather than a count at some reference
+    /// note: a block sized for the average would truncate whichever note
+    /// happened to be dense, and which note that is depends on the geometry.
+    ///
+    /// Measured rather than derived, because where the maximum sits differs by
+    /// geometry — [`Geometry::Octaves`] peaks at a note whose grid starts on
+    /// `low_hz`, and [`Geometry::Harmonics`] peaks at the lowest note there
+    /// is, whose partials are closest together. Both fall out of the same
+    /// sweep.
+    ///
+    /// **MIDI's 128 notes are the domain and not an approximation of one.** A
+    /// chord reaches this type through `note_hz` whether it came from a
+    /// keyboard or from a command line, so there is no other note to ask
+    /// about.
+    ///
+    /// Costs one walk of the grid per note, so it belongs beside a change of
+    /// settings and not beside a change of chord.
+    ///
+    /// ```
+    /// use hyperglare_dsp::grid::Grid;
+    ///
+    /// // The default octave grid spans log2(5000/65) = 6.27 octaves, so a
+    /// // note placed at the bottom of it reaches seven points.
+    /// assert_eq!(Grid::default().max_count(24_000.0), 7);
+    /// ```
+    #[must_use]
+    pub fn max_count(&self, nyquist_hz: f32) -> usize {
+        (0..=u8::MAX)
+            .map(|note| self.count(note_hz(note), nyquist_hz))
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Walks the grid, handing each frequency to `emit` until it returns
     /// `false`.
     ///
@@ -362,6 +400,75 @@ pub const MAX_HARMONICS: usize = 160;
 )]
 mod tests {
     use super::*;
+
+    /// The stride ADR 0021 cuts a voice's block to, and why it is a maximum.
+    ///
+    /// Where the peak sits differs by geometry, which is the reason
+    /// `max_count` sweeps rather than asking at a reference note.
+    #[test]
+    fn the_maximum_count_is_at_a_different_note_for_each_geometry() {
+        let grid = |geometry| Grid {
+            geometry,
+            ..Grid::default()
+        };
+
+        // Octaves: seven points, reached by a note whose grid lands on
+        // `low_hz`. Which note that is has nothing to do with pitch — the
+        // grid is periodic in octaves, so note 0 does as well as the bottom
+        // of the band, and A4 does worse because its lowest octave falls out
+        // of the band's bottom.
+        let octaves = grid(Geometry::Octaves);
+        assert_eq!(octaves.max_count(NYQUIST), 7);
+        assert_eq!(octaves.count(DEFAULT_LOW_HZ, NYQUIST), 7);
+        assert_eq!(octaves.count(note_hz(0), NYQUIST), 7);
+        assert_eq!(octaves.count(note_hz(69), NYQUIST), 6);
+
+        // Pairs double it, exactly.
+        assert_eq!(grid(Geometry::OctavePairs).max_count(NYQUIST), 14);
+
+        // Harmonics peak in the middle of the range, and **neither end of it
+        // reaches the maximum** — which is the whole reason this is a sweep.
+        // A low note's partials crowd together but `MAX_HARMONICS` runs out
+        // before they leave the band; a note at `low_hz` keeps all of its
+        // partials and has too few of them.
+        let harmonics = grid(Geometry::Harmonics);
+        let most = harmonics.max_count(NYQUIST);
+        assert!(most > 100, "a harmonic series should be dense, got {most}");
+        assert!(
+            harmonics.count(note_hz(0), NYQUIST) < most,
+            "the lowest note should not be the densest"
+        );
+        assert!(
+            harmonics.count(DEFAULT_LOW_HZ, NYQUIST) < most,
+            "a note at the band's bottom should not be the densest"
+        );
+    }
+
+    /// No note may exceed its block, which is the invariant the stride buys.
+    #[test]
+    fn no_note_produces_more_than_the_maximum() {
+        for geometry in [
+            Geometry::Octaves,
+            Geometry::OctavePairs,
+            Geometry::Harmonics,
+        ] {
+            for detune in [0.0f32, -1200.0, 1200.0] {
+                let grid = Grid {
+                    geometry,
+                    detune_cents_per_octave: detune,
+                    ..Grid::default()
+                };
+                let most = grid.max_count(NYQUIST);
+                for note in 0..=u8::MAX {
+                    let n = grid.count(note_hz(note), NYQUIST);
+                    assert!(
+                        n <= most,
+                        "{geometry:?} detune {detune}: note {note} gave {n} > {most}"
+                    );
+                }
+            }
+        }
+    }
 
     const NYQUIST: f32 = 24_000.0;
     /// A bass fundamental: what colour bass is applied to.

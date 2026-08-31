@@ -299,6 +299,40 @@ impl Svf {
         self.ic2eq = 0.0;
     }
 
+    /// How much the integrators are holding, as a squared magnitude.
+    ///
+    /// `ic1eq² + ic2eq²`. **Squared, and deliberately not a root**: the two
+    /// integrators are in quadrature at the centre frequency, so their
+    /// root-sum-square is a smooth envelope of the ringing where either one
+    /// alone crosses zero every cycle. A caller comparing filters wants the
+    /// envelope; a caller comparing *sums* of filters wants energies, which
+    /// add. Returning the square serves both and costs no `sqrt`.
+    ///
+    /// **Unnormalised**, like the integrators themselves, so it is the raw
+    /// band-pass branch rather than what [`process_bandpass`] emits. A caller
+    /// weighing this against another filter's must scale by `k²` — that is,
+    /// by `1/q²` — or it is comparing two different quantities. See
+    /// [`SvfCoeffs::q`].
+    ///
+    /// ```
+    /// use effectkit::filter::{Svf, SvfCoeffs};
+    ///
+    /// let coeffs = SvfCoeffs::new(1_000.0, 48_000.0, 8.0);
+    /// let mut filter = Svf::new();
+    /// assert_eq!(filter.energy(), 0.0);
+    /// filter.process_bandpass(&coeffs, 1.0);
+    /// assert!(filter.energy() > 0.0);
+    /// filter.reset_state();
+    /// assert_eq!(filter.energy(), 0.0);
+    /// ```
+    ///
+    /// [`process_bandpass`]: Self::process_bandpass
+    #[inline]
+    #[must_use]
+    pub fn energy(&self) -> f32 {
+        self.ic1eq.mul_add(self.ic1eq, self.ic2eq * self.ic2eq)
+    }
+
     /// Whether both integrators are free of NaN and infinities.
     #[must_use]
     pub const fn is_finite(&self) -> bool {
@@ -337,6 +371,8 @@ impl Svf {
     clippy::suboptimal_flops
 )]
 mod svf_tests {
+    use core::f32::consts::TAU;
+
     use super::*;
 
     const SR: f32 = 48_000.0;
@@ -395,6 +431,54 @@ mod svf_tests {
                 "q={q}: peak {peak} should be about q"
             );
         }
+    }
+
+    /// The claim `energy` is written for: it is an envelope, not a sample.
+    ///
+    /// A ringing filter's own integrator crosses zero every cycle, so a caller
+    /// deciding anything from one reading of it would decide differently a few
+    /// samples later. The sum of squares does not.
+    #[test]
+    fn energy_is_smooth_where_a_single_integrator_oscillates() {
+        let rate = 48_000.0;
+        let centre = 1_000.0;
+        let coeffs = SvfCoeffs::new(centre, rate, 40.0);
+        let mut filter = Svf::new();
+        // Excite for one period, then let it ring.
+        let period = (rate / centre) as usize;
+        for n in 0..period {
+            let phase = TAU * n as f32 / period as f32;
+            filter.process_bandpass(&coeffs, phase.sin());
+        }
+
+        let mut energies = Vec::new();
+        let mut branch = Vec::new();
+        for _ in 0..period * 4 {
+            branch.push(filter.process_bandpass_raw(&coeffs, 0.0).abs());
+            energies.push(filter.energy());
+        }
+
+        // The branch really does cross zero while ringing, which is what makes
+        // it useless as a level: this test is worth nothing if it does not.
+        let quietest = branch.iter().copied().fold(f32::INFINITY, f32::min);
+        let loudest = branch.iter().copied().fold(0.0f32, f32::max);
+        assert!(
+            quietest < loudest / 100.0,
+            "the raw branch should cross zero: {quietest} against {loudest}"
+        );
+
+        // The energy only falls. A high-Q filter decays slowly, so the bound is
+        // on rises rather than on the size of the fall.
+        for pair in energies.windows(2) {
+            let [before, after] = [pair.first().copied().unwrap_or(0.0), pair.last().copied().unwrap_or(0.0)];
+            assert!(
+                after <= before * 1.000_01,
+                "energy rose while ringing down: {before} to {after}"
+            );
+        }
+        let first = energies.first().copied().unwrap_or(0.0);
+        let last = energies.last().copied().unwrap_or(0.0);
+        assert!(last < first, "energy should decay: {first} to {last}");
     }
 
     /// −3 dB half a bandwidth off centre, which is what makes `q` mean
