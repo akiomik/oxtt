@@ -463,6 +463,78 @@ mod tests {
         assert!(peak > 1e-5, "the tail did not survive the key lift: {peak}");
     }
 
+    /// Keys tune the bank to the notes that were pressed, and to no others.
+    ///
+    /// **The offline twin of the check a board cannot make**: on hardware
+    /// `held_voices` says the keys arrived, and nothing there says what they
+    /// tuned. Two chords a fourth apart, each measured at a grid point the
+    /// other does not have.
+    #[test]
+    fn the_keys_pressed_are_the_notes_that_ring() {
+        use core::f32::consts::TAU;
+
+        use crate::note::note_hz;
+
+        /// Energy at one frequency, by Goertzel.
+        fn energy_at(samples: &[f32], hz: f32) -> f32 {
+            let w = TAU * hz / SR;
+            let coeff = 2.0 * w.cos();
+            let (mut s1, mut s2) = (0.0f32, 0.0f32);
+            for x in samples {
+                let s0 = x + coeff * s1 - s2;
+                s2 = s1;
+                s1 = s0;
+            }
+            s1.mul_add(s1, s2.mul_add(s2, -coeff * s1 * s2))
+        }
+
+        // Under the octave grid a note rings at its own pitch in every octave,
+        // so D3 puts a resonator on D5 and C3 puts one on C5. Neither chord
+        // reaches the other's point.
+        let d3 = note_hz(50);
+        let f_sharp3 = note_hz(54);
+        let a3 = note_hz(57);
+        let c3 = note_hz(48);
+        let e3 = note_hz(52);
+        let g3 = note_hz(55);
+        let d5 = note_hz(74);
+        let c5 = note_hz(72);
+
+        let params = HyperglareParams {
+            color: 1.0,
+            ..HyperglareParams::default()
+        };
+        let ring = |chord: [f32; 3]| {
+            let mut processor = Processor::new(params, SR);
+            for note in chord {
+                processor.note_on(note).expect("a real note");
+            }
+            // A click train opens every band, so no resonator is silent for
+            // want of something to ring on.
+            let mut out = Vec::with_capacity(SR as usize / 2);
+            for i in 0..(SR as usize / 2) {
+                let x = if i % 480 == 0 { 0.5 } else { 0.0 };
+                let (left, _) = processor.process_frame(x, x);
+                out.push(left);
+            }
+            out
+        };
+
+        let major = ring([d3, f_sharp3, a3]);
+        let minor = ring([c3, e3, g3]);
+
+        let major_ratio = energy_at(&major, d5) / energy_at(&major, c5);
+        let minor_ratio = energy_at(&minor, d5) / energy_at(&minor, c5);
+        assert!(
+            major_ratio > 4.0,
+            "D was pressed and C was not, but D5/C5 is only {major_ratio}"
+        );
+        assert!(
+            minor_ratio < 0.25,
+            "C was pressed and D was not, but D5/C5 is {minor_ratio}"
+        );
+    }
+
     /// `set_params` is the knob path for a host whose chord comes from keys,
     /// and it must not put the keys back up.
     ///

@@ -111,6 +111,39 @@ comes from specifies bass and drums.
 `contracts.md` §5.0 and `demo/hyperglare/README.md` say by measurement — the
 source's reach is the effect's reach — is audible on the board.
 
+### Keys reach the DSP — PASS
+
+The MIDI intake (`--midi-port hw:0,0,0`, ADR 0021), played from a computer
+over the board's USB gadget. `--report-on-exit` after each run, with the keys
+in whatever state the run ended in:
+
+```text
+ what was sent                          held_voices  midi_backlog  underruns
+ nothing                                          0             0          0
+ 3 note ons                                       3             3          0
+ 8 note ons, against a table of five              5             8          0
+ 3 note ons then 3 note offs                      0             3          0
+ 96 messages as fast as they would go             0            48          0
+```
+
+- **A played run starts empty.** No key, no chord — the fixed chord's default
+  does not reach a run that takes keys.
+- **The polyphony is the voice table.** Eight keys against five voices leaves
+  five held; the rest stole and were stolen from.
+- **The last row is the one worth having.** Forty-eight on/off pairs pushed
+  through with no gap between them left every key up and nothing stuck, so no
+  message was lost — `bela`'s ring holds 100 and reached 48. The drain's bound
+  spread them over about twelve blocks and the callback met its deadline
+  through all of it.
+
+### The load does not move when a chord does — PASS
+
+`active_resonators` read 35 in every run above — five voices of a seven-slot
+block — whatever was held. CPU stayed between 12.8% and 13.9% across all five,
+which is inside what the same configuration varies by between runs
+([`cpu.md`](cpu.md)). **A chord arriving costs nothing**, which is what
+reserving the blocks buys.
+
 ## Not verified
 
 - **Latency.** Not measured. `oxtt` measured roughly 1 ms round trip on this
@@ -121,9 +154,16 @@ source's reach is the effect's reach — is audible on the board.
   property of the board's converters, so it applies here — but this effect's
   own contribution, with a bank of high-Q resonators ringing, has not been
   measured.
-- **MIDI.** The intake exists (`--midi-port`, ADR 0021) and has not been run
-  on the board. Nothing about a key lift, a stolen voice or a chord changing
-  under a ringing bank has been heard.
+- **What MIDI sounds like.** The control path is verified above; the audio is
+  not, and cannot be on this rig — connecting a capture interface to the board
+  raises a ground loop that puts broadband noise 60 dB above the board's own
+  output floor across the whole capture. A key lift is meant to leave the voice
+  ringing down at its own decay and a stolen voice is meant to start from rest,
+  and both are measured offline (`crates/hyperglare-dsp/src/processor.rs`)
+  rather than heard on the board.
+
+  **What the earlier sections above measured is unaffected**: those captures
+  predate the rig this note describes.
 - **Anything with a control surface.** It does not exist.
 - **Long runs.** The longest here was 40 seconds.
 - **Chord changes while running.** `apply_params` retunes without a click by
@@ -136,8 +176,13 @@ source's reach is the effect's reach — is audible on the board.
 export BELA_SYSROOT=/path/to/bela-sysroot
 export BELA_PACKAGE=hyperglare-bela
 scripts/bela-build.sh
-scripts/bela-deploy.sh -- --report-on-exit --adc-gain-db 12 --headphone-level-db -20
+scripts/bela-deploy.sh -- --report-on-exit --adc-gain-db 12 \
+  --headphone-level-db -20
 ```
+
+For the MIDI rows, `--midi-port hw:0,0,0` in place of `--notes`, and keys sent
+from whatever the board's MIDI port is wired to. `amidi -l` names the port and
+the argument takes the subdevice as well.
 
 To record the board's output rather than listen to it, **hold the ssh session
 open for the whole run**: a host started in the background and detached from
