@@ -60,9 +60,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bela"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd11a3895558ad2e9e988f904f815eeb83e9175d572d716a5ad4ee14db95d61"
+checksum = "239ab1a341a57b8e5fc4e4142004953303ebdec2739d3ffe37f3b9a9924e753d"
 dependencies = [
  "bela-sys",
  "libc",
@@ -70,9 +70,9 @@ dependencies = [
 
 [[package]]
 name = "bela-sys"
-version = "0.7.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06c8d9de7159785cdb75863e9d63b7b75670c52714cc3038cd73f8b4cf0beb10"
+checksum = "000cebde5a3a4a5d9bb437cc8353d291ff24753b91f4244b67e4346bd1eff084"
 dependencies = [
  "cc",
 ]

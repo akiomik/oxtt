@@ -10,7 +10,7 @@ readme = "../../README.md"
 publish = false
 
 [dependencies]
-bela = "0.7"
+bela = "0.8"
 clap = { version = "4", features = ["derive"] }
 effectkit = { path = "../effectkit" }
 effectkit-controls = { path = "../effectkit-controls" }
