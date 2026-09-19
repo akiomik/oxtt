@@ -10,7 +10,7 @@ readme = "../../README.md"
 publish = false
 
 [dependencies]
-bela = "0.7"
+bela = "0.9"
 clap = { version = "4", features = ["derive"] }
 effectkit = { path = "../effectkit" }
 hyperglare-args = { path = "../hyperglare-args" }
