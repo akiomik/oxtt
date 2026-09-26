@@ -21,7 +21,7 @@ clap = ["dep:clap"]
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
 effectkit = { path = "../effectkit" }
-nutype = "0.7.0"
+nutype = "0.8.0"
 thiserror = { workspace = true }
 
 [dev-dependencies]
