@@ -14,7 +14,7 @@ readme = "../../README.md"
 publish = false
 
 [dependencies]
-nutype = "0.7.0"
+nutype = "0.8.0"
 
 [dev-dependencies]
 no-panic = "0.1"
